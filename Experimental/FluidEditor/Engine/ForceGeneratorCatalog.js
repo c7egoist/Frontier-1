@@ -260,6 +260,20 @@ export const ScenePresets = Object.freeze([
         ],
     },
     {
+        Id: 'preset-tile-crossing', Name: 'Tile Crossing · World Grid', Icon: 'grid', Summary: 'Static 4 × 1 × 2 tile grid: a smoke source in the first tile is blown clean across every seam by a steady wind, curls round a vortex two tiles downstream and leaves at the far end — the bright box is one tile, the dim outline the whole grid.',
+        Domain: { Resolution: [144, 30, 72], Size: [3, 2.5, 3], MaxCells: 36, Tiles: [4, 1, 2], Follow: 'None', Buoyancy: 0.25, AmbientTemperature: 0, Cooling: 0.3, Vorticity: 0.4, Dissipation: 0.997, Gravity: 0.1, VelocityDissipation: 0.999, PressureIterations: 20 },
+        Boundary: 'OpenAll',
+        Look: { Albedo: '#d9dde3', Absorption: 2.6, Anisotropy: 0.55, Exposure: 1.1 },
+        Emitters: [
+            { Name: 'Smoke Source', Shape: 'Sphere', Position: [-4.6, -0.7, -1.4], Radius: 0.3, Density: 2.0, Temperature: 0.5, Fuel: 0, Velocity: [2.0, 0.6, 0.4], Jitter: 0.3 },
+        ],
+        Forces: [
+            { Type: 'DirectionalWind', Name: 'Tailwind', Position: [0, 0, 0], Strength: 1.6, Direction: [1, 0, 0.12], Falloff: 'Constant', Frequency: 0.3, Secondary: 0.4 },
+            { Type: 'VortexColumn', Name: 'Mid-field Vortex', Position: [1.5, -0.3, 0.6], Strength: 3.5, Radius: 1.6, Falloff: 'Gaussian', Direction: [0, 1, 0] },
+            { Type: 'DragBaffle', Name: 'Ceiling Brake', Position: [0, 0.9, 0], Strength: 1.2, Radius: 7, Falloff: 'Plateau' },
+        ],
+    },
+    {
         Id: 'preset-drift-run', Name: 'Drift Run · World Grid', Icon: 'track', Summary: 'A car slaloming down an endless strip: the 3 × 1 × 3 tile world grid follows the tyre, so the smoke trail streams back through tile seams and lingers behind instead of hitting a wall.',
         Domain: { Resolution: [120, 22, 120], Size: [4, 2.2, 4], MaxCells: 40, Tiles: [3, 1, 3], Follow: 'Emitter', Buoyancy: 0.1, AmbientTemperature: 0, Cooling: 0.4, Vorticity: 0.3, Dissipation: 0.995, Gravity: 0.3, VelocityDissipation: 0.998, PressureIterations: 20 },
         Boundary: 'OpenAll',

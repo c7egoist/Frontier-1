@@ -923,7 +923,12 @@ export class VolumeRenderer
         const gizmos = scene.Visualizers.ForceGizmos;
         this.beginLines();
         const half = solver.domainHalfExtent, centre = solver.domainCentre;
-        this.box(centre, half, [0.62, 0.66, 0.74, selection === 'domain' ? 0.95 : 0.45]);
+        const tiles = scene.Domain.Tiles || [1, 1, 1];
+        const multi = tiles[0] * tiles[1] * tiles[2] > 1;
+        // Multi-tile windows: the bright box is the single *tile* the domain size describes; the whole simulated window
+        // is the dimmer outline around it, so gas visibly carries on past the tile into its neighbours.
+        if (multi) this.box(centre, half.map((extent, axis) => extent / tiles[axis]), [0.62, 0.66, 0.74, selection === 'domain' ? 0.95 : 0.45]);
+        this.box(centre, half, multi ? [0.62, 0.66, 0.74, selection === 'domain' ? 0.45 : 0.2] : [0.62, 0.66, 0.74, selection === 'domain' ? 0.95 : 0.45]);
         this.worldGridGizmo(scene.Domain, half, centre, selection === 'domain');
         const show = (node) => gizmos.Visible ? node.Visible : node.Id === selection;
         if (true)

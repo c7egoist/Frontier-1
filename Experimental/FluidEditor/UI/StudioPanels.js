@@ -187,6 +187,30 @@ export function mountStudioUI({ app, refs })
         ]);
     }
 
+    /** Floating right-click menu; closes on any click, scroll, Escape or another menu opening. */
+    function openContextMenu(x, y, entries)
+    {
+        closeContextMenu();
+        const menu = element('div', 'context-menu');
+        for (const entry of entries)
+        {
+            const row = element('button', 'context-item' + (entry.danger ? ' danger' : ''), `${icon(entry.icon, 13)}<span>${entry.label}</span>`);
+            row.addEventListener('click', (event) => { event.stopPropagation(); closeContextMenu(); entry.action(); });
+            menu.appendChild(row);
+        }
+        document.body.appendChild(menu);
+        const rect = menu.getBoundingClientRect();
+        menu.style.left = `${Math.min(x, window.innerWidth - rect.width - 6)}px`;
+        menu.style.top = `${Math.min(y, window.innerHeight - rect.height - 6)}px`;
+        state.contextMenu = menu;
+        setTimeout(() => { document.addEventListener('pointerdown', closeContextMenu, { once: true }); window.addEventListener('scroll', closeContextMenu, { once: true, capture: true }); }, 0);
+    }
+
+    function closeContextMenu()
+    {
+        if (state.contextMenu) { state.contextMenu.remove(); state.contextMenu = null; }
+    }
+
     function renderTreeItem(node, selection)
     {
         const enabled = node.Enabled !== false;
@@ -195,6 +219,17 @@ export function mountStudioUI({ app, refs })
         item.addEventListener('click', () => app.select(node.Id));
         if (node.Kind !== 'Domain' && node.Kind !== 'Visualizer')
         {
+            item.addEventListener('contextmenu', (event) =>
+            {
+                event.preventDefault();
+                app.select(node.Id);
+                openContextMenu(event.clientX, event.clientY, [
+                    { label: 'Duplicate', icon: 'copy', action: () => app.duplicateNode(node.Id) },
+                    { label: enabled ? 'Disable' : 'Enable', icon: 'power', action: () => app.updateNode(node.Id, 'Enabled', !enabled) },
+                    { label: node.Visible ? 'Hide in viewport' : 'Show in viewport', icon: node.Visible ? 'eyeOff' : 'eye', action: () => app.updateNode(node.Id, 'Visible', !node.Visible) },
+                    { label: 'Delete', icon: 'trash', danger: true, action: () => app.removeNode(node.Id) },
+                ]);
+            });
             const status = element('button', 'status-dot' + (enabled ? '' : ' off'), icon(enabled ? 'check' : 'power', 9, 3));
             status.title = enabled ? 'Enabled — click to disable' : 'Disabled — click to enable';
             status.addEventListener('click', (event) => { event.stopPropagation(); app.updateNode(node.Id, 'Enabled', !enabled); });
@@ -1097,6 +1132,7 @@ export function mountStudioUI({ app, refs })
     refs.drawerTab.addEventListener('click', () => toggleDrawer(!state.drawerOpen));
     document.addEventListener('keydown', (event) =>
     {
+        if (event.key === 'Escape') closeContextMenu();
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f')
         {
             event.preventDefault();
