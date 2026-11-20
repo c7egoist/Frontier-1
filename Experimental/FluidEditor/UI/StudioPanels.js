@@ -110,6 +110,7 @@ export function mountStudioUI({ app, refs })
         const { scene, selection } = snapshot;
         treeHost.innerHTML = '';
         const collections = [
+            { key: 'scenes', title: 'Scenes', icon: 'scene', items: [], subtitle: `${ScenePresets.length} presets · click one to load`, add: () => toggleDrawer(true, 'presets'), presets: true },
             { key: 'domain', title: 'Domain', icon: 'domain', items: [scene.Domain], subtitle: `${scene.Domain.Resolution.join(' × ')} cells` },
             { key: 'emitters', title: 'Emitters', icon: 'flame', items: scene.Emitters, subtitle: `${scene.Emitters.length} items`, add: () => app.addEmitter('Sphere') },
             { key: 'forces', title: 'Force Generators', icon: 'wind', items: scene.Forces, subtitle: `${scene.Forces.length} of ${MaximumForceGenerators} slots`, add: () => toggleDrawer(true, 'forces') },
@@ -119,7 +120,9 @@ export function mountStudioUI({ app, refs })
         ];
         for (const collection of collections)
         {
-            const items = collection.items.filter((node) => !state.searchTerm || node.Name.toLowerCase().includes(state.searchTerm) || (node.Type || '').toLowerCase().includes(state.searchTerm));
+            const items = collection.presets
+                ? ScenePresets.filter((preset) => !state.searchTerm || preset.Name.toLowerCase().includes(state.searchTerm))
+                : collection.items.filter((node) => !state.searchTerm || node.Name.toLowerCase().includes(state.searchTerm) || (node.Type || '').toLowerCase().includes(state.searchTerm));
             if (state.searchTerm && items.length === 0) continue;
             const row = element('div', 'tree-collection' + (state.collapsed.has(collection.key) ? ' collapsed' : ''),
                 `${icon('chevron', 10)}<span class="collection-icon">${icon(collection.icon, 14)}</span><span class="meta"><strong>${collection.title}</strong><span>${collection.subtitle}</span></span>`);
@@ -134,7 +137,8 @@ export function mountStudioUI({ app, refs })
             }
             treeHost.appendChild(row);
             const list = element('div', 'tree-items');
-            for (const node of items) list.appendChild(renderTreeItem(node, selection));
+            if (collection.presets) for (const preset of items) list.appendChild(renderPresetItem(preset, scene.PresetId));
+            else for (const node of items) list.appendChild(renderTreeItem(node, selection));
             treeHost.appendChild(list);
         }
     }
@@ -209,6 +213,17 @@ export function mountStudioUI({ app, refs })
     function closeContextMenu()
     {
         if (state.contextMenu) { state.contextMenu.remove(); state.contextMenu = null; }
+    }
+
+    function renderPresetItem(preset, currentId)
+    {
+        const current = preset.Id === currentId;
+        const item = element('div', 'tree-item preset-item' + (current ? ' selected' : ''));
+        const grid = preset.Domain.Tiles && preset.Domain.Tiles.some((count) => count > 1) ? ` · ${preset.Domain.Tiles.join('×')} tile grid` : '';
+        item.innerHTML = `<span class="item-icon" style="color:${current ? '#f5a524' : '#9aa3b2'}">${icon(preset.Icon, 15)}</span><span class="item-meta"><strong>${preset.Name}</strong><span>${preset.Domain.Resolution.join('×')} cells${grid}</span></span><span class="load-hint">${current ? 'loaded' : 'load'}</span>`;
+        item.title = preset.Summary;
+        item.addEventListener('click', () => app.loadPreset(preset.Id));
+        return item;
     }
 
     function renderTreeItem(node, selection)
@@ -881,6 +896,10 @@ export function mountStudioUI({ app, refs })
             button.addEventListener('click', () => setMode(key));
             segmented.appendChild(button);
         }
+        const scenes = element('button', 'scenes-button', `${icon('scene', 12)} Scenes <span class="badge">${ScenePresets.length}</span>`);
+        scenes.title = 'Open the scene preset browser';
+        scenes.addEventListener('click', () => toggleDrawer(true, 'presets'));
+        rowA.appendChild(scenes);
         rowA.appendChild(segmented);
         host.appendChild(rowA);
 

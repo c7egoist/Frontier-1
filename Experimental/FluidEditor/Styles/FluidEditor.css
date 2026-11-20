@@ -285,3 +285,11 @@ button.mini { padding: 0 7px; height: 20px; min-width: 20px; border-radius: 8px;
 .context-item:hover { background: #222; color: #fff; }
 .context-item.danger { color: var(--accent-red); }
 .context-item.danger:hover { background: rgba(240, 83, 90, 0.14); }
+
+/* Scenes */
+.scenes-button { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; margin-right: 8px; border-radius: 8px; border: 1px solid var(--border-strong); background: #1a1a1a; color: #fff; font: inherit; font-size: 11px; cursor: pointer; }
+.scenes-button:hover { background: #242424; border-color: var(--accent-amber); }
+.scenes-button .badge { font-size: 9.5px; padding: 1px 6px; border-radius: 999px; background: rgba(245, 165, 36, 0.18); color: var(--accent-amber); }
+.tree-item.preset-item .load-hint { font-size: 9.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+.tree-item.preset-item:hover .load-hint { color: var(--accent-amber); }
+.tree-item.preset-item.selected .load-hint { color: var(--accent-amber); }
