@@ -330,19 +330,44 @@ export default function Notch({
             <div className="settings-body" data-drawer-scroll>
               {Page === "Render Settings" ? (
                 <>
+                  <Card Title="World Render Engine">
+                    <p>
+                      Unified Zero-SDF 5-engine pipeline across GTX 4-Wide BVH4
+                      and RTX VK_KHR_ray_query
+                    </p>
+                    {Field(
+                      "Engine",
+                      "Select",
+                      [
+                        "MatCap",
+                        "OpenPBR Direct",
+                        "Contour + Surfel GI (GTX)",
+                        "Dynamic Irradiance GI (GTX)",
+                        "Deterministic Path Tracer (GTX / RTX)",
+                      ],
+                      2,
+                    )}
+                  </Card>
                   <Card Title="Shadows">
                     <p>
-                      Filter follows the quality tier; resolution can override
-                      it
+                      Zero-SDF direct solar shadows with DeformingCapsuleRig &
+                      SurfelOccluderField
                     </p>
+                    {Field(
+                      "Shadow Algorithm",
+                      "Select",
+                      [
+                        "Contact PCSS (3.9 mm)",
+                        "Solar Disc Ray Query (GTX / RTX)",
+                      ],
+                      0,
+                    )}
                     <div className="readout">
                       <span>Technique</span>
                       <span>
-                        {Settings.Quality === 0
-                          ? "Hard shadow map"
-                          : Settings.Quality === 1
-                            ? "Wide PCF"
-                            : "PCSS (soft, contact-hardening)"}
+                        {(Draft["Shadow Algorithm"] ?? 0) === 1
+                          ? "4-Ray Vogel Solar Cone + Plane-Aware Filter"
+                          : "3.91 mm/tx 2-Cascade PCSS + BVH4 Contact Gate"}
                       </span>
                     </div>
                     {Field(
@@ -362,7 +387,7 @@ export default function Notch({
                       <span>
                         {MapSide} × {MapSide} ·{" "}
                         {((MapSide * MapSide * 4) / 1048576).toFixed(1)} MB per
-                        light tap
+                        cascade
                       </span>
                     </div>
                   </Card>

@@ -1,9 +1,12 @@
 # Third-party fetched packages & toolchains (reproduced via Automation/)
+/ExternalPackages
 ExternalPackages/
 EngineContent/FontsArchives/
 
-# Local transient scratchpad
+# Local transient scratchpad & generated exhibit screenshots
+/_ClaudeScratch
 _ClaudeScratch/
+Exhibits/Images/
 
 # Build & packaged output directories
 Build/
@@ -30,3 +33,7 @@ Thumbs.db
 .env.local
 _Build/
 Experimental/FrontierEditor/dist/
+
+# Local sandbox excluded cache
+.cache/
+.venv/

@@ -1,0 +1,51 @@
+# 🧩 `Engine/GeometricRaster/`
+
+> **TL;DR**: Headless & desktop Vulkan 1.2+ device interchange using volk, Timeline Semaphores (zero fences), and SwiftShader fallback (2 source/header/shader files under `Engine/GeometricRaster/`).
+
+---
+
+## Subdirectories
+
+| Directory | Summary |
+| :--- | :--- |
+| [`Atmosphere/`](Atmosphere/README.md) | Physical Bruneton/Hillaire Rayleigh + Mie + Ozone atmospheric transmittance, SkyView LUT, and solar disc/corona radiance |
+| [`Baking/`](Baking/README.md) | Dual GTX SAH-BVH4 + optional RTX VK_KHR_acceleration_structure (BLAS + TLAS) upload & synchronization for GPU baking |
+| [`ComponentEditor/`](ComponentEditor/README.md) | Procedural & compiled geometry vertex builders for Component Editor .slang pipelines (surface channels, constraints, shells, beams) |
+| [`Compute/`](Compute/README.md) | Modular Vulkan .slang compute pipeline registry and descriptor encoder shared across UV, Geometry, Texture, Material & Simulation |
+| [`DirectLighting/`](DirectLighting/README.md) | Zero-SDF Direct Lighting: Contact PCSS (3.9 mm 2-Cascade + BVH4 + Capsule Rig) & Solar Disc Ray Query (GTX BVH4 / RTX RayQuery) + LTC & Surfel AO |
+| [`Gizmo/`](Gizmo/README.md) | Modular 3D & 2D Slate GizmoPRO manipulator reusable across UV, Geometry, Material, Vector & Simulation workspaces |
+| [`GlobalIllumination/`](GlobalIllumination/README.md) | Dual Zero-SDF GTX GI Renderers: Contour + 2-Bounce Surfel + SH9 (Denoiser-Free) & Dynamic Octahedral Cache + WeightedPathReplay RIS |
+| [`PathTracing/`](PathTracing/README.md) | Unified 6-Queue Lock-Free Wavefront Deterministic Path Tracer (Split-Word Fixed-Point, Owen-Sobol (0,2), GTX BVH4 & RTX VK_KHR_ray_query) |
+| [`Picking/`](Picking/README.md) | Unified 3D & 2D GPU R32G32B32A32_UINT visibility pick query supporting 1x1 cursor readback and marquee/brush VRAM reduction |
+| [`Rasterization/`](Rasterization/README.md) | Native Vulkan 1.2+ swapchain & offscreen presenter executing ImGuiOverlayRasterization.slang over GLFW OS windows or headless targets |
+| [`Simulation/`](Simulation/README.md) | Editor-only Vulkan 1.3 dynamic-rendering overlay sequence executing all 6 .slang ForceField rasterization pipelines + MRT PickID |
+| [`UV/`](UV/README.md) | Vulkan .slang 3D Surface/MatCap + 2D UDIM UVTile + 3D/2D TransformGizmo MRT rasterizer with GPU Selection & Stretch compute |
+| [`Vector/`](Vector/README.md) | Pure Vulkan 1.3 + .slang VectorGraphics GPU rasterizer driven by ThorVG symbolic DOM/typography paths + Planar2D TransformGizmo + R32G32B32A32_UINT picking. |
+| [`Visibility/`](Visibility/README.md) | Two-Phase GPU/CPU Cluster Visibility Culler: Frustum + Normal-Cone + Continuous LOD Cut + Hi-Z Split (>=4 px HW vs <4 px SW) |
+| [`WorldRendering/`](WorldRendering/README.md) | Unified 5-Engine CPU & Vulkan GPU World Render Orchestrators, Specular & Abbe Glass Raytracing, and Canonical Showcase Gallery Scene |
+
+## Files
+
+| File | Purpose |
+| :--- | :--- |
+| `VulkanInterchange.cpp` | Implementation of VulkanInterchange with volk dynamic loading, SwiftShader ICD auto-discovery, and Timeline Semaphore synchronization |
+| `VulkanInterchange.h` | Headless & desktop Vulkan 1.2+ device interchange using volk, Timeline Semaphores (zero fences), and SwiftShader fallback |
+
+## Namespaces & Primary Types
+
+- **Namespaces**: `Frontier::GeometricRaster`
+- **Primary Types**: `DeviceBufferResource`, `DeviceImageResource`, `VulkanInterchange`
+
+## Usage
+
+```cpp
+#include "Engine/GeometricRaster/VulkanInterchange.h"
+
+using namespace Frontier::GeometricRaster;
+DeviceBufferResource Instance {};
+```
+
+## Build & Verification
+
+- Built as part of `FrontierEngine` in root `CMakeLists.txt` (ISO C++20).
+- Validated by the repository's CTest suites under `Exhibits/` (`ctest --test-dir build-editor --output-on-failure`).
