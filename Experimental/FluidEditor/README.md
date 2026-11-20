@@ -54,7 +54,7 @@ Falloff envelopes: `SmoothStep · Linear · InverseSquare · Infinite`. Up to **
 
 ## 🔍 3. Flow Visualisation (`Engine/VolumeRenderer.js`)
 
-- **Volume Render** — single-pass ray-march with jittered steps, directional light shadow march, smoke albedo, blackbody fire emission, filmic tone map; analytic ground grid + sphere colliders share the same ray.
+- **Volume Render** — single-pass ray-march with jittered steps, directional shadow march, Henyey-Greenstein forward scattering, editable **fire incandescence ramp** (ember → flame → core colours, ignition temperature, span, flame opacity, emission), soot lit by its own flame, editable smoke albedo / extinction / ambient / sun / exposure with `Wood · Gas · Fuel · Magic` fire and `Soot · Grey · Steam · Dust` smoke look chips, ACES tone map; analytic ground grid + sphere colliders share the same ray.
 - **Velocity Vectors** — GPU-generated arrow lines on an axis-aligned slice (stride, scale, Turbo / Engineering / Plasma / Diverging ramps).
 - **Scalar Slice** — heat-map of `Speed · Pressure · Vorticity · Temperature · Density · Divergence · Force |F|` (force magnitude is evaluated live from the generator uniforms).
 - **Flow Tracers** — 8 192 GPU particles with speed-coloured points + trails.

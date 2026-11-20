@@ -93,6 +93,16 @@ export class VolumeRenderer
         gl.uniform1f(uniforms.uDensityScale, volume.Density);
         gl.uniform1f(uniforms.uAbsorption, volume.Absorption);
         gl.uniform1f(uniforms.uFireIntensity, volume.FireIntensity);
+        gl.uniform3fv(uniforms.uFireEmber, hexToRgb(volume.FireEmber));
+        gl.uniform3fv(uniforms.uFireFlame, hexToRgb(volume.FireFlame));
+        gl.uniform3fv(uniforms.uFireCore, hexToRgb(volume.FireCore));
+        gl.uniform1f(uniforms.uFireThreshold, volume.FireThreshold);
+        gl.uniform1f(uniforms.uFireSoftness, volume.FireSoftness);
+        gl.uniform1f(uniforms.uFireOpacity, volume.FireOpacity);
+        gl.uniform1f(uniforms.uExposure, volume.Exposure);
+        gl.uniform1f(uniforms.uAnisotropy, Math.min(0.95, volume.Anisotropy));
+        gl.uniform1f(uniforms.uLightIntensity, volume.LightIntensity);
+        gl.uniform3fv(uniforms.uAmbientColour, hexToRgb(volume.Ambient));
         gl.uniform1i(uniforms.uSteps, Math.round(volume.Steps));
         gl.uniform1i(uniforms.uShadowSteps, Math.round(volume.ShadowSteps));
         gl.uniform1f(uniforms.uGroundHeight, -solver.domainHalfExtent[1] - 0.02);

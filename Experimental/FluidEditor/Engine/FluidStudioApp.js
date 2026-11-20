@@ -143,6 +143,7 @@ export class FluidStudioApp
             Colliders: (preset.Colliders || []).map((collider) => createCollider(collider)),
             Visualizers: createVisualizerSet(),
         };
+        Object.assign(this.scene.Visualizers.Volume, preset.Look || {});
         this.applyDomainResolution();
         this.camera.frame(this.solver.domainHalfExtent);
         this.selection = this.scene.Forces[0] ? this.scene.Forces[0].Id : 'domain';
@@ -250,13 +251,26 @@ export class FluidStudioApp
         const node = this.findNode(id);
         if (!node) return;
         node[key] = value;
+        this.afterNodeUpdate(node, key);
+        this.notify();
+    }
+
+    applyLook(id, look)
+    {
+        const node = this.findNode(id);
+        if (!node) return;
+        Object.assign(node, look);
+        this.notify();
+    }
+
+    afterNodeUpdate(node, key)
+    {
         if (node.Kind === 'Domain' && (key === 'Resolution' || key === 'CellSize'))
         {
             this.applyDomainResolution();
             this.camera.frame(this.solver.domainHalfExtent);
         }
         if (node.Kind === 'Visualizer' && key === 'Lifetime') this.solver.tracersNeedReset = true;
-        this.notify();
     }
 
     //------------------------------------------------------------------------------------------------------------------------
@@ -302,7 +316,7 @@ export class FluidStudioApp
             Emitters: (data.Emitters || []).map((emitter) => createEmitter(emitter)),
             Forces: (data.Forces || []).map((force) => createForceGenerator(force.Type, force)),
             Colliders: (data.Colliders || []).map((collider) => createCollider(collider)),
-            Visualizers: { ...createVisualizerSet(), ...(data.Visualizers || {}) },
+            Visualizers: Object.fromEntries(Object.entries(createVisualizerSet()).map(([key, defaults]) => [key, { ...defaults, ...((data.Visualizers || {})[key] || {}) }])),
         };
         this.applyDomainResolution();
         this.selection = 'domain';

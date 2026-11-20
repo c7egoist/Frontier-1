@@ -7,7 +7,7 @@
 import { icon } from './StudioIcons.js';
 import {
     ForceGeneratorTypes, ForceTypeById, FalloffCurves, EmitterShapes, ColourRamps, SliceAxes, ScalarChannels, AdvectionSchemes, BoundaryModes,
-    ScenePresets, RampStops, MaximumForceGenerators,
+    ScenePresets, RampStops, MaximumForceGenerators, SmokeLooks, FireLooks,
 } from '../Engine/ForceGeneratorCatalog.js';
 
 const FalloffLabels = { SmoothStep: 'Smooth', Linear: 'Linear', InverseSquare: 'Inverse²', Constant: 'Infinite' };
@@ -249,6 +249,21 @@ export function mountStudioUI({ app, refs })
         return row;
     }
 
+    function lookChips(node, label, looks, isActive)
+    {
+        const control = element('div', 'control');
+        control.appendChild(element('div', 'control-head', `<span>${label}</span>`));
+        const row = element('div', 'choice-row');
+        for (const [name, look] of Object.entries(looks))
+        {
+            const button = element('button', isActive(look) ? 'active' : '', name);
+            button.addEventListener('click', () => app.applyLook(node.Id, look));
+            row.appendChild(button);
+        }
+        control.appendChild(row);
+        return control;
+    }
+
     function card(title, hint, controls)
     {
         const wrap = element('div', 'property-card', `<h3>${title}${hint ? `<span>${hint}</span>` : ''}</h3>`);
@@ -471,13 +486,29 @@ export function mountStudioUI({ app, refs })
         host.appendChild(element('div', 'section-head', '<span>Properties</span><span>Overlay settings</span>'));
         if (visualizer.Id === 'vis-volume')
         {
-            host.appendChild(card('Volume Shading', 'Ray-march', [
+            host.appendChild(card('Fire', 'Incandescence', [
+                lookChips(visualizer, 'Fire preset', FireLooks, (look) => visualizer.FireEmber === look.FireEmber),
+                colour(visualizer, 'FireEmber', 'Ember (cool edge)'),
+                colour(visualizer, 'FireFlame', 'Flame body'),
+                colour(visualizer, 'FireCore', 'Hot core'),
+                slider(visualizer, 'FireIntensity', 'Fire emission', 0, 12, 0.1),
+                slider(visualizer, 'FireThreshold', 'Ignition temperature', 0.3, 3, 0.05),
+                slider(visualizer, 'FireSoftness', 'Temperature span', 0.5, 8, 0.1),
+                slider(visualizer, 'FireOpacity', 'Flame opacity', 0, 4, 0.05),
+            ]));
+            host.appendChild(card('Smoke', 'Scattering', [
+                lookChips(visualizer, 'Smoke preset', SmokeLooks, (look) => visualizer.Albedo === look.Albedo),
+                colour(visualizer, 'Albedo', 'Smoke albedo'),
                 slider(visualizer, 'Density', 'Density scale', 0, 4, 0.05),
-                slider(visualizer, 'Absorption', 'Absorption', 0.2, 12, 0.1),
-                slider(visualizer, 'FireIntensity', 'Fire emission', 0, 5, 0.05),
+                slider(visualizer, 'Absorption', 'Extinction', 0.2, 12, 0.1, '/m'),
+                slider(visualizer, 'Anisotropy', 'Forward scatter', 0, 0.9, 0.01),
+            ]));
+            host.appendChild(card('Lighting', 'Sun + sky', [
+                slider(visualizer, 'LightIntensity', 'Sun intensity', 0, 4, 0.05),
+                colour(visualizer, 'Ambient', 'Ambient sky'),
+                slider(visualizer, 'Exposure', 'Exposure', 0.2, 4, 0.05),
                 slider(visualizer, 'Steps', 'March steps', 24, 256, 4, '', 0),
                 slider(visualizer, 'ShadowSteps', 'Shadow steps', 0, 16, 1, '', 0),
-                colour(visualizer, 'Albedo', 'Smoke albedo'),
             ]));
         }
         else if (visualizer.Id === 'vis-vectors')

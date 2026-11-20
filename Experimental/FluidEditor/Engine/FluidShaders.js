@@ -612,7 +612,7 @@ void main()
         float burn = min(fuel, uCombustion * 2.5 * uDeltaTime * fuel * smoothstep(ignition, ignition + 1.0, temperature));
         fuel -= burn;
         temperature += burn * 12.0;
-        density += burn * 1.1;
+        density += burn * 0.55;
     }
     float excess = temperature - uAmbientTemperature;
     // Newtonian + radiative (T^4 shaped) cooling.
@@ -740,6 +740,16 @@ uniform vec3  uAlbedo;
 uniform float uDensityScale;
 uniform float uAbsorption;
 uniform float uFireIntensity;
+uniform vec3  uFireEmber;
+uniform vec3  uFireFlame;
+uniform vec3  uFireCore;
+uniform float uFireThreshold;
+uniform float uFireSoftness;
+uniform float uFireOpacity;
+uniform float uExposure;
+uniform float uAnisotropy;
+uniform float uLightIntensity;
+uniform vec3  uAmbientColour;
 uniform int   uSteps;
 uniform int   uShadowSteps;
 uniform float uGroundHeight;
@@ -767,15 +777,29 @@ float IntersectSphere(vec3 origin, vec3 direction, vec3 centre, float radius)
     return -b - sqrt(h);
 }
 
-vec3 Blackbody(float temperature)
+// Editable incandescence ramp: ember -> flame -> white-hot core, radiance growing with temperature.
+vec3 FireRadiance(float temperature)
 {
-    // Temperature is a dimensionless solver value; map 1..6 onto an ember-to-white ramp.
-    float t = clamp((temperature - 0.9) / 4.5, 0.0, 1.0);
-    vec3 ember = vec3(1.0, 0.18, 0.02);
-    vec3 flame = vec3(1.0, 0.55, 0.12);
-    vec3 hot = vec3(1.0, 0.92, 0.72);
-    vec3 colour = t < 0.5 ? mix(ember, flame, t * 2.0) : mix(flame, hot, (t - 0.5) * 2.0);
-    return colour * pow(t, 1.6) * 6.0;
+    float t = clamp((temperature - uFireThreshold) / max(uFireSoftness, 0.05), 0.0, 1.0);
+    vec3 colour = t < 0.5 ? mix(uFireEmber, uFireFlame, t * 2.0) : mix(uFireFlame, uFireCore, (t - 0.5) * 2.0);
+    return colour * (0.2 + 4.0 * t * t);
+}
+
+float FirePresence(float temperature)
+{
+    return smoothstep(uFireThreshold * 0.7, uFireThreshold * 1.15, temperature);
+}
+
+// Henyey-Greenstein phase function for forward-scattering silver linings.
+float HenyeyGreenstein(float cosTheta, float g)
+{
+    float g2 = g * g;
+    return (1.0 - g2) / (4.0 * 3.14159265 * pow(1.0 + g2 - 2.0 * g * cosTheta, 1.5));
+}
+
+vec3 AcesFilm(vec3 x)
+{
+    return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
 }
 
 float GroundGrid(vec3 world)
@@ -858,30 +882,34 @@ void main()
             float jitter = Hash31(vec3(gl_FragCoord.xy, float(uFrame)));
             float transmittance = 1.0;
             vec3 accumulated = vec3(0.0);
-            vec3 ambient = vec3(0.30, 0.33, 0.40);
+            float phase = HenyeyGreenstein(dot(direction, uLightDirection), uAnisotropy) * 4.0 * 3.14159265;
+            vec3 sunLight = uLightColour * uLightIntensity * mix(1.0, phase, 0.6);
             for (int i = 0; i < 256; i++)
             {
-                if (i >= uSteps || transmittance < 0.01) break;
+                if (i >= uSteps || transmittance < 0.005) break;
                 vec3 p = origin + direction * (entry + (float(i) + jitter) * step_);
                 vec4 state = SampleVolume(uState, CellFromWorld(p));
                 float density = state.x * uDensityScale;
                 float temperature = state.y;
-                vec3 emission = Blackbody(temperature) * uFireIntensity;
-                if (density < 0.002 && dot(emission, emission) < 1e-6) continue;
-                float sigma = density * uAbsorption;
-                float stepTransmittance = exp(-sigma * step_);
-                float lightTransmittance = (sigma > 0.0) ? ShadowTransmittance(p, -half_, half_) : 1.0;
-                vec3 scattering = uAlbedo * (ambient + uLightColour * lightTransmittance);
-                vec3 contribution = scattering * sigma * step_ + emission * step_ * (0.4 + 0.6 * density);
+                float fire = FirePresence(temperature);
+                if (density < 0.002 && fire < 0.002) continue;
+                vec3 emission = FireRadiance(temperature) * uFireIntensity * fire;
+                float sigmaSmoke = density * uAbsorption;
+                float sigmaFire = fire * uFireOpacity;
+                float sigma = sigmaSmoke + sigmaFire;
+                float lightTransmittance = (sigmaSmoke > 0.0) ? ShadowTransmittance(p, -half_, half_) : 1.0;
+                // Soot is lit by the sun, the ambient sky, and the flame it is wrapped around.
+                vec3 scattering = uAlbedo * (uAmbientColour + sunLight * lightTransmittance + emission * 0.6);
+                vec3 contribution = scattering * sigmaSmoke * step_ + emission * (1.0 + sigmaFire) * step_;
                 accumulated += transmittance * contribution;
-                transmittance *= stepTransmittance;
+                transmittance *= exp(-sigma * step_);
             }
             colour = colour * transmittance + accumulated;
         }
     }
 
-    // Filmic tone map.
-    colour = colour / (1.0 + colour) * 1.2;
+    // ACES filmic tone map with editable exposure.
+    colour = AcesFilm(colour * uExposure);
     colour = pow(colour, vec3(1.0 / 2.2));
     fragColour = vec4(colour, 1.0);
 }
