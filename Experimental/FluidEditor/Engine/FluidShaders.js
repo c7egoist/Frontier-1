@@ -594,18 +594,35 @@ void main()
 export const ThermodynamicsFragment = `#version 300 es
 precision highp float; precision highp int; precision highp sampler2D;
 ${VolumeChunk}
+${BoundaryChunk}
 uniform sampler2D uState;
 uniform float uDeltaTime;
 uniform float uCooling;
 uniform float uCombustion;
 uniform float uAmbientTemperature;
 out vec4 fragColour;
+// Retention factor that fades gas out across a band of cells next to every open face, so plumes leave the
+// domain instead of flattening against the lid.
+float OutflowSponge(ivec3 cell)
+{
+    float keep = 1.0;
+    float band = max(3.0, float(max(uGrid.x, max(uGrid.y, uGrid.z))) * 0.07);
+    if (OpenFace(ivec3(cell.x, uGrid.y, cell.z))) keep *= smoothstep(0.0, band, float(uGrid.y - 1 - cell.y));
+    if (OpenFace(ivec3(cell.x, -1, cell.z))) keep *= smoothstep(0.0, band, float(cell.y));
+    if (OpenFace(ivec3(uGrid.x, cell.y, cell.z))) keep *= smoothstep(0.0, band, float(uGrid.x - 1 - cell.x));
+    if (OpenFace(ivec3(-1, cell.y, cell.z))) keep *= smoothstep(0.0, band, float(cell.x));
+    if (OpenFace(ivec3(cell.x, cell.y, uGrid.z))) keep *= smoothstep(0.0, band, float(uGrid.z - 1 - cell.z));
+    if (OpenFace(ivec3(cell.x, cell.y, -1))) keep *= smoothstep(0.0, band, float(cell.z));
+    return mix(0.82, 1.0, keep);
+}
+
 void main()
 {
     ivec3 cell = CellFromFragment(gl_FragCoord.xy);
     if (!CellInside(cell)) { fragColour = vec4(0.0); return; }
     vec4 state = FetchCell(uState, cell);
-    float density = state.x, temperature = state.y, fuel = state.z;
+    float sponge = OutflowSponge(cell);
+    float density = state.x * sponge, temperature = uAmbientTemperature + (state.y - uAmbientTemperature) * sponge, fuel = state.z * sponge;
     const float ignition = 0.9;
     if (fuel > 0.0 && temperature > ignition && uCombustion > 0.0)
     {
@@ -754,6 +771,7 @@ uniform int   uSteps;
 uniform int   uShadowSteps;
 uniform float uGroundHeight;
 uniform int   uShowVolume;
+uniform int   uVoxelPreview;
 uniform int   uFrame;
 uniform int   uSelectedCollider;
 out vec4 fragColour;
@@ -888,7 +906,8 @@ void main()
             {
                 if (i >= uSteps || transmittance < 0.005) break;
                 vec3 p = origin + direction * (entry + (float(i) + jitter) * step_);
-                vec4 state = SampleVolume(uState, CellFromWorld(p));
+                vec3 coordinate = CellFromWorld(p);
+                vec4 state = uVoxelPreview == 1 ? FetchCell(uState, ivec3(floor(coordinate))) : SampleVolume(uState, coordinate);
                 float density = state.x * uDensityScale;
                 float temperature = state.y;
                 float fire = FirePresence(temperature);

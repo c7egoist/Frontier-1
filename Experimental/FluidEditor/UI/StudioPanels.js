@@ -7,7 +7,7 @@
 import { icon } from './StudioIcons.js';
 import {
     ForceGeneratorTypes, ForceTypeById, FalloffCurves, EmitterShapes, ColourRamps, SliceAxes, ScalarChannels, AdvectionSchemes, BoundaryModes,
-    ScenePresets, RampStops, MaximumForceGenerators, SmokeLooks, FireLooks,
+    ScenePresets, RampStops, MaximumForceGenerators, SmokeLooks, FireLooks, ResolutionPresets, VolumeFilters,
 } from '../Engine/ForceGeneratorCatalog.js';
 
 const FalloffLabels = { SmoothStep: 'Smooth', Linear: 'Linear', InverseSquare: 'Inverse²', Constant: 'Infinite' };
@@ -141,7 +141,7 @@ export function mountStudioUI({ app, refs })
     {
         switch (node.Kind)
         {
-            case 'Domain': return `${(node.Resolution[0] * node.CellSize).toFixed(1)} × ${(node.Resolution[1] * node.CellSize).toFixed(1)} × ${(node.Resolution[2] * node.CellSize).toFixed(1)} m · ${BoundaryLabels[node.Boundary]}`;
+            case 'Domain': return `${node.Size.map((extent) => extent.toFixed(1)).join(' × ')} m · ${(node.CellSize * 100).toFixed(1)} cm voxels · ${BoundaryLabels[node.Boundary]}`;
             case 'Force': return `${ForceTypeById[node.Type].Name} · ${formatNumber(node.Strength, 1)} · ${FalloffLabels[node.Falloff]}`;
             case 'Emitter': return `${node.Shape} · ρ ${formatNumber(node.Density, 1)} · T ${formatNumber(node.Temperature, 1)}${node.Fuel > 0 ? ' · fuel' : ''}`;
             case 'Collider': return `Sphere · r ${formatNumber(node.Radius, 2)} m`;
@@ -344,10 +344,23 @@ export function mountStudioUI({ app, refs })
         status.appendChild(statusTile('MacCormack', domain.Advection === 'MacCormack' ? '2ND ORDER' : 'SEMI-LAGRANGIAN', 'vectors', domain.Advection === 'MacCormack', () => app.updateNode(domain.Id, 'Advection', domain.Advection === 'MacCormack' ? AdvectionSchemes[0] : AdvectionSchemes[1])));
         host.appendChild(status);
         host.appendChild(element('div', 'section-head', '<span>Properties</span><span>Grid, dynamics & solver</span>'));
-        host.appendChild(card('Grid', 'Rebuilds fields', [
-            vector(domain, 'Resolution', 'Resolution (cells)', 8, true),
-            slider(domain, 'CellSize', 'Cell size', 0.02, 0.2, 0.005, 'm', 3),
+        const resolutionChips = element('div', 'control');
+        resolutionChips.appendChild(element('div', 'control-head', '<span>Quality preset</span>'));
+        const chipRow = element('div', 'choice-row');
+        for (const [name, cells] of Object.entries(ResolutionPresets))
+        {
+            const button = element('button', domain.MaxCells === cells ? 'active' : '', `${name} <span style="opacity:.55;margin-left:4px">${cells}</span>`);
+            button.addEventListener('click', () => app.updateNode(domain.Id, 'MaxCells', cells));
+            chipRow.appendChild(button);
+        }
+        resolutionChips.appendChild(chipRow);
+        host.appendChild(card('Grid', `${domain.Resolution.join(' × ')} = ${formatCells(domain.Resolution[0] * domain.Resolution[1] * domain.Resolution[2])}`, [
+            vector(domain, 'Size', 'World size (m)', 0.5),
+            slider(domain, 'MaxCells', 'Voxel resolution (longest axis)', 16, 160, 8, 'cells', 0),
+            resolutionChips,
+            element('p', 'note', `Voxel ${(domain.CellSize * 100).toFixed(1)} cm — lower resolution = coarser, blockier gas and a faster solve; higher resolution = finer detail at a higher GPU cost. World size stays fixed while you change it.`),
             choice(domain, 'Boundary', 'Boundary', BoundaryModes, BoundaryLabels),
+            element('p', 'note', 'Open faces let gas flow out of the domain (a sponge band fades it near the edge); closed walls contain it.'),
         ]));
         host.appendChild(card('Dynamics', 'Per second', [
             slider(domain, 'Buoyancy', 'Thermal buoyancy', 0, 4, 0.05),
@@ -504,6 +517,7 @@ export function mountStudioUI({ app, refs })
                 slider(visualizer, 'Anisotropy', 'Forward scatter', 0, 0.9, 0.01),
             ]));
             host.appendChild(card('Lighting', 'Sun + sky', [
+                choice(visualizer, 'Filter', 'Volume filtering', VolumeFilters, { Smooth: 'Smooth (trilinear)', Voxel: 'Voxel (show cells)' }),
                 slider(visualizer, 'LightIntensity', 'Sun intensity', 0, 4, 0.05),
                 colour(visualizer, 'Ambient', 'Ambient sky'),
                 slider(visualizer, 'Exposure', 'Exposure', 0.2, 4, 0.05),

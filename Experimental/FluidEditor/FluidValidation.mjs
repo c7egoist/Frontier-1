@@ -149,7 +149,7 @@ for (const programRecord of [...Object.values(solver.programs), ...Object.values
 
 const preset = ScenePresets.find((candidate) => candidate.Id === 'preset-wind-tunnel');
 const domain = createDomain({ ...preset.Domain, Boundary: preset.Boundary });
-domain.CellSize = preset.Domain.Size[0] / preset.Domain.Resolution[0];
+check(domain.Resolution.join() === '96,48,48' && Math.abs(domain.CellSize - 6 / 96) < 1e-9, 'Domain grid derives 96×48×48 @ 6.25 cm from Size 6×3×3 / MaxCells 96');
 const scene = {
     Name: preset.Name, Domain: domain,
     Emitters: preset.Emitters.map((emitter) => createEmitter(emitter)),
@@ -268,11 +268,14 @@ check(app.solver.frame === 3, `Solver advanced ${app.solver.frame} frames throug
 for (const preset of ScenePresets) { app.loadPreset(preset.Id); check(app.scene.Name === preset.Name && app.solver.layout.width === preset.Domain.Resolution[0], `Preset ${preset.Name} loads + reconfigures grid`); }
 ui.toggleDrawer(true, 'forces');
 check(refs.drawer.children.length === 2 && refs.drawer.children[1].children.length === ForceGeneratorTypes.length, 'Asset drawer lists every force generator card');
-app.updateNode(app.scene.Domain.Id, 'Resolution', [48, 64, 48]);
-check(app.solver.layout.depth === 48, 'Resolution edits rebuild the solver fields');
+app.loadPreset('preset-campfire');
+app.updateNode(app.scene.Domain.Id, 'MaxCells', 48);
+check(app.solver.layout.height === 48 && app.solver.layout.width === 24, 'MaxCells edits rebuild the solver fields at fixed world size (3×6×3 m → 24×48×24)');
+app.updateNode(app.scene.Domain.Id, 'Size', [4, 6, 4]);
+check(app.solver.layout.width === 32 && Math.abs(app.scene.Domain.CellSize - 0.125) < 1e-9, 'Size edits keep the voxel count on the longest axis');
 const exported = app.exportJson();
 app.importJson(exported);
-check(app.scene.Domain.Resolution.join() === '48,64,48', 'Export → import preserves the edited domain');
+check(app.scene.Domain.Resolution.join() === '32,48,32' && app.scene.Domain.MaxCells === 48, 'Export → import preserves the edited domain');
 
 console.log(Failures === 0 ? '\n🟢 Fluid Studio validation passed' : `\n🔴 Fluid Studio validation failed (${Failures})`);
 process.exit(Failures === 0 ? 0 : 1);

@@ -6,7 +6,7 @@
 
 import * as Shaders from './FluidShaders.js';
 import { Vec3 } from './OrbitCamera.js';
-import { ForceTypeById, ColourRamps, ScalarChannels, SliceAxes } from './ForceGeneratorCatalog.js';
+import { ForceTypeById, ColourRamps, ScalarChannels, SliceAxes, VolumeFilters } from './ForceGeneratorCatalog.js';
 
 function hexToRgb(hex)
 {
@@ -107,6 +107,7 @@ export class VolumeRenderer
         gl.uniform1i(uniforms.uShadowSteps, Math.round(volume.ShadowSteps));
         gl.uniform1f(uniforms.uGroundHeight, -solver.domainHalfExtent[1] - 0.02);
         gl.uniform1i(uniforms.uShowVolume, volume.Visible ? 1 : 0);
+        gl.uniform1i(uniforms.uVoxelPreview, VolumeFilters.indexOf(volume.Filter) === 1 ? 1 : 0);
         gl.uniform1i(uniforms.uFrame, solver.frame & 1023);
         const selectedCollider = selection ? scene.Colliders.filter((c) => c.Enabled).findIndex((c) => c.Id === selection) : -1;
         gl.uniform1i(uniforms.uSelectedCollider, selectedCollider);

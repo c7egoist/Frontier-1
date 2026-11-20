@@ -22,6 +22,8 @@
 
 ## 🧩 2. Solver Pipeline (`Engine/FluidSolver.js` + `Engine/FluidShaders.js`)
 
+Domain resolution follows the Unreal convention: world **Size** stays fixed, **Voxel resolution** sets the cell count on the longest axis (`Draft 32 … Extreme 160` chips), and the per-axis grid + cell size are derived. Open faces (`OpenTop` default) carry an outflow sponge band so plumes exit instead of flattening on the lid; the `Voxel` volume filter shows the raw cells.
+
 Fields are 3D grids stored as 2D tile atlases (`RGBA16F`, hardware bilinear + manual slice lerp = trilinear). Per step:
 
 | # | Pass | Kernel |

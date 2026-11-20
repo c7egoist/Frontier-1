@@ -9,7 +9,7 @@ import { GpuContext } from './GpuContext.js';
 import { FluidSolver } from './FluidSolver.js';
 import { VolumeRenderer } from './VolumeRenderer.js';
 import { OrbitCamera, Vec3 } from './OrbitCamera.js';
-import { ScenePresets, createDomain, createEmitter, createForceGenerator, createCollider, createVisualizerSet, ForceTypeById } from './ForceGeneratorCatalog.js';
+import { ScenePresets, createDomain, createEmitter, createForceGenerator, createCollider, createVisualizerSet, ForceTypeById, resolveDomainGrid } from './ForceGeneratorCatalog.js';
 
 export class FluidStudioApp
 {
@@ -133,7 +133,6 @@ export class FluidStudioApp
     {
         const preset = ScenePresets.find((candidate) => candidate.Id === presetId) || ScenePresets[0];
         const domain = createDomain({ ...preset.Domain, Boundary: preset.Boundary });
-        domain.CellSize = preset.Domain.Size[0] / preset.Domain.Resolution[0];
         this.scene = {
             Name: preset.Name,
             PresetId: preset.Id,
@@ -153,7 +152,7 @@ export class FluidStudioApp
 
     applyDomainResolution()
     {
-        const domain = this.scene.Domain;
+        const domain = resolveDomainGrid(this.scene.Domain);
         this.solver.configure(domain.Resolution, domain.CellSize);
     }
 
@@ -265,8 +264,9 @@ export class FluidStudioApp
 
     afterNodeUpdate(node, key)
     {
-        if (node.Kind === 'Domain' && (key === 'Resolution' || key === 'CellSize'))
+        if (node.Kind === 'Domain' && (key === 'Size' || key === 'MaxCells'))
         {
+            node.Size = node.Size.map((extent) => Math.max(0.5, Math.min(20, extent)));
             this.applyDomainResolution();
             this.camera.frame(this.solver.domainHalfExtent);
         }
@@ -308,7 +308,6 @@ export class FluidStudioApp
         const data = JSON.parse(text);
         if (data.Format !== 'FrontierFluidScene') throw new Error('Not a FrontierFluidScene document.');
         const domain = createDomain(data.Domain);
-        domain.CellSize = data.Domain.CellSize || 3 / domain.Resolution[0];
         this.scene = {
             Name: data.Name || 'Imported Scene',
             PresetId: null,

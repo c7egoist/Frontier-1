@@ -15,6 +15,7 @@ export const SliceAxes = ['X', 'Y', 'Z'];
 export const ScalarChannels = ['Speed', 'Pressure', 'Vorticity', 'Temperature', 'Density', 'Divergence', 'ForceMagnitude'];
 export const AdvectionSchemes = ['SemiLagrangian', 'MacCormack'];
 export const BoundaryModes = ['ClosedBox', 'OpenTop', 'OpenAll'];
+export const VolumeFilters = ['Smooth', 'Voxel'];
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                  FORCE GENERATOR TYPES
@@ -117,10 +118,10 @@ export const FireLooks = Object.freeze({
 export const ScenePresets = Object.freeze([
     {
         Id: 'preset-campfire', Name: 'Campfire', Icon: 'flame', Summary: 'Fuel-burning flame with soot plume and gentle crosswind.',
-        Domain: { Resolution: [64, 96, 64], Size: [3, 4.5, 3], Buoyancy: 1.6, AmbientTemperature: 0, Cooling: 0.8, Vorticity: 0.35, Dissipation: 0.995, Combustion: 1.2 },
+        Domain: { Resolution: [48, 96, 48], Size: [3, 6, 3], Buoyancy: 1.6, AmbientTemperature: 0, Cooling: 0.8, Vorticity: 0.35, Dissipation: 0.995, Combustion: 1.2 },
         Look: { Albedo: '#4b4b4f', Absorption: 4.0, FireIntensity: 4.5 },
         Emitters: [
-            { Name: 'Fire Source', Shape: 'Disc', Position: [0, -2.0, 0], Radius: 0.42, Density: 0.3, Temperature: 4.5, Fuel: 1.0, Velocity: [0, 1.2, 0], Jitter: 0.6 },
+            { Name: 'Fire Source', Shape: 'Disc', Position: [0, -2.7, 0], Radius: 0.42, Density: 0.3, Temperature: 4.5, Fuel: 1.0, Velocity: [0, 1.2, 0], Jitter: 0.6 },
         ],
         Forces: [
             { Type: 'DirectionalWind', Position: [0, 0, 0], Strength: 1.2, Direction: [1, 0, 0.2], Falloff: 'Constant', Frequency: 0.5, Secondary: 0.6 },
@@ -129,10 +130,10 @@ export const ScenePresets = Object.freeze([
     },
     {
         Id: 'preset-smoke-plume', Name: 'Smoke Plume', Icon: 'smoke', Summary: 'Dense cold smoke rising through a vortex column.',
-        Domain: { Resolution: [64, 96, 64], Size: [3, 4.5, 3], Buoyancy: 0.9, AmbientTemperature: 0, Cooling: 0.4, Vorticity: 0.5, Dissipation: 0.998 },
+        Domain: { Resolution: [48, 96, 48], Size: [3, 6, 3], Buoyancy: 0.9, AmbientTemperature: 0, Cooling: 0.4, Vorticity: 0.5, Dissipation: 0.998 },
         Look: { Albedo: '#8e8f94', Absorption: 3.2 },
         Emitters: [
-            { Name: 'Smoke Stack', Shape: 'Sphere', Position: [0, -1.8, 0], Radius: 0.35, Density: 1.4, Temperature: 1.1, Fuel: 0, Velocity: [0, 1.5, 0], Jitter: 0.3 },
+            { Name: 'Smoke Stack', Shape: 'Sphere', Position: [0, -2.5, 0], Radius: 0.35, Density: 1.4, Temperature: 1.1, Fuel: 0, Velocity: [0, 1.5, 0], Jitter: 0.3 },
         ],
         Forces: [
             { Type: 'VortexColumn', Position: [0, 0, 0], Strength: 7, Radius: 1.6, Frequency: 0.6, Secondary: 1.2 },
@@ -140,22 +141,22 @@ export const ScenePresets = Object.freeze([
     },
     {
         Id: 'preset-explosion', Name: 'Explosion', Icon: 'burst', Summary: 'Radial burst detonation with high-temperature fireball.',
-        Domain: { Resolution: [72, 72, 72], Size: [4, 4, 4], Buoyancy: 1.0, AmbientTemperature: 0, Cooling: 1.1, Vorticity: 0.6, Dissipation: 0.993, Combustion: 1.8 },
+        Domain: { Resolution: [64, 96, 64], Size: [4, 6, 4], Buoyancy: 1.0, AmbientTemperature: 0, Cooling: 1.1, Vorticity: 0.6, Dissipation: 0.993, Combustion: 1.8 },
         Look: { Albedo: '#3f3d3c', Absorption: 4.5, FireIntensity: 6.0, FireOpacity: 2.0, FireSoftness: 4.5, FireEmber: '#b3120a', FireFlame: '#ff6a00', FireCore: '#ffd27a', Exposure: 1.0 },
         Emitters: [
-            { Name: 'Detonation Core', Shape: 'Sphere', Position: [0, -0.6, 0], Radius: 0.55, Density: 0.6, Temperature: 7.5, Fuel: 1.6, Velocity: [0, 0, 0], Jitter: 1.0, Pulse: 2.6 },
+            { Name: 'Detonation Core', Shape: 'Sphere', Position: [0, -2.2, 0], Radius: 0.55, Density: 0.6, Temperature: 7.5, Fuel: 1.6, Velocity: [0, 0, 0], Jitter: 1.0, Pulse: 2.6 },
         ],
         Forces: [
-            { Type: 'RadialBurst', Position: [0, -0.6, 0], Strength: 55, Radius: 1.8, Frequency: 2.6, Secondary: 0.1 },
+            { Type: 'RadialBurst', Position: [0, -2.2, 0], Strength: 55, Radius: 1.8, Frequency: 2.6, Secondary: 0.1 },
             { Type: 'CurlNoiseTurbulence', Position: [0, 0, 0], Strength: 6, Radius: 2.6, Frequency: 1.6, Secondary: 1.2 },
         ],
     },
     {
         Id: 'preset-tornado', Name: 'Tornado Funnel', Icon: 'vortex', Summary: 'Strong vortex with axial lift and inward pull lofting dust.',
-        Domain: { Resolution: [64, 96, 64], Size: [3, 4.5, 3], Buoyancy: 0.3, AmbientTemperature: 0, Cooling: 0.2, Vorticity: 0.25, Dissipation: 0.998 },
+        Domain: { Resolution: [48, 96, 48], Size: [3, 6, 3], Buoyancy: 0.3, AmbientTemperature: 0, Cooling: 0.2, Vorticity: 0.25, Dissipation: 0.998 },
         Look: { Albedo: '#b89c74', Absorption: 2.6, Anisotropy: 0.3 },
         Emitters: [
-            { Name: 'Dust Ring', Shape: 'Disc', Position: [0, -2.1, 0], Radius: 1.1, Density: 0.8, Temperature: 0.2, Fuel: 0, Velocity: [0, 0.3, 0], Jitter: 0.5 },
+            { Name: 'Dust Ring', Shape: 'Disc', Position: [0, -2.8, 0], Radius: 1.1, Density: 0.8, Temperature: 0.2, Fuel: 0, Velocity: [0, 0.3, 0], Jitter: 0.5 },
         ],
         Forces: [
             { Type: 'VortexColumn', Position: [0, 0, 0], Strength: 18, Radius: 1.4, Falloff: 'Linear', Frequency: 1.4, Secondary: 4.0 },
@@ -180,6 +181,7 @@ export const ScenePresets = Object.freeze([
     {
         Id: 'preset-smoke-ring', Name: 'Smoke Ring Cannon', Icon: 'ring', Summary: 'Vortex ring generator launching toroidal puffs.',
         Domain: { Resolution: [64, 64, 96], Size: [3, 3, 4.5], Buoyancy: 0.15, AmbientTemperature: 0, Cooling: 0.1, Vorticity: 0.2, Dissipation: 0.998 },
+        Boundary: 'OpenAll',
         Look: { Albedo: '#d9dde3', Absorption: 2.4, Anisotropy: 0.6 },
         Emitters: [
             { Name: 'Ring Muzzle', Shape: 'Disc', Position: [0, 0, -1.8], Radius: 0.45, Density: 1.2, Temperature: 0.3, Fuel: 0, Velocity: [0, 0, 3.0], Jitter: 0.1, Orientation: [0, 0, 1], Pulse: 1.8 },
@@ -257,14 +259,30 @@ export function createCollider(overrides = {})
     };
 }
 
+export const ResolutionPresets = Object.freeze({ Draft: 32, Low: 48, Medium: 64, High: 96, Ultra: 128, Extreme: 160 });
+
+// Resolution follows the Unreal convention: the domain keeps its world size, `MaxCells` sets the cell count along the
+// longest axis, and `CellSize` + per-axis `Resolution` are derived so shrinking the voxel count makes the gas coarser.
+export function resolveDomainGrid(domain)
+{
+    const longest = Math.max(domain.Size[0], domain.Size[1], domain.Size[2]);
+    const maxCells = Math.max(8, Math.min(160, Math.round(domain.MaxCells)));
+    const cellSize = longest / maxCells;
+    domain.CellSize = cellSize;
+    domain.Resolution = domain.Size.map((extent) => Math.max(8, Math.min(160, Math.round(extent / cellSize))));
+    return domain;
+}
+
 export function createDomain(overrides = {})
 {
-    return {
+    const size = [...(overrides.Size || [3, 6, 3])];
+    const maxCells = overrides.MaxCells || (overrides.Resolution ? Math.max(...overrides.Resolution) : 96);
+    return resolveDomainGrid({
         Id: 'domain',
         Kind: 'Domain',
         Name: 'Gas Domain',
-        Resolution: [...(overrides.Resolution || [64, 96, 64])],
-        Size: [...(overrides.Size || [3, 4.5, 3])],
+        Size: size,
+        MaxCells: maxCells,
         Buoyancy: overrides.Buoyancy ?? 1.2,
         AmbientTemperature: overrides.AmbientTemperature ?? 0,
         Cooling: overrides.Cooling ?? 0.6,
@@ -274,10 +292,10 @@ export function createDomain(overrides = {})
         Gravity: overrides.Gravity ?? 0.25,
         PressureIterations: overrides.PressureIterations ?? 24,
         Advection: overrides.Advection || 'MacCormack',
-        Boundary: overrides.Boundary || 'ClosedBox',
+        Boundary: overrides.Boundary || 'OpenTop',
         TimeScale: overrides.TimeScale ?? 1.0,
         Combustion: overrides.Combustion ?? 1.0,
-    };
+    });
 }
 
 export function createVisualizerSet()
@@ -287,7 +305,7 @@ export function createVisualizerSet()
             Id: 'vis-volume', Kind: 'Visualizer', Name: 'Volume Render', Visible: true,
             Density: 1.0, Albedo: '#8e8f94', Absorption: 3.2, Anisotropy: 0.45, Ambient: '#3a414c', LightIntensity: 1.4, Exposure: 1.15,
             FireIntensity: 4.0, FireThreshold: 1.0, FireSoftness: 3.5, FireOpacity: 1.4, FireEmber: '#ff2a05', FireFlame: '#ff8a16', FireCore: '#fff3cf',
-            Steps: 80, ShadowSteps: 4,
+            Steps: 80, ShadowSteps: 4, Filter: 'Smooth',
         },
         VelocityVectors: { Id: 'vis-vectors', Kind: 'Visualizer', Name: 'Velocity Vectors', Visible: true, Axis: 'Z', Offset: 0.5, Stride: 2, Scale: 0.35, Ramp: 'Turbo', MaxSpeed: 6 },
         ScalarSlice: { Id: 'vis-slice', Kind: 'Visualizer', Name: 'Scalar Slice', Visible: false, Axis: 'Y', Offset: 0.35, Channel: 'Speed', Ramp: 'Turbo', Range: 6, Opacity: 0.85 },
