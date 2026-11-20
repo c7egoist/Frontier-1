@@ -1,0 +1,64 @@
+//============================================================================================================================================
+//                                                          STUDIOICONS.JS
+//                   Inline Flat SVG Glyph Set for the Fluid Studio — Outliner Classifications, Force Generator Types,
+//                                         Transport Controls, and Inspector Status Tiles
+//============================================================================================================================================
+
+const Wrap = (body, size = 16, stroke = 1.5) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+
+const Glyphs = {
+    domain: '<path d="M4 8l8-4 8 4-8 4-8-4z"/><path d="M4 8v8l8 4 8-4V8"/><path d="M12 12v8"/>',
+    folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+    flame: '<path d="M12 3c1 3 4 5 4 9a4 4 0 0 1-8 0c0-2 1-3 1-3s1 2 2 2c0-3-1-5 1-8z"/>',
+    smoke: '<path d="M7 17a4 4 0 0 1 .5-8 5 5 0 0 1 9.5 1 3.5 3.5 0 0 1 0 7z"/>',
+    wind: '<path d="M3 8h11a3 3 0 1 0-3-3"/><path d="M3 12h16a3 3 0 1 1-3 3"/><path d="M3 16h8a2 2 0 1 1-2 2"/>',
+    attractor: '<circle cx="12" cy="12" r="3"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><path d="M10 5l2 2 2-2M10 19l2-2 2 2M5 10l2 2-2 2M19 10l-2 2 2 2"/>',
+    repulsor: '<circle cx="12" cy="12" r="3"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><path d="M10 5l2-2 2 2M10 19l2 2 2-2M5 10l-2 2 2 2M19 10l2 2-2 2"/>',
+    vortex: '<path d="M12 21c5 0 8-3 8-7s-3-6-6-6-5 2-5 4 2 3 3 3 2-1 2-2"/><path d="M12 3C7 3 4 6 4 10"/>',
+    turbulence: '<path d="M3 7c3-3 6 3 9 0s6 3 9 0"/><path d="M3 12c3-3 6 3 9 0s6 3 9 0"/><path d="M3 17c3-3 6 3 9 0s6 3 9 0"/>',
+    drag: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 12h8M8 15h5"/>',
+    burst: '<circle cx="12" cy="12" r="2.5"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>',
+    updraft: '<path d="M12 20V6"/><path d="M7 11l5-5 5 5"/><path d="M5 20h14"/>',
+    axis: '<path d="M12 3v18"/><path d="M5 9l7-3 7 3M5 15l7 3 7-3"/>',
+    ring: '<ellipse cx="12" cy="12" rx="8" ry="4"/><ellipse cx="12" cy="12" rx="3.5" ry="1.5"/>',
+    collider: '<circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4a12 12 0 0 1 0 16M12 4a12 12 0 0 0 0 16"/>',
+    camera: '<rect x="3" y="7" width="13" height="10" rx="2"/><path d="M16 10l5-2v8l-5-2z"/>',
+    vectors: '<path d="M4 20L20 4"/><path d="M13 4h7v7"/><path d="M4 12l5-5M4 6l2-2"/>',
+    slice: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 12h16"/><path d="M8 8h3M13 16h3"/>',
+    tracers: '<path d="M3 18c4 0 5-10 9-10s5 6 9 6"/><circle cx="12" cy="8" r="1.5" fill="currentColor"/><circle cx="19" cy="14" r="1.5" fill="currentColor"/>',
+    gizmo: '<path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="5"/>',
+    volume: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/>',
+    eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    eyeOff: '<path d="M3 3l18 18"/><path d="M10.6 10.6A3 3 0 0 0 13.4 13.4"/><path d="M6.6 6.6C3.8 8.4 2 12 2 12s4 7 10 7c1.8 0 3.3-.4 4.6-1"/><path d="M9.9 5.2A10 10 0 0 1 12 5c6 0 10 7 10 7s-.9 1.6-2.5 3.3"/>',
+    check: '<path d="M5 12l5 5 9-10"/>',
+    search: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.3-4.3"/>',
+    filter: '<path d="M4 6h16M7 12h10M10 18h4"/>',
+    sliders: '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
+    play: '<path d="M7 5v14l12-7z" fill="currentColor" stroke="none"/>',
+    pause: '<rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none"/>',
+    step: '<path d="M6 5v14l9-7z" fill="currentColor" stroke="none"/><rect x="17" y="5" width="2.5" height="14" rx="1" fill="currentColor" stroke="none"/>',
+    reset: '<path d="M4 12a8 8 0 1 0 2.5-5.8"/><path d="M4 4v5h5"/>',
+    frame: '<path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/>',
+    power: '<path d="M12 3v9"/><path d="M6.3 7A8 8 0 1 0 17.7 7"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/>',
+    trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+    perspective: '<path d="M3 20L9 4h6l6 16z"/><path d="M6 14h12"/>',
+    scene: '<path d="M4 5h16v14H4z"/><path d="M4 15l5-5 4 4 3-3 4 4"/>',
+    pencil: '<path d="M4 20l4-1 11-11-3-3L5 16z"/>',
+    chart: '<path d="M4 20V4M4 20h16"/><path d="M8 16v-5M12 16V8M16 16v-3"/>',
+    gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+    chevron: '<path d="M6 9l6 6 6-6"/>',
+    cube: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/>',
+    thermometer: '<path d="M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0z"/>',
+    boundary: '<rect x="4" y="4" width="16" height="16" rx="2" stroke-dasharray="3 3"/>',
+    download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
+    upload: '<path d="M12 15V4M7 9l5-5 5 5M5 20h14"/>',
+};
+
+export function icon(name, size = 16, stroke = 1.5)
+{
+    return Wrap(Glyphs[name] || Glyphs.cube, size, stroke);
+}
+
+export const IconNames = Object.keys(Glyphs);

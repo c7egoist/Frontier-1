@@ -1,0 +1,1050 @@
+//============================================================================================================================================
+//                                                         FLUIDSHADERS.JS
+//               GLSL ES 3.00 Kernels — Tiled 3D Eulerian Gas Solver (MacCormack Advection, Buoyancy, Combustion,
+//            Vorticity Confinement, Jacobi Pressure Projection), Analytic Force Generators, Volume Ray-Marcher,
+//                         Velocity Vector / Scalar Slice / Tracer Overlays, and Gizmo Line Rendering
+//============================================================================================================================================
+
+export const FullscreenVertex = `#version 300 es
+layout(location = 0) in vec2 aPosition;
+out vec2 vUv;
+void main()
+{
+    vUv = aPosition * 0.5 + 0.5;
+    gl_Position = vec4(aPosition, 0.0, 1.0);
+}
+`;
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                  SHARED VOLUME ADDRESSING
+//------------------------------------------------------------------------------------------------------------------------
+
+export const VolumeChunk = `
+uniform ivec3 uGrid;
+uniform ivec2 uTiles;
+uniform vec2  uTexSize;
+uniform float uCellSize;
+
+ivec3 CellFromFragment(vec2 fragment)
+{
+    ivec2 pixel = ivec2(fragment);
+    int tileX = pixel.x / uGrid.x;
+    int tileY = pixel.y / uGrid.y;
+    return ivec3(pixel.x - tileX * uGrid.x, pixel.y - tileY * uGrid.y, tileY * uTiles.x + tileX);
+}
+
+bool CellInside(ivec3 cell)
+{
+    return all(greaterThanEqual(cell, ivec3(0))) && all(lessThan(cell, uGrid));
+}
+
+ivec2 PixelFromCell(ivec3 cell)
+{
+    int tileX = cell.z - (cell.z / uTiles.x) * uTiles.x;
+    int tileY = cell.z / uTiles.x;
+    return ivec2(tileX * uGrid.x + cell.x, tileY * uGrid.y + cell.y);
+}
+
+vec4 FetchCell(sampler2D field, ivec3 cell)
+{
+    cell = clamp(cell, ivec3(0), uGrid - 1);
+    return texelFetch(field, PixelFromCell(cell), 0);
+}
+
+// Trilinear sample; coordinate in cell units where the centre of cell i sits at i + 0.5.
+vec4 SampleVolume(sampler2D field, vec3 coordinate)
+{
+    vec3 p = clamp(coordinate - 0.5, vec3(0.0), vec3(uGrid) - 1.0);
+    float z0 = floor(p.z);
+    float fz = p.z - z0;
+    int sliceA = int(z0);
+    int sliceB = min(sliceA + 1, uGrid.z - 1);
+    vec2 inner = p.xy + 0.5;
+    ivec2 tileA = ivec2(sliceA - (sliceA / uTiles.x) * uTiles.x, sliceA / uTiles.x);
+    ivec2 tileB = ivec2(sliceB - (sliceB / uTiles.x) * uTiles.x, sliceB / uTiles.x);
+    vec2 uvA = (vec2(tileA * uGrid.xy) + inner) / uTexSize;
+    vec2 uvB = (vec2(tileB * uGrid.xy) + inner) / uTexSize;
+    return mix(texture(field, uvA), texture(field, uvB), fz);
+}
+
+vec3 WorldFromCell(vec3 cellCentre)
+{
+    return (cellCentre - vec3(uGrid) * 0.5) * uCellSize;
+}
+
+vec3 CellFromWorld(vec3 world)
+{
+    return world / uCellSize + vec3(uGrid) * 0.5;
+}
+`;
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                  NOISE + FORCE GENERATORS
+//------------------------------------------------------------------------------------------------------------------------
+
+export const NoiseChunk = `
+float Hash31(vec3 p)
+{
+    p = fract(p * vec3(0.1031, 0.1030, 0.0973));
+    p += dot(p, p.yxz + 33.33);
+    return fract((p.x + p.y) * p.z);
+}
+
+float ValueNoise(vec3 p)
+{
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    vec3 u = f * f * (3.0 - 2.0 * f);
+    float n000 = Hash31(i + vec3(0.0, 0.0, 0.0));
+    float n100 = Hash31(i + vec3(1.0, 0.0, 0.0));
+    float n010 = Hash31(i + vec3(0.0, 1.0, 0.0));
+    float n110 = Hash31(i + vec3(1.0, 1.0, 0.0));
+    float n001 = Hash31(i + vec3(0.0, 0.0, 1.0));
+    float n101 = Hash31(i + vec3(1.0, 0.0, 1.0));
+    float n011 = Hash31(i + vec3(0.0, 1.0, 1.0));
+    float n111 = Hash31(i + vec3(1.0, 1.0, 1.0));
+    float x00 = mix(n000, n100, u.x);
+    float x10 = mix(n010, n110, u.x);
+    float x01 = mix(n001, n101, u.x);
+    float x11 = mix(n011, n111, u.x);
+    return mix(mix(x00, x10, u.y), mix(x01, x11, u.y), u.z);
+}
+
+vec3 PotentialNoise(vec3 p)
+{
+    return vec3(ValueNoise(p), ValueNoise(p + vec3(31.7, 17.3, 9.1)), ValueNoise(p + vec3(-12.9, 44.2, 23.6))) * 2.0 - 1.0;
+}
+
+// Curl of a vector potential is divergence-free: ideal for turbulence injection.
+vec3 CurlNoise(vec3 p)
+{
+    const float e = 0.05;
+    vec3 dx = PotentialNoise(p + vec3(e, 0.0, 0.0)) - PotentialNoise(p - vec3(e, 0.0, 0.0));
+    vec3 dy = PotentialNoise(p + vec3(0.0, e, 0.0)) - PotentialNoise(p - vec3(0.0, e, 0.0));
+    vec3 dz = PotentialNoise(p + vec3(0.0, 0.0, e)) - PotentialNoise(p - vec3(0.0, 0.0, e));
+    return vec3(dy.z - dz.y, dz.x - dx.z, dx.y - dy.x) / (2.0 * e);
+}
+`;
+
+export const ForceFieldChunk = `
+#define MAX_FORCES 12
+uniform int   uForceCount;
+uniform vec4  uForceA[MAX_FORCES];   // position.xyz, radius
+uniform vec4  uForceB[MAX_FORCES];   // direction.xyz, strength
+uniform vec4  uForceC[MAX_FORCES];   // type, falloff, frequency, secondary
+uniform float uTime;
+
+float Falloff(int mode, float normalisedDistance)
+{
+    if (mode == 3) return 1.0;
+    if (normalisedDistance >= 1.0) return 0.0;
+    if (mode == 0) return 1.0 - smoothstep(0.0, 1.0, normalisedDistance);
+    if (mode == 1) return 1.0 - normalisedDistance;
+    return (1.0 / (1.0 + 16.0 * normalisedDistance * normalisedDistance)) * (1.0 - smoothstep(0.85, 1.0, normalisedDistance));
+}
+
+vec3 SafeNormalise(vec3 v)
+{
+    float l = length(v);
+    return l > 1e-5 ? v / l : vec3(0.0, 1.0, 0.0);
+}
+
+vec3 EvaluateForceGenerator(int index, vec3 position, vec3 velocity)
+{
+    vec4 a = uForceA[index];
+    vec4 b = uForceB[index];
+    vec4 c = uForceC[index];
+    int type = int(c.x + 0.5);
+    int falloffMode = int(c.y + 0.5);
+    float frequency = c.z;
+    float secondary = c.w;
+    vec3 centre = a.xyz;
+    float radius = max(a.w, 1e-3);
+    vec3 axis = SafeNormalise(b.xyz);
+    float strength = b.w;
+    vec3 r = position - centre;
+    float distance = length(r);
+    vec3 radial = r - axis * dot(r, axis);
+    float radialDistance = length(radial);
+
+    if (type == 0)
+    {
+        float w = Falloff(falloffMode, distance / radius);
+        float gust = ValueNoise(position * 0.6 + vec3(uTime * frequency, 0.0, uTime * frequency * 0.7)) * 2.0 - 1.0;
+        return axis * strength * (1.0 + secondary * gust) * w;
+    }
+    if (type == 1 || type == 2)
+    {
+        float w = Falloff(falloffMode, distance / radius);
+        float core = distance / (distance + max(secondary, 0.02) * radius + 1e-4);
+        vec3 direction = distance > 1e-4 ? r / distance : vec3(0.0);
+        return direction * strength * w * core * (type == 1 ? -1.0 : 1.0);
+    }
+    if (type == 3)
+    {
+        float w = Falloff(falloffMode, radialDistance / radius);
+        vec3 radialDirection = radialDistance > 1e-4 ? radial / radialDistance : vec3(0.0);
+        vec3 tangent = cross(axis, radialDirection);
+        float core = radialDistance / (radialDistance + 0.12 * radius);
+        return (tangent * strength * core - radialDirection * strength * 0.3 * frequency + axis * secondary) * w;
+    }
+    if (type == 4)
+    {
+        float w = Falloff(falloffMode, distance / radius);
+        return CurlNoise(position * frequency + vec3(0.0, uTime * secondary, uTime * secondary * 0.31)) * strength * w * 0.25;
+    }
+    if (type == 5)
+    {
+        float w = Falloff(falloffMode, distance / radius);
+        return -velocity * strength * w;
+    }
+    if (type == 6)
+    {
+        float period = max(frequency, 0.05);
+        float phase = fract(uTime / period);
+        float pulse = exp(-phase / max(secondary, 0.01)) * (1.0 - smoothstep(0.8, 1.0, phase));
+        float w = Falloff(falloffMode, distance / radius);
+        vec3 direction = distance > 1e-4 ? r / distance : vec3(0.0);
+        return direction * strength * pulse * w;
+    }
+    if (type == 7)
+    {
+        float w = Falloff(falloffMode, radialDistance / radius);
+        return axis * strength * w;
+    }
+    if (type == 8)
+    {
+        float w = Falloff(falloffMode, radialDistance / radius);
+        vec3 radialDirection = radialDistance > 1e-4 ? radial / radialDistance : vec3(0.0);
+        return -radialDirection * strength * w;
+    }
+    if (type == 9)
+    {
+        float tube = max(frequency, 0.05);
+        vec3 radialDirection = radialDistance > 1e-4 ? radial / radialDistance : vec3(1.0, 0.0, 0.0);
+        vec3 ringPoint = centre + radialDirection * radius;
+        vec3 d = position - ringPoint;
+        float coreDistance = length(d);
+        float w = Falloff(falloffMode, coreDistance / tube);
+        vec3 ringTangent = cross(axis, radialDirection);
+        vec3 circulation = cross(ringTangent, d / max(coreDistance, 1e-4));
+        return circulation * strength * w;
+    }
+    return vec3(0.0);
+}
+
+vec3 EvaluateForceField(vec3 position, vec3 velocity)
+{
+    vec3 total = vec3(0.0);
+    for (int i = 0; i < MAX_FORCES; i++)
+    {
+        if (i >= uForceCount) break;
+        total += EvaluateForceGenerator(i, position, velocity);
+    }
+    return total;
+}
+`;
+
+export const ColliderChunk = `
+#define MAX_COLLIDERS 4
+uniform int  uColliderCount;
+uniform vec4 uColliders[MAX_COLLIDERS];
+
+bool SolidAtWorld(vec3 world)
+{
+    for (int i = 0; i < MAX_COLLIDERS; i++)
+    {
+        if (i >= uColliderCount) break;
+        if (distance(world, uColliders[i].xyz) < uColliders[i].w) return true;
+    }
+    return false;
+}
+
+bool SolidAtCell(ivec3 cell)
+{
+    return SolidAtWorld(WorldFromCell(vec3(cell) + 0.5));
+}
+`;
+
+export const BoundaryChunk = `
+uniform int uBoundaryMode; // 0 closed box, 1 open top, 2 open everywhere
+
+// Returns true when stepping across this face leaves through an open boundary.
+bool OpenFace(ivec3 neighbour)
+{
+    if (uBoundaryMode == 2) return true;
+    if (uBoundaryMode == 1 && neighbour.y >= uGrid.y) return true;
+    return false;
+}
+`;
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                  SOLVER KERNELS
+//------------------------------------------------------------------------------------------------------------------------
+
+export const AdvectFragment = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+${VolumeChunk}
+uniform sampler2D uVelocity;
+uniform sampler2D uSource;
+uniform float uDeltaTime;
+uniform float uDissipation;
+uniform float uDirection; // +1 forward trace, -1 reverse trace (MacCormack)
+out vec4 fragColour;
+void main()
+{
+    ivec3 cell = CellFromFragment(gl_FragCoord.xy);
+    if (!CellInside(cell)) { fragColour = vec4(0.0); return; }
+    vec3 centre = vec3(cell) + 0.5;
+    vec3 velocity = FetchCell(uVelocity, cell).xyz;
+    vec3 midpoint = centre - uDirection * 0.5 * uDeltaTime * velocity / uCellSize;
+    vec3 midVelocity = SampleVolume(uVelocity, midpoint).xyz;
+    vec3 origin = centre - uDirection * uDeltaTime * midVelocity / uCellSize;
+    fragColour = SampleVolume(uSource, origin) * uDissipation;
+}
+`;
+
+export const MacCormackFragment = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+${VolumeChunk}
+uniform sampler2D uVelocity;
+uniform sampler2D uSource;     // phi_n
+uniform sampler2D uForward;    // phi_hat_{n+1}
+uniform sampler2D uBackward;   // phi_hat_n
+uniform float uDeltaTime;
+uniform float uDissipation;
+out vec4 fragColour;
+void main()
+{
+    ivec3 cell = CellFromFragment(gl_FragCoord.xy);
+    if (!CellInside(cell)) { fragColour = vec4(0.0); return; }
+    vec3 centre = vec3(cell) + 0.5;
+    vec3 velocity = FetchCell(uVelocity, cell).xyz;
+    vec3 origin = centre - uDeltaTime * velocity / uCellSize;
+    vec4 forward = FetchCell(uForward, cell);
+    vec4 backward = FetchCell(uBackward, cell);
+    vec4 source = FetchCell(uSource, cell);
+    vec4 corrected = forward + 0.5 * (source * uDissipation - backward);
+    // Clamp to the extrema of the semi-Lagrangian stencil to stay monotone.
+    ivec3 base = ivec3(floor(clamp(origin - 0.5, vec3(0.0), vec3(uGrid) - 1.0)));
+    vec4 lo = vec4(1e9), hi = vec4(-1e9);
+    for (int z = 0; z < 2; z++)
+    for (int y = 0; y < 2; y++)
+    for (int x = 0; x < 2; x++)
+    {
+        vec4 s = FetchCell(uSource, base + ivec3(x, y, z)) * uDissipation;
+        lo = min(lo, s); hi = max(hi, s);
+    }
+    fragColour = clamp(corrected, lo, hi);
+}
+`;
+
+export const InjectFragment = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+${VolumeChunk}
+${NoiseChunk}
+#define MAX_EMITTERS 6
+uniform sampler2D uTarget;
+uniform int   uMode;              // 0 velocity, 1 state (density, temperature, fuel)
+uniform int   uEmitterCount;
+uniform vec4  uEmitterA[MAX_EMITTERS];  // position.xyz, radius
+uniform vec4  uEmitterB[MAX_EMITTERS];  // velocity.xyz, density
+uniform vec4  uEmitterC[MAX_EMITTERS];  // temperature, fuel, jitter, shape
+uniform vec4  uEmitterD[MAX_EMITTERS];  // orientation.xyz, pulse period
+uniform float uDeltaTime;
+uniform float uTime;
+out vec4 fragColour;
+
+float EmitterMask(int index, vec3 world)
+{
+    vec4 a = uEmitterA[index];
+    vec4 c = uEmitterC[index];
+    vec4 d = uEmitterD[index];
+    vec3 r = world - a.xyz;
+    float radius = max(a.w, uCellSize);
+    int shape = int(c.w + 0.5);
+    float edge = uCellSize * 1.5;
+    float mask;
+    if (shape == 0)
+    {
+        mask = 1.0 - smoothstep(radius - edge, radius, length(r));
+    }
+    else if (shape == 1)
+    {
+        vec3 n = normalize(d.xyz);
+        float along = abs(dot(r, n));
+        float radial = length(r - n * dot(r, n));
+        mask = (1.0 - smoothstep(radius - edge, radius, radial)) * (1.0 - smoothstep(edge * 0.6, edge * 1.4, along));
+    }
+    else
+    {
+        vec3 q = abs(r) - vec3(radius);
+        float boxDistance = max(q.x, max(q.y, q.z));
+        mask = 1.0 - smoothstep(-edge, 0.0, boxDistance);
+    }
+    float jitter = c.z;
+    if (jitter > 0.0)
+    {
+        float n = ValueNoise(world * (6.0 / radius) + vec3(0.0, uTime * 2.5, uTime * 1.3));
+        mask *= mix(1.0, n * 1.6, clamp(jitter, 0.0, 1.0));
+    }
+    float pulse = d.w;
+    if (pulse > 0.0)
+    {
+        float phase = fract(uTime / pulse);
+        mask *= exp(-phase * 7.0) * step(phase, 0.45);
+    }
+    return clamp(mask, 0.0, 1.0);
+}
+
+void main()
+{
+    ivec3 cell = CellFromFragment(gl_FragCoord.xy);
+    if (!CellInside(cell)) { fragColour = vec4(0.0); return; }
+    vec3 world = WorldFromCell(vec3(cell) + 0.5);
+    vec4 value = FetchCell(uTarget, cell);
+    float blend = min(1.0, uDeltaTime * 10.0);
+    for (int i = 0; i < MAX_EMITTERS; i++)
+    {
+        if (i >= uEmitterCount) break;
+        float mask = EmitterMask(i, world);
+        if (mask <= 0.0) continue;
+        vec4 b = uEmitterB[i];
+        vec4 c = uEmitterC[i];
+        if (uMode == 0)
+        {
+            if (dot(b.xyz, b.xyz) > 0.0) value.xyz = mix(value.xyz, b.xyz, mask * blend);
+        }
+        else
+        {
+            value.x = min(value.x + mask * b.w * uDeltaTime * 6.0, max(value.x, b.w * 1.5));
+            value.y = mix(value.y, max(value.y, c.x), mask * blend);
+            value.z = min(value.z + mask * c.y * uDeltaTime * 6.0, max(value.z, c.y * 1.5));
+        }
+    }
+    fragColour = value;
+}
+`;
+
+export const ForcesFragment = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+${VolumeChunk}
+${NoiseChunk}
+${ForceFieldChunk}
+${ColliderChunk}
+uniform sampler2D uVelocity;
+uniform sampler2D uState;
+uniform float uDeltaTime;
+uniform float uBuoyancy;
+uniform float uGravity;
+uniform float uAmbientTemperature;
+out vec4 fragColour;
+void main()
+{
+    ivec3 cell = CellFromFragment(gl_FragCoord.xy);
+    if (!CellInside(cell)) { fragColour = vec4(0.0); return; }
+    vec3 world = WorldFromCell(vec3(cell) + 0.5);
+    if (SolidAtWorld(world)) { fragColour = vec4(0.0); return; }
+    vec3 velocity = FetchCell(uVelocity, cell).xyz;
+    vec4 state = FetchCell(uState, cell);
+    float temperature = state.y - uAmbientTemperature;
+    vec3 acceleration = vec3(0.0, uBuoyancy * temperature - uGravity * state.x, 0.0);
+    acceleration += EvaluateForceField(world, velocity);
+    fragColour = vec4(velocity + acceleration * uDeltaTime, 0.0);
+}
+`;
+
+export const CurlFragment = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+${VolumeChunk}
+uniform sampler2D uVelocity;
+out vec4 fragColour;
+void main()
+{
+    ivec3 cell = CellFromFragment(gl_FragCoord.xy);
+    if (!CellInside(cell)) { fragColour = vec4(0.0); return; }
+    vec3 xp = FetchCell(uVelocity, cell + ivec3(1, 0, 0)).xyz, xm = FetchCell(uVelocity, cell - ivec3(1, 0, 0)).xyz;
+    vec3 yp = FetchCell(uVelocity, cell + ivec3(0, 1, 0)).xyz, ym = FetchCell(uVelocity, cell - ivec3(0, 1, 0)).xyz;
+    vec3 zp = FetchCell(uVelocity, cell + ivec3(0, 0, 1)).xyz, zm = FetchCell(uVelocity, cell - ivec3(0, 0, 1)).xyz;
+    float inv = 0.5 / uCellSize;
+    vec3 curl = vec3((yp.z - ym.z) - (zp.y - zm.y), (zp.x - zm.x) - (xp.z - xm.z), (xp.y - xm.y) - (yp.x - ym.x)) * inv;
+    fragColour = vec4(curl, length(curl));
+}
+`;
+
+export const VorticityFragment = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+${VolumeChunk}
+uniform sampler2D uVelocity;
+uniform sampler2D uCurl;
+uniform float uDeltaTime;
+uniform float uConfinement;
+out vec4 fragColour;
+void main()
+{
+    ivec3 cell = CellFromFragment(gl_FragCoord.xy);
+    if (!CellInside(cell)) { fragColour = vec4(0.0); return; }
+    vec3 velocity = FetchCell(uVelocity, cell).xyz;
+    vec4 centre = FetchCell(uCurl, cell);
+    vec3 eta = vec3(
+        FetchCell(uCurl, cell + ivec3(1, 0, 0)).w - FetchCell(uCurl, cell - ivec3(1, 0, 0)).w,
+        FetchCell(uCurl, cell + ivec3(0, 1, 0)).w - FetchCell(uCurl, cell - ivec3(0, 1, 0)).w,
+        FetchCell(uCurl, cell + ivec3(0, 0, 1)).w - FetchCell(uCurl, cell - ivec3(0, 0, 1)).w) * (0.5 / uCellSize);
+    float magnitude = length(eta);
+    vec3 n = magnitude > 1e-5 ? eta / magnitude : vec3(0.0);
+    vec3 force = uConfinement * uCellSize * cross(n, centre.xyz);
+    fragColour = vec4(velocity + force * uDeltaTime, 0.0);
+}
+`;
+
+export const DivergenceFragment = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+${VolumeChunk}
+${ColliderChunk}
+${BoundaryChunk}
+uniform sampler2D uVelocity;
+out vec4 fragColour;
+float Component(ivec3 cell, ivec3 neighbour, int axis, float centreComponent)
+{
+    if (!CellInside(neighbour))
+    {
+        return OpenFace(neighbour) ? centreComponent : 0.0;
+    }
+    if (SolidAtCell(neighbour)) return 0.0;
+    vec3 v = FetchCell(uVelocity, neighbour).xyz;
+    return axis == 0 ? v.x : (axis == 1 ? v.y : v.z);
+}
+void main()
+{
+    ivec3 cell = CellFromFragment(gl_FragCoord.xy);
+    if (!CellInside(cell)) { fragColour = vec4(0.0); return; }
+    vec3 c = FetchCell(uVelocity, cell).xyz;
+    float xp = Component(cell, cell + ivec3(1, 0, 0), 0, c.x), xm = Component(cell, cell - ivec3(1, 0, 0), 0, c.x);
+    float yp = Component(cell, cell + ivec3(0, 1, 0), 1, c.y), ym = Component(cell, cell - ivec3(0, 1, 0), 1, c.y);
+    float zp = Component(cell, cell + ivec3(0, 0, 1), 2, c.z), zm = Component(cell, cell - ivec3(0, 0, 1), 2, c.z);
+    float divergence = 0.5 * ((xp - xm) + (yp - ym) + (zp - zm)) / uCellSize;
+    fragColour = vec4(divergence, 0.0, 0.0, 0.0);
+}
+`;
+
+export const PressureFragment = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+${VolumeChunk}
+${ColliderChunk}
+${BoundaryChunk}
+uniform sampler2D uPressure;
+uniform sampler2D uDivergence;
+out vec4 fragColour;
+float Neighbour(ivec3 neighbour, float centre)
+{
+    if (!CellInside(neighbour)) return OpenFace(neighbour) ? 0.0 : centre;
+    if (SolidAtCell(neighbour)) return centre;
+    return FetchCell(uPressure, neighbour).x;
+}
+void main()
+{
+    ivec3 cell = CellFromFragment(gl_FragCoord.xy);
+    if (!CellInside(cell)) { fragColour = vec4(0.0); return; }
+    float centre = FetchCell(uPressure, cell).x;
+    float divergence = FetchCell(uDivergence, cell).x;
+    float sum = Neighbour(cell + ivec3(1, 0, 0), centre) + Neighbour(cell - ivec3(1, 0, 0), centre)
+              + Neighbour(cell + ivec3(0, 1, 0), centre) + Neighbour(cell - ivec3(0, 1, 0), centre)
+              + Neighbour(cell + ivec3(0, 0, 1), centre) + Neighbour(cell - ivec3(0, 0, 1), centre);
+    float h2 = uCellSize * uCellSize;
+    fragColour = vec4((sum - divergence * h2) / 6.0, 0.0, 0.0, 0.0);
+}
+`;
+
+export const GradientFragment = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+${VolumeChunk}
+${ColliderChunk}
+${BoundaryChunk}
+uniform sampler2D uPressure;
+uniform sampler2D uVelocity;
+out vec4 fragColour;
+float Neighbour(ivec3 neighbour, float centre)
+{
+    if (!CellInside(neighbour)) return OpenFace(neighbour) ? 0.0 : centre;
+    if (SolidAtCell(neighbour)) return centre;
+    return FetchCell(uPressure, neighbour).x;
+}
+void main()
+{
+    ivec3 cell = CellFromFragment(gl_FragCoord.xy);
+    if (!CellInside(cell)) { fragColour = vec4(0.0); return; }
+    if (SolidAtCell(cell)) { fragColour = vec4(0.0); return; }
+    float centre = FetchCell(uPressure, cell).x;
+    vec3 gradient = vec3(
+        Neighbour(cell + ivec3(1, 0, 0), centre) - Neighbour(cell - ivec3(1, 0, 0), centre),
+        Neighbour(cell + ivec3(0, 1, 0), centre) - Neighbour(cell - ivec3(0, 1, 0), centre),
+        Neighbour(cell + ivec3(0, 0, 1), centre) - Neighbour(cell - ivec3(0, 0, 1), centre)) * (0.5 / uCellSize);
+    vec3 velocity = FetchCell(uVelocity, cell).xyz - gradient;
+    // Enforce no-penetration on closed walls.
+    if (cell.x == 0 && !OpenFace(cell - ivec3(1, 0, 0))) velocity.x = max(velocity.x, 0.0);
+    if (cell.x == uGrid.x - 1 && !OpenFace(cell + ivec3(1, 0, 0))) velocity.x = min(velocity.x, 0.0);
+    if (cell.y == 0 && !OpenFace(cell - ivec3(0, 1, 0))) velocity.y = max(velocity.y, 0.0);
+    if (cell.y == uGrid.y - 1 && !OpenFace(cell + ivec3(0, 1, 0))) velocity.y = min(velocity.y, 0.0);
+    if (cell.z == 0 && !OpenFace(cell - ivec3(0, 0, 1))) velocity.z = max(velocity.z, 0.0);
+    if (cell.z == uGrid.z - 1 && !OpenFace(cell + ivec3(0, 0, 1))) velocity.z = min(velocity.z, 0.0);
+    fragColour = vec4(velocity, 0.0);
+}
+`;
+
+export const ThermodynamicsFragment = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+${VolumeChunk}
+uniform sampler2D uState;
+uniform float uDeltaTime;
+uniform float uCooling;
+uniform float uCombustion;
+uniform float uAmbientTemperature;
+out vec4 fragColour;
+void main()
+{
+    ivec3 cell = CellFromFragment(gl_FragCoord.xy);
+    if (!CellInside(cell)) { fragColour = vec4(0.0); return; }
+    vec4 state = FetchCell(uState, cell);
+    float density = state.x, temperature = state.y, fuel = state.z;
+    const float ignition = 0.9;
+    if (fuel > 0.0 && temperature > ignition && uCombustion > 0.0)
+    {
+        float burn = min(fuel, uCombustion * 2.5 * uDeltaTime * fuel * smoothstep(ignition, ignition + 1.0, temperature));
+        fuel -= burn;
+        temperature += burn * 12.0;
+        density += burn * 1.1;
+    }
+    float excess = temperature - uAmbientTemperature;
+    // Newtonian + radiative (T^4 shaped) cooling.
+    excess = max(0.0, excess - uDeltaTime * uCooling * (0.35 * excess + 0.02 * excess * excess * excess));
+    temperature = uAmbientTemperature + excess;
+    fragColour = vec4(max(density, 0.0), temperature, max(fuel, 0.0), 0.0);
+}
+`;
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                  TRACER PARTICLES
+//------------------------------------------------------------------------------------------------------------------------
+
+export const TracerUpdateFragment = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+${VolumeChunk}
+${NoiseChunk}
+uniform sampler2D uTracers;
+uniform sampler2D uVelocity;
+uniform float uDeltaTime;
+uniform float uTime;
+uniform float uLifetime;
+uniform int   uReset;
+out vec4 fragColour;
+vec3 SpawnPosition(vec2 pixel, float salt)
+{
+    vec3 extent = vec3(uGrid) * uCellSize;
+    vec3 u = vec3(Hash31(vec3(pixel, salt)), Hash31(vec3(pixel.yx, salt + 7.3)), Hash31(vec3(pixel + 3.1, salt + 19.7)));
+    return (u - 0.5) * extent * 0.96;
+}
+void main()
+{
+    vec2 pixel = floor(gl_FragCoord.xy);
+    vec4 tracer = texelFetch(uTracers, ivec2(pixel), 0);
+    if (uReset == 1)
+    {
+        fragColour = vec4(SpawnPosition(pixel, 0.0), Hash31(vec3(pixel, 3.3)) * uLifetime);
+        return;
+    }
+    vec3 position = tracer.xyz;
+    float age = tracer.w + uDeltaTime;
+    vec3 v1 = SampleVolume(uVelocity, CellFromWorld(position)).xyz;
+    vec3 mid = position + 0.5 * uDeltaTime * v1;
+    vec3 v2 = SampleVolume(uVelocity, CellFromWorld(mid)).xyz;
+    position += uDeltaTime * v2;
+    vec3 half_ = vec3(uGrid) * uCellSize * 0.5;
+    bool outside = any(greaterThan(abs(position), half_));
+    if (age > uLifetime || outside)
+    {
+        position = SpawnPosition(pixel, uTime);
+        age = 0.0;
+    }
+    fragColour = vec4(position, age);
+}
+`;
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                  COLOUR RAMPS
+//------------------------------------------------------------------------------------------------------------------------
+
+export const RampChunk = `
+vec3 TurboRamp(float t)
+{
+    t = clamp(t, 0.0, 1.0);
+    const vec4 kR = vec4(0.13572138, 4.61539260, -42.66032258, 132.13108234);
+    const vec4 kG = vec4(0.09140261, 2.19418839, 4.84296658, -14.18503333);
+    const vec4 kB = vec4(0.10667330, 12.64194608, -60.58204836, 110.36276771);
+    const vec2 kR2 = vec2(-152.94239396, 59.28637943);
+    const vec2 kG2 = vec2(4.27729857, 2.82956604);
+    const vec2 kB2 = vec2(-89.90310912, 27.34824973);
+    vec4 v4 = vec4(1.0, t, t * t, t * t * t);
+    vec2 v2 = v4.zw * v4.z;
+    return vec3(dot(v4, kR) + dot(v2, kR2), dot(v4, kG) + dot(v2, kG2), dot(v4, kB) + dot(v2, kB2));
+}
+vec3 PlasmaRamp(float t)
+{
+    t = clamp(t, 0.0, 1.0);
+    vec3 c0 = vec3(0.0509, 0.0298, 0.5279), c1 = vec3(2.1763, 0.2383, 0.7539), c2 = vec3(-2.6895, -7.4559, 3.1107);
+    vec3 c3 = vec3(6.1303, 42.3461, -28.5188), c4 = vec3(-11.1074, -82.6663, 60.1398), c5 = vec3(10.0231, 71.4136, -54.0721), c6 = vec3(-3.6587, -22.9315, 18.1919);
+    return c0 + t * (c1 + t * (c2 + t * (c3 + t * (c4 + t * (c5 + t * c6)))));
+}
+vec3 EngineeringRamp(float t)
+{
+    t = clamp(t, 0.0, 1.0) * 6.0;
+    vec3 stops[7];
+    stops[0] = vec3(0.043, 0.122, 0.227); stops[1] = vec3(0.071, 0.318, 0.541); stops[2] = vec3(0.102, 0.627, 0.784);
+    stops[3] = vec3(0.373, 0.816, 0.627); stops[4] = vec3(0.898, 0.890, 0.416); stops[5] = vec3(0.949, 0.545, 0.176); stops[6] = vec3(0.851, 0.157, 0.110);
+    int i = int(min(floor(t), 5.0));
+    return mix(stops[i], stops[i + 1], fract(t));
+}
+vec3 DivergingRamp(float t)
+{
+    t = clamp(t, 0.0, 1.0) * 6.0;
+    vec3 stops[7];
+    stops[0] = vec3(0.129, 0.400, 0.675); stops[1] = vec3(0.404, 0.663, 0.812); stops[2] = vec3(0.820, 0.898, 0.941);
+    stops[3] = vec3(0.969, 0.969, 0.969); stops[4] = vec3(0.992, 0.859, 0.780); stops[5] = vec3(0.937, 0.541, 0.384); stops[6] = vec3(0.698, 0.094, 0.169);
+    int i = int(min(floor(t), 5.0));
+    return mix(stops[i], stops[i + 1], fract(t));
+}
+vec3 Ramp(int mode, float t)
+{
+    if (mode == 1) return EngineeringRamp(t);
+    if (mode == 2) return PlasmaRamp(t);
+    if (mode == 3) return DivergingRamp(t);
+    return TurboRamp(t);
+}
+`;
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                  SCENE RAY-MARCHER
+//------------------------------------------------------------------------------------------------------------------------
+
+export const SceneFragment = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+${VolumeChunk}
+${NoiseChunk}
+${ColliderChunk}
+uniform sampler2D uState;
+uniform vec3  uCameraPosition;
+uniform mat4  uInverseViewProjection;
+uniform vec2  uViewport;
+uniform vec3  uLightDirection;
+uniform vec3  uLightColour;
+uniform vec3  uAlbedo;
+uniform float uDensityScale;
+uniform float uAbsorption;
+uniform float uFireIntensity;
+uniform int   uSteps;
+uniform int   uShadowSteps;
+uniform float uGroundHeight;
+uniform int   uShowVolume;
+uniform int   uFrame;
+uniform int   uSelectedCollider;
+out vec4 fragColour;
+
+vec2 IntersectBox(vec3 origin, vec3 direction, vec3 boxMin, vec3 boxMax)
+{
+    vec3 inv = 1.0 / direction;
+    vec3 t0 = (boxMin - origin) * inv;
+    vec3 t1 = (boxMax - origin) * inv;
+    vec3 tmin = min(t0, t1), tmax = max(t0, t1);
+    return vec2(max(max(tmin.x, tmin.y), tmin.z), min(min(tmax.x, tmax.y), tmax.z));
+}
+
+float IntersectSphere(vec3 origin, vec3 direction, vec3 centre, float radius)
+{
+    vec3 oc = origin - centre;
+    float b = dot(oc, direction);
+    float c = dot(oc, oc) - radius * radius;
+    float h = b * b - c;
+    if (h < 0.0) return -1.0;
+    return -b - sqrt(h);
+}
+
+vec3 Blackbody(float temperature)
+{
+    // Temperature is a dimensionless solver value; map 1..6 onto an ember-to-white ramp.
+    float t = clamp((temperature - 0.9) / 4.5, 0.0, 1.0);
+    vec3 ember = vec3(1.0, 0.18, 0.02);
+    vec3 flame = vec3(1.0, 0.55, 0.12);
+    vec3 hot = vec3(1.0, 0.92, 0.72);
+    vec3 colour = t < 0.5 ? mix(ember, flame, t * 2.0) : mix(flame, hot, (t - 0.5) * 2.0);
+    return colour * pow(t, 1.6) * 6.0;
+}
+
+float GroundGrid(vec3 world)
+{
+    vec2 coordinate = world.xz;
+    vec2 minor = abs(fract(coordinate - 0.5) - 0.5) / fwidth(coordinate);
+    vec2 major = abs(fract(coordinate * 0.2 - 0.5) - 0.5) / fwidth(coordinate * 0.2);
+    float minorLine = 1.0 - min(min(minor.x, minor.y), 1.0);
+    float majorLine = 1.0 - min(min(major.x, major.y), 1.0);
+    return max(minorLine * 0.35, majorLine * 0.7);
+}
+
+float ShadowTransmittance(vec3 world, vec3 boxMin, vec3 boxMax)
+{
+    if (uShadowSteps <= 0) return 1.0;
+    vec2 span = IntersectBox(world, uLightDirection, boxMin, boxMax);
+    float length_ = max(span.y, 0.0);
+    float step_ = length_ / float(uShadowSteps);
+    float optical = 0.0;
+    for (int i = 0; i < 16; i++)
+    {
+        if (i >= uShadowSteps) break;
+        vec3 p = world + uLightDirection * (float(i) + 0.5) * step_;
+        optical += SampleVolume(uState, CellFromWorld(p)).x * uDensityScale * uAbsorption * step_;
+    }
+    return exp(-optical);
+}
+
+void main()
+{
+    vec2 ndc = (gl_FragCoord.xy / uViewport) * 2.0 - 1.0;
+    vec4 far = uInverseViewProjection * vec4(ndc, 1.0, 1.0);
+    vec3 direction = normalize(far.xyz / far.w - uCameraPosition);
+    vec3 origin = uCameraPosition;
+
+    // Background gradient.
+    float horizon = clamp(direction.y * 0.5 + 0.5, 0.0, 1.0);
+    vec3 colour = mix(vec3(0.055, 0.058, 0.068), vec3(0.028, 0.029, 0.034), pow(horizon, 0.6));
+
+    float sceneDepth = 1e9;
+    // Ground plane with 1 m engineering grid.
+    if (direction.y < -1e-4)
+    {
+        float t = (uGroundHeight - origin.y) / direction.y;
+        vec3 hit = origin + direction * t;
+        float fade = exp(-length(hit.xz) * 0.09);
+        vec3 ground = vec3(0.075, 0.078, 0.088);
+        float grid = GroundGrid(hit) * fade;
+        colour = mix(ground * fade + colour * (1.0 - fade), vec3(0.32, 0.34, 0.40), grid);
+        sceneDepth = t;
+    }
+
+    // Analytic sphere colliders.
+    for (int i = 0; i < MAX_COLLIDERS; i++)
+    {
+        if (i >= uColliderCount) break;
+        float t = IntersectSphere(origin, direction, uColliders[i].xyz, uColliders[i].w);
+        if (t > 0.0 && t < sceneDepth)
+        {
+            vec3 hit = origin + direction * t;
+            vec3 n = normalize(hit - uColliders[i].xyz);
+            float diffuse = max(dot(n, uLightDirection), 0.0);
+            float rim = pow(1.0 - max(dot(n, -direction), 0.0), 3.0);
+            vec3 base = i == uSelectedCollider ? vec3(0.86, 0.72, 0.36) : vec3(0.42, 0.44, 0.50);
+            colour = base * (0.18 + 0.82 * diffuse) + rim * 0.25;
+            sceneDepth = t;
+        }
+    }
+
+    if (uShowVolume == 1)
+    {
+        vec3 half_ = vec3(uGrid) * uCellSize * 0.5;
+        vec2 span = IntersectBox(origin, direction, -half_, half_);
+        float entry = max(span.x, 0.0);
+        float exit = min(span.y, sceneDepth);
+        if (exit > entry)
+        {
+            float marchLength = exit - entry;
+            float step_ = marchLength / float(uSteps);
+            float jitter = Hash31(vec3(gl_FragCoord.xy, float(uFrame)));
+            float transmittance = 1.0;
+            vec3 accumulated = vec3(0.0);
+            vec3 ambient = vec3(0.30, 0.33, 0.40);
+            for (int i = 0; i < 256; i++)
+            {
+                if (i >= uSteps || transmittance < 0.01) break;
+                vec3 p = origin + direction * (entry + (float(i) + jitter) * step_);
+                vec4 state = SampleVolume(uState, CellFromWorld(p));
+                float density = state.x * uDensityScale;
+                float temperature = state.y;
+                vec3 emission = Blackbody(temperature) * uFireIntensity;
+                if (density < 0.002 && dot(emission, emission) < 1e-6) continue;
+                float sigma = density * uAbsorption;
+                float stepTransmittance = exp(-sigma * step_);
+                float lightTransmittance = (sigma > 0.0) ? ShadowTransmittance(p, -half_, half_) : 1.0;
+                vec3 scattering = uAlbedo * (ambient + uLightColour * lightTransmittance);
+                vec3 contribution = scattering * sigma * step_ + emission * step_ * (0.4 + 0.6 * density);
+                accumulated += transmittance * contribution;
+                transmittance *= stepTransmittance;
+            }
+            colour = colour * transmittance + accumulated;
+        }
+    }
+
+    // Filmic tone map.
+    colour = colour / (1.0 + colour) * 1.2;
+    colour = pow(colour, vec3(1.0 / 2.2));
+    fragColour = vec4(colour, 1.0);
+}
+`;
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                  VELOCITY VECTOR OVERLAY
+//------------------------------------------------------------------------------------------------------------------------
+
+export const VectorVertex = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+${VolumeChunk}
+${RampChunk}
+uniform sampler2D uVelocity;
+uniform mat4  uViewProjection;
+uniform int   uAxis;
+uniform int   uSlice;
+uniform int   uStride;
+uniform float uScale;
+uniform float uMaxSpeed;
+uniform int   uRampMode;
+uniform int   uHeads;
+out vec4 vColour;
+void main()
+{
+    int vertexInArrow = uHeads == 1 ? 0 : gl_VertexID - (gl_VertexID / 2) * 2;
+    int arrow = uHeads == 1 ? gl_VertexID : gl_VertexID / 2;
+    ivec2 planeSize = uAxis == 0 ? uGrid.yz : (uAxis == 1 ? uGrid.xz : uGrid.xy);
+    int columns = (planeSize.x + uStride - 1) / uStride;
+    int u = (arrow - (arrow / columns) * columns) * uStride + uStride / 2;
+    int v = (arrow / columns) * uStride + uStride / 2;
+    ivec3 cell = uAxis == 0 ? ivec3(uSlice, u, v) : (uAxis == 1 ? ivec3(u, uSlice, v) : ivec3(u, v, uSlice));
+    vec3 velocity = FetchCell(uVelocity, cell).xyz;
+    float speed = length(velocity);
+    vec3 origin = WorldFromCell(vec3(cell) + 0.5);
+    float cap = float(uStride) * uCellSize * 1.6;
+    vec3 tip = origin + velocity * uScale * min(1.0, cap / max(speed * uScale, 1e-4));
+    vec3 position = (vertexInArrow == 1 || uHeads == 1) ? tip : origin;
+    float t = clamp(speed / max(uMaxSpeed, 1e-3), 0.0, 1.0);
+    float alpha = smoothstep(0.0, 0.05, t) * (0.35 + 0.65 * t);
+    vColour = vec4(Ramp(uRampMode, t), alpha);
+    if (!CellInside(cell) || v >= planeSize.y) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vColour.a = 0.0; }
+    else gl_Position = uViewProjection * vec4(position, 1.0);
+    gl_PointSize = 3.0;
+}
+`;
+
+export const ColourFragment = `#version 300 es
+precision highp float;
+in vec4 vColour;
+out vec4 fragColour;
+void main() { if (vColour.a <= 0.0) discard; fragColour = vColour; }
+`;
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                  SCALAR SLICE OVERLAY
+//------------------------------------------------------------------------------------------------------------------------
+
+export const SliceVertex = `#version 300 es
+precision highp float;
+uniform mat4 uViewProjection;
+uniform vec3 uCorner;
+uniform vec3 uEdgeU;
+uniform vec3 uEdgeV;
+out vec3 vWorld;
+void main()
+{
+    int id = gl_VertexID;
+    vec2 uv = vec2((id == 1 || id == 2 || id == 4) ? 1.0 : 0.0, (id == 2 || id == 4 || id == 5) ? 1.0 : 0.0);
+    vWorld = uCorner + uEdgeU * uv.x + uEdgeV * uv.y;
+    gl_Position = uViewProjection * vec4(vWorld, 1.0);
+}
+`;
+
+export const SliceFragment = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+${VolumeChunk}
+${NoiseChunk}
+${ForceFieldChunk}
+${RampChunk}
+uniform sampler2D uVelocity;
+uniform sampler2D uState;
+uniform sampler2D uPressure;
+uniform sampler2D uCurl;
+uniform sampler2D uDivergence;
+uniform int   uChannel;
+uniform float uRange;
+uniform float uOpacity;
+uniform int   uRampMode;
+in vec3 vWorld;
+out vec4 fragColour;
+void main()
+{
+    vec3 coordinate = CellFromWorld(vWorld);
+    float value;
+    bool signed_ = false;
+    if (uChannel == 0) value = length(SampleVolume(uVelocity, coordinate).xyz);
+    else if (uChannel == 1) { value = SampleVolume(uPressure, coordinate).x; signed_ = true; }
+    else if (uChannel == 2) value = SampleVolume(uCurl, coordinate).w;
+    else if (uChannel == 3) value = SampleVolume(uState, coordinate).y;
+    else if (uChannel == 4) value = SampleVolume(uState, coordinate).x;
+    else if (uChannel == 5) { value = SampleVolume(uDivergence, coordinate).x; signed_ = true; }
+    else value = length(EvaluateForceField(vWorld, SampleVolume(uVelocity, coordinate).xyz));
+    float t = signed_ ? clamp(value / uRange * 0.5 + 0.5, 0.0, 1.0) : clamp(value / uRange, 0.0, 1.0);
+    vec3 colour = Ramp(uRampMode, t);
+    float magnitude = signed_ ? abs(t - 0.5) * 2.0 : t;
+    float alpha = uOpacity * (0.18 + 0.82 * smoothstep(0.0, 0.3, magnitude));
+    fragColour = vec4(colour, alpha);
+}
+`;
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                  TRACER RENDER
+//------------------------------------------------------------------------------------------------------------------------
+
+export const TracerRenderVertex = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+${RampChunk}
+uniform sampler2D uTracers;
+uniform sampler2D uPrevious;
+uniform mat4  uViewProjection;
+uniform ivec2 uTracerSize;
+uniform float uMaxSpeed;
+uniform float uPointSize;
+uniform float uDeltaTime;
+uniform float uRespawnDistance;
+uniform int   uTrail;
+uniform int   uRampMode;
+uniform float uLifetime;
+out vec4 vColour;
+void main()
+{
+    int particle = uTrail == 1 ? gl_VertexID / 2 : gl_VertexID;
+    int end = uTrail == 1 ? gl_VertexID - particle * 2 : 0;
+    ivec2 pixel = ivec2(particle - (particle / uTracerSize.x) * uTracerSize.x, particle / uTracerSize.x);
+    vec4 current = texelFetch(uTracers, pixel, 0);
+    vec4 previous = texelFetch(uPrevious, pixel, 0);
+    bool respawned = current.w < previous.w || distance(current.xyz, previous.xyz) > uRespawnDistance;
+    vec3 position = (end == 1 && !respawned) ? previous.xyz : current.xyz;
+    float speed = respawned ? 0.0 : distance(current.xyz, previous.xyz) / max(uDeltaTime, 1e-4);
+    float t = clamp(speed / max(uMaxSpeed, 1e-3), 0.0, 1.0);
+    float life = current.w / max(uLifetime, 1e-3);
+    float fade = smoothstep(0.0, 0.08, life) * (1.0 - smoothstep(0.85, 1.0, life));
+    float alpha = fade * (0.08 + 0.92 * smoothstep(0.0, 0.08, t));
+    vColour = vec4(Ramp(uRampMode, t), alpha * (end == 1 ? 0.25 : 1.0));
+    gl_Position = uViewProjection * vec4(position, 1.0);
+    gl_PointSize = uPointSize * (0.6 + 0.8 * t);
+}
+`;
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                  GIZMO LINES
+//------------------------------------------------------------------------------------------------------------------------
+
+export const LineVertex = `#version 300 es
+precision highp float;
+layout(location = 0) in vec3 aPosition;
+layout(location = 1) in vec4 aColour;
+uniform mat4 uViewProjection;
+out vec4 vColour;
+void main()
+{
+    vColour = aColour;
+    gl_Position = uViewProjection * vec4(aPosition, 1.0);
+}
+`;
