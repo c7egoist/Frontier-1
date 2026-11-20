@@ -135,7 +135,7 @@ void main()
     vec3 position = p.xyz;
     vec3 velocity = v.xyz;
     float age = p.w;
-    vec3 half_ = vec3(uGrid) * uCellSize * 0.5;
+    vec3 half_ = GridHalf();
     bool alive = uMode == 1 || age < uLifetime;
     bool lingering = !alive && age < uLifetime + uLinger;
     if (index >= uCount) { fragColour = uOutput == 0 ? vec4(0.0, -1e4, 0.0, uLifetime + 1.0) : vec4(0.0, 0.0, 0.0, seed); return; }
@@ -172,14 +172,15 @@ void main()
         velocity += acceleration * uDeltaTime;
         velocity *= exp(-uDrag * uDeltaTime);
         position += velocity * uDeltaTime;
-        float floorY = -half_.y + 0.01;
+        float floorY = uGridCentre.y - half_.y + 0.01;
         if (position.y < floorY && uBounce >= 0.0)
         {
             position.y = floorY;
             velocity.y = abs(velocity.y) * uBounce;
             velocity.xz *= 0.7;
         }
-        if (uMode == 0 && (any(greaterThan(abs(position.xz), half_.xz * 1.05)) || position.y > half_.y * 1.2 || position.y < -half_.y * 1.5)) age = max(age, uLifetime);
+        vec3 local = position - uGridCentre;
+        if (uMode == 0 && (any(greaterThan(abs(local.xz), half_.xz * 1.05)) || local.y > half_.y * 1.2 || local.y < -half_.y * 1.5)) age = max(age, uLifetime);
     }
     fragColour = uOutput == 0 ? vec4(position, age) : vec4(velocity, v.w);
 }

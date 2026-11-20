@@ -135,10 +135,10 @@ export class OrbitCamera
         this.distance = Math.max(0.8, Math.min(80, this.distance * Math.exp(delta * 0.0012)));
     }
 
-    frame(halfExtent)
+    frame(halfExtent, centre = [0, 0, 0])
     {
         const radius = Math.hypot(halfExtent[0], halfExtent[1], halfExtent[2]);
-        this.target = [0, 0, 0];
+        this.target = [centre[0], centre[1], centre[2]];
         this.distance = radius / Math.sin(this.fovY / 2) * 1.05;
     }
 

@@ -7,7 +7,7 @@
 import { icon } from './StudioIcons.js';
 import {
     ForceGeneratorTypes, ForceTypeById, FalloffCurves, EmitterShapes, ColourRamps, SliceAxes, ScalarChannels, AdvectionSchemes, BoundaryModes,
-    ScenePresets, RampStops, MaximumForceGenerators, SmokeLooks, FireLooks, ResolutionPresets, VolumeFilters, FalloffLabels, ForceCategories, VectorModes, timingEnvelope, isKeyed, DebrisKinds, EmitterPathKinds,
+    ScenePresets, RampStops, MaximumForceGenerators, SmokeLooks, FireLooks, ResolutionPresets, VolumeFilters, FalloffLabels, ForceCategories, VectorModes, timingEnvelope, isKeyed, DebrisKinds, EmitterPathKinds, GridFollowModes, MaximumGridTiles,
 } from '../Engine/ForceGeneratorCatalog.js';
 import { ParticleTemplates, ParticleTemplateById, ParticleCategories, ParticleShapes, ParticleModes, ParticleColourModes, ParticleColourLabels, ParticleBlendModes, ParticleRenderStyles, ParticleRampSources, PalettePresets, MaximumPaletteStops, MaximumParticleSystems, ParticleSprites, ParticleSizeModes, ParticleTrailModes, ParticleTrailColours, MaximumTrailLength } from '../Engine/ParticleCatalog.js';
 const BoundaryLabels = { ClosedBox: 'Closed Box', OpenTop: 'Open Top', OpenAll: 'Open All' };
@@ -396,6 +396,35 @@ export function mountStudioUI({ app, refs })
             choice(domain, 'Boundary', 'Boundary', BoundaryModes, BoundaryLabels),
             element('p', 'note', 'Open faces let gas flow out of the domain (a sponge band fades it near the edge); closed walls contain it.'),
         ]));
+        const tiles = domain.Tiles || [1, 1, 1];
+        const tileCount = tiles[0] * tiles[1] * tiles[2];
+        const followTargets = domain.Follow === 'Emitter' ? snapshot.scene.Emitters : domain.Follow === 'Particles' ? (snapshot.scene.Particles || []) : [];
+        const followChoice = followTargets.length > 1 ? element('div', 'control') : null;
+        if (followChoice)
+        {
+            followChoice.appendChild(element('div', 'control-head', '<span>Follow target</span>'));
+            const row = element('div', 'choice-row');
+            for (const target of followTargets)
+            {
+                const active = domain.FollowId ? domain.FollowId === target.Id : target === followTargets[0];
+                const button = element('button', active ? 'active' : '', target.Name);
+                button.addEventListener('click', () => app.updateNode(domain.Id, 'FollowId', target.Id));
+                row.appendChild(button);
+            }
+            followChoice.appendChild(row);
+        }
+        const gridStatus = element('div', 'status-grid');
+        gridStatus.appendChild(statusTile('Window', `${tiles.join('×')} TILES`, 'grid', tileCount > 1, null));
+        gridStatus.appendChild(statusTile('Origin tile', (domain.GridOrigin || [0, 0, 0]).join(', '), 'frame', (domain.GridOrigin || []).some((v) => v !== 0), () => app.recentreGrid()));
+        host.appendChild(card('World Grid', tileCount > 1 || domain.Follow !== 'None' ? `${tileCount} tile${tileCount > 1 ? 's' : ''} · ${(domain.TileCells || domain.Resolution).join('×')} cells each` : 'Single tile', [
+            vector(domain, 'Tiles', `Tiles per axis (max ${MaximumGridTiles})`, 1, true),
+            element('p', 'note', `The domain size above is one tile; the solver runs ${tiles.join(' × ')} tiles as one seamless field (${domain.Resolution.join(' × ')} cells), so gas crosses tile seams without hitting a wall.`),
+            choice(domain, 'Follow', 'Follow', GridFollowModes, { None: 'Static', Emitter: 'Emitter', Particles: 'Particles', Camera: 'Camera' }),
+            followChoice,
+            statusTile('Follow height', domain.FollowHeight ? 'ON' : 'LOCKED', 'vectors', Boolean(domain.FollowHeight), () => app.updateNode(domain.Id, 'FollowHeight', !domain.FollowHeight)),
+            gridStatus,
+            element('p', 'note', 'Following slides the window across the world grid by whole tiles whenever the target enters a neighbouring tile. The fields are moved by an exact cell offset, so smoke already laid down keeps simulating in place — nothing is clipped at the old box. Use 3 × 1 × 3 tiles with an Emitter on a Straight or Slalom path for an endless drift run.'),
+        ]));
         host.appendChild(card('Dynamics', 'Per second', [
             slider(domain, 'Buoyancy', 'Thermal buoyancy', 0, 4, 0.05),
             slider(domain, 'Gravity', 'Smoke weight', 0, 2, 0.05),
@@ -509,8 +538,9 @@ export function mountStudioUI({ app, refs })
         host.appendChild(card('Exit Velocity', 'm/s', [vector(emitter, 'Velocity', 'Velocity', 0.1)]));
         host.appendChild(card('Motion Path', 'Animated source', [
             choice(emitter, 'PathKind', 'Path', EmitterPathKinds, { None: 'Static', Figure8: 'Figure 8' }),
-            emitter.PathKind !== 'None' ? slider(emitter, 'PathRadius', 'Path radius', 0.1, 4, 0.05, 'm') : null,
-            emitter.PathKind !== 'None' ? slider(emitter, 'PathSpeed', 'Angular speed', 0, 4, 0.05, 'rad/s') : null,
+            emitter.PathKind !== 'None' && emitter.PathKind !== 'Straight' ? slider(emitter, 'PathRadius', emitter.PathKind === 'Slalom' ? 'Weave half-width' : 'Path radius', 0.1, 4, 0.05, 'm') : null,
+            emitter.PathKind === 'Straight' || emitter.PathKind === 'Slalom' ? slider(emitter, 'PathSpeed', 'Drive speed', 0, 12, 0.1, 'm/s') : emitter.PathKind !== 'None' ? slider(emitter, 'PathSpeed', 'Angular speed', 0, 4, 0.05, 'rad/s') : null,
+            emitter.PathKind === 'Straight' || emitter.PathKind === 'Slalom' ? element('p', 'note', 'Unbounded drive along +X — set the Domain\'s World Grid to follow this emitter so the smoke trail is never clipped.') : null,
             element('p', 'note', 'The emitter orbits its Position along the path; exit velocity is expressed in the moving frame (X = forward, Z = right), so a negative X trails smoke behind it like a drifting tyre.'),
         ]));
         host.appendChild(card('Debris', 'Ballistic ejecta', [

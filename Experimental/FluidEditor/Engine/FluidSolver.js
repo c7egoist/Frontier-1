@@ -20,6 +20,8 @@ export class FluidSolver
         this.layout = null;
         this.fields = null;
         this.tracerSize = [128, 64];
+        this.gridCentre = [0, 0, 0];
+        this.relocations = 0;
         this.tracers = null;
         this.statistics = { stepMilliseconds: 0, passes: 0 };
         this.forceArrays = {
@@ -61,15 +63,17 @@ export class FluidSolver
             thermodynamics: create('Thermodynamics', Shaders.ThermodynamicsFragment),
             tracerUpdate: create('TracerUpdate', Shaders.TracerUpdateFragment),
             debrisUpdate: create('DebrisUpdate', Shaders.DebrisUpdateFragment),
+            shift: create('Shift', Shaders.ShiftFragment),
         };
     }
 
-    configure(resolution, cellSize)
+    configure(resolution, cellSize, centre = [0, 0, 0])
     {
         const [width, height, depth] = resolution.map((value) => Math.max(8, Math.min(160, Math.round(value))));
         const layout = computeVolumeLayout(width, height, depth);
         const unchanged = this.layout && this.layout.width === width && this.layout.height === height && this.layout.depth === depth;
         this.cellSize = cellSize;
+        this.gridCentre = [centre[0], centre[1], centre[2]];
         if (unchanged) return;
         this.destroyFields();
         this.layout = layout;
@@ -110,6 +114,31 @@ export class FluidSolver
         context.destroyPingPong(this.debrisVelocities);
         context.destroyTarget(this.debrisPrevious);
         this.fields = null;
+    }
+
+    /**
+     * World Grid relocation: the simulated window has stepped `shiftCells` cells through world space. Every field is
+     * copied across by that integer offset (an exact texel move — no resampling blur) so the gas keeps its world position
+     * while the window re-centres; the new centre feeds every world↔cell mapping through uGridCentre.
+     */
+    relocate(shiftCells, centre)
+    {
+        this.gridCentre = [centre[0], centre[1], centre[2]];
+        if (!this.fields || !shiftCells.some((value) => value !== 0)) return;
+        const gl = this.gl, context = this.context, layout = this.layout;
+        const whole = Math.abs(shiftCells[0]) >= layout.width || Math.abs(shiftCells[1]) >= layout.height || Math.abs(shiftCells[2]) >= layout.depth;
+        const uniforms = context.use(this.programs.shift);
+        this.applyVolumeUniforms(uniforms);
+        gl.uniform3i(uniforms.uShift, shiftCells[0], shiftCells[1], shiftCells[2]);
+        for (const pair of [this.fields.velocity, this.fields.state, this.fields.pressure])
+        {
+            if (whole) { context.clearTarget(pair.read); continue; }
+            context.bindTexture('uSource', pair.read.texture);
+            context.dispatch(pair.write);
+            pair.swap();
+            this.statistics.passes += 1;
+        }
+        this.relocations = (this.relocations || 0) + 1;
     }
 
     reset()
@@ -192,6 +221,7 @@ export class FluidSolver
         if (uniforms.uTiles) gl.uniform2i(uniforms.uTiles, layout.tilesX, layout.tilesY);
         if (uniforms.uTexSize) gl.uniform2f(uniforms.uTexSize, layout.textureWidth, layout.textureHeight);
         if (uniforms.uCellSize) gl.uniform1f(uniforms.uCellSize, this.cellSize);
+        if (uniforms.uGridCentre) gl.uniform3f(uniforms.uGridCentre, this.gridCentre[0], this.gridCentre[1], this.gridCentre[2]);
     }
 
     applyForceUniforms(uniforms)
@@ -490,5 +520,11 @@ export class FluidSolver
     {
         const layout = this.layout;
         return [layout.width * this.cellSize * 0.5, layout.height * this.cellSize * 0.5, layout.depth * this.cellSize * 0.5];
+    }
+
+    /** World-space centre of the simulated window (moves as the World Grid follows its target). */
+    get domainCentre()
+    {
+        return this.gridCentre || [0, 0, 0];
     }
 }

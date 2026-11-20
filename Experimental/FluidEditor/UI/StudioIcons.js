@@ -45,6 +45,8 @@ const Glyphs = {
     snow: '<path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9"/><path d="M12 3l-2 2M12 3l2 2M12 21l-2-2M12 21l2-2"/>',
     dust: '<circle cx="5" cy="17" r="1.2"/><circle cx="9" cy="19" r="1"/><circle cx="13" cy="16" r="1.4"/><circle cx="18" cy="18" r="1.1"/><circle cx="8" cy="13" r="0.9"/><circle cx="16" cy="13" r="0.9"/><path d="M3 21h18"/>',
     rain: '<path d="M7 4v6M12 3v8M17 4v6M9 14v5M14 13v6"/>',
+    grid: '<path d="M3 9h18M3 15h18M9 3v18M15 3v18"/><rect x="3" y="3" width="18" height="18" rx="1.5"/>',
+    track: '<path d="M3 17c3-6 6-6 9 0s6 6 9 0"/><circle cx="6" cy="8" r="1.6"/><circle cx="18" cy="8" r="1.6"/><path d="M3 21h18"/>',
     tyre: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 4v5M12 15v5M4 12h5M15 12h5M6.3 6.3l3.5 3.5M14.2 14.2l3.5 3.5M6.3 17.7l3.5-3.5M14.2 9.8l3.5-3.5"/>',
     stardust: '<path d="M3 15c4-6 10-8 18-9"/><path d="M4 19c5-5 9-6 16-6"/><circle cx="7" cy="12" r="0.9" fill="currentColor" stroke="none"/><circle cx="13" cy="8.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="17" cy="15" r="0.8" fill="currentColor" stroke="none"/><circle cx="10" cy="17" r="0.7" fill="currentColor" stroke="none"/><circle cx="19" cy="5" r="0.7" fill="currentColor" stroke="none"/>',
     nebula: '<circle cx="12" cy="12" r="2.2"/><path d="M12 5c4 0 7 3 7 7M12 19c-4 0-7-3-7-7"/><path d="M6 7c2-2 4-2 6-1M18 17c-2 2-4 2-6 1"/><circle cx="5" cy="14" r="0.8" fill="currentColor" stroke="none"/><circle cx="19" cy="9" r="0.8" fill="currentColor" stroke="none"/>',

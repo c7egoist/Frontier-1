@@ -110,7 +110,7 @@ export class VolumeRenderer
         gl.uniform3fv(uniforms.uAmbientColour, hexToRgb(volume.Ambient));
         gl.uniform1i(uniforms.uSteps, Math.round(volume.Steps));
         gl.uniform1i(uniforms.uShadowSteps, Math.round(volume.ShadowSteps));
-        gl.uniform1f(uniforms.uGroundHeight, -solver.domainHalfExtent[1] - 0.02);
+        gl.uniform1f(uniforms.uGroundHeight, solver.domainCentre[1] - solver.domainHalfExtent[1] - 0.02);
         gl.uniform1i(uniforms.uShowVolume, volume.Visible ? 1 : 0);
         gl.uniform1i(uniforms.uVoxelPreview, VolumeFilters.indexOf(volume.Filter) === 1 ? 1 : 0);
         gl.uniform1i(uniforms.uFrame, solver.frame & 1023);
@@ -185,13 +185,13 @@ export class VolumeRenderer
     renderSlice(settings, matrices)
     {
         const gl = this.gl, context = this.context, solver = this.solver;
-        const half = solver.domainHalfExtent;
+        const half = solver.domainHalfExtent, centre = solver.domainCentre;
         const axis = Math.max(0, SliceAxes.indexOf(settings.Axis));
-        const offset = (settings.Offset * 2 - 1) * half[axis];
+        const offset = centre[axis] + (settings.Offset * 2 - 1) * half[axis];
         let corner, edgeU, edgeV;
-        if (axis === 0) { corner = [offset, -half[1], -half[2]]; edgeU = [0, 2 * half[1], 0]; edgeV = [0, 0, 2 * half[2]]; }
-        else if (axis === 1) { corner = [-half[0], offset, -half[2]]; edgeU = [2 * half[0], 0, 0]; edgeV = [0, 0, 2 * half[2]]; }
-        else { corner = [-half[0], -half[1], offset]; edgeU = [2 * half[0], 0, 0]; edgeV = [0, 2 * half[1], 0]; }
+        if (axis === 0) { corner = [offset, centre[1] - half[1], centre[2] - half[2]]; edgeU = [0, 2 * half[1], 0]; edgeV = [0, 0, 2 * half[2]]; }
+        else if (axis === 1) { corner = [centre[0] - half[0], offset, centre[2] - half[2]]; edgeU = [2 * half[0], 0, 0]; edgeV = [0, 0, 2 * half[2]]; }
+        else { corner = [centre[0] - half[0], centre[1] - half[1], offset]; edgeU = [2 * half[0], 0, 0]; edgeV = [0, 2 * half[1], 0]; }
         const uniforms = context.use(this.programs.slice);
         solver.applyVolumeUniforms(uniforms);
         solver.applyForceUniforms(uniforms);
@@ -877,13 +877,54 @@ export class VolumeRenderer
         if (speed > 1e-3) this.arrow(c, emitter.Velocity, Math.min(1.2, 0.25 + speed * 0.2), colour);
     }
 
+    /** World Grid lattice: seams between the tiles of the sliding window, plus the ring of neighbour tiles it can step into. */
+    worldGridGizmo(domain, half, centre, selected)
+    {
+        const tiles = domain.Tiles || [1, 1, 1];
+        if (tiles[0] * tiles[1] * tiles[2] <= 1 && domain.Follow === 'None') return;
+        const pitch = [0, 1, 2].map((axis) => domain.TileCells[axis] * domain.CellSize);
+        const floor = centre[1] - half[1] + 0.005;
+        const seam = [0.62, 0.66, 0.74, selected ? 0.5 : 0.22];
+        // Seams inside the window, drawn on the floor and up the walls so the tile structure reads in 3D.
+        for (let i = 1; i < tiles[0]; i += 1)
+        {
+            const x = centre[0] - half[0] + i * pitch[0];
+            this.line([x, floor, centre[2] - half[2]], [x, floor, centre[2] + half[2]], seam);
+            this.line([x, floor, centre[2] - half[2]], [x, centre[1] + half[1], centre[2] - half[2]], seam);
+            this.line([x, floor, centre[2] + half[2]], [x, centre[1] + half[1], centre[2] + half[2]], seam);
+        }
+        for (let k = 1; k < tiles[2]; k += 1)
+        {
+            const z = centre[2] - half[2] + k * pitch[2];
+            this.line([centre[0] - half[0], floor, z], [centre[0] + half[0], floor, z], seam);
+            this.line([centre[0] - half[0], floor, z], [centre[0] - half[0], centre[1] + half[1], z], seam);
+            this.line([centre[0] + half[0], floor, z], [centre[0] + half[0], centre[1] + half[1], z], seam);
+        }
+        for (let j = 1; j < tiles[1]; j += 1)
+        {
+            const y = centre[1] - half[1] + j * pitch[1];
+            this.box([centre[0], y, centre[2]], [half[0], 0, half[2]], seam);
+        }
+        // Neighbour tiles on the floor: the lattice the window slides across while following its target.
+        if (domain.Follow === 'None') return;
+        const ghost = [0.62, 0.66, 0.74, selected ? 0.16 : 0.07];
+        for (let i = -1; i <= 1; i += 1) for (let k = -1; k <= 1; k += 1)
+        {
+            if (i === 0 && k === 0) continue;
+            const cx = centre[0] + i * pitch[0] * tiles[0], cz = centre[2] + k * pitch[2] * tiles[2];
+            const corners = [[cx - half[0], floor, cz - half[2]], [cx + half[0], floor, cz - half[2]], [cx + half[0], floor, cz + half[2]], [cx - half[0], floor, cz + half[2]]];
+            for (let e = 0; e < 4; e += 1) this.line(corners[e], corners[(e + 1) % 4], ghost);
+        }
+    }
+
     renderGizmos(scene, matrices, selection)
     {
         const gl = this.gl, context = this.context, solver = this.solver;
         const gizmos = scene.Visualizers.ForceGizmos;
         this.beginLines();
-        const half = solver.domainHalfExtent;
-        this.box([0, 0, 0], half, [0.62, 0.66, 0.74, selection === 'domain' ? 0.95 : 0.45]);
+        const half = solver.domainHalfExtent, centre = solver.domainCentre;
+        this.box(centre, half, [0.62, 0.66, 0.74, selection === 'domain' ? 0.95 : 0.45]);
+        this.worldGridGizmo(scene.Domain, half, centre, selection === 'domain');
         const show = (node) => gizmos.Visible ? node.Visible : node.Id === selection;
         if (true)
         {

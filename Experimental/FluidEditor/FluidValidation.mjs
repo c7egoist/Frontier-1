@@ -307,5 +307,18 @@ app.scene.Visualizers.Debris.Visible = true; app.frame(80); app.frame(96); app.f
 check(app.supported && app.solver.debrisPositions && app.solver.debrisVelocities, 'Debris particle ping-pong integrates + renders through the app loop');
 app.scene.Domain.SceneLoop = 0.01; app.frame(130); check(app.solver.frame <= 1, 'Scene loop restarts the solver clock');
 
+// World Grid: a 3×1×3 tile window following a Straight-path emitter must slide by whole tiles with the fields shifted in place.
+app.loadPreset('preset-drift-run');
+const grid = app.scene.Domain;
+check(grid.Tiles.join() === '3,1,3' && grid.TileCells.join() === '40,22,40' && grid.Resolution.join() === '120,22,120', `World Grid 3×1×3 tiles of ${grid.TileCells.join('×')} cells solve as one ${grid.Resolution.join('×')} field`);
+app.scene.Emitters[0].PathKind = 'Straight'; app.scene.Emitters[0].PathSpeed = 10; app.scene.Emitters[0].Position = [0, -0.98, 0];
+const relocationsBefore = app.solver.relocations;
+for (let i = 0; i < 40; i += 1) app.frame(200 + i * 16);
+check(app.solver.relocations > relocationsBefore && grid.GridOrigin[0] >= 1 && grid.GridOrigin[1] === 0, `Following emitter at 10 m/s stepped the window ${app.solver.relocations - relocationsBefore}× along X to tile ${grid.GridOrigin.join(',')} (height locked)`);
+check(Math.abs(app.solver.domainCentre[0] - grid.GridOrigin[0] * 4) < 1e-9 && app.solver.layout.width === 120, 'Window centre tracks the tile origin without reallocating the fields');
+app.recentreGrid();
+check(grid.GridOrigin.join() === '0,0,0' && app.solver.domainCentre[0] === 0, 'Recentre returns the window to tile 0');
+check(Shaders.ShiftFragment.includes('CellInside(source)'), 'Shift kernel zero-fills cells scrolling in from outside the old window');
+
 console.log(Failures === 0 ? '\n🟢 Fluid Studio validation passed' : `\n🔴 Fluid Studio validation failed (${Failures})`);
 process.exit(Failures === 0 ? 0 : 1);

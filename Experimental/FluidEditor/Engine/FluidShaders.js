@@ -24,6 +24,12 @@ uniform ivec3 uGrid;
 uniform ivec2 uTiles;
 uniform vec2  uTexSize;
 uniform float uCellSize;
+uniform vec3  uGridCentre;   // world-space centre of the simulated window (World Grid tile origin × tile pitch)
+
+vec3 GridHalf()
+{
+    return vec3(uGrid) * uCellSize * 0.5;
+}
 
 ivec3 CellFromFragment(vec2 fragment)
 {
@@ -69,12 +75,12 @@ vec4 SampleVolume(sampler2D field, vec3 coordinate)
 
 vec3 WorldFromCell(vec3 cellCentre)
 {
-    return (cellCentre - vec3(uGrid) * 0.5) * uCellSize;
+    return (cellCentre - vec3(uGrid) * 0.5) * uCellSize + uGridCentre;
 }
 
 vec3 CellFromWorld(vec3 world)
 {
-    return world / uCellSize + vec3(uGrid) * 0.5;
+    return (world - uGridCentre) / uCellSize + vec3(uGrid) * 0.5;
 }
 `;
 
@@ -755,7 +761,7 @@ vec3 SpawnPosition(vec2 pixel, float salt)
 {
     vec3 extent = vec3(uGrid) * uCellSize;
     vec3 u = vec3(Hash31(vec3(pixel, salt)), Hash31(vec3(pixel.yx, salt + 7.3)), Hash31(vec3(pixel + 3.1, salt + 19.7)));
-    return (u - 0.5) * extent * 0.96;
+    return uGridCentre + (u - 0.5) * extent * 0.96;
 }
 void main()
 {
@@ -772,14 +778,35 @@ void main()
     vec3 mid = position + 0.5 * uDeltaTime * v1;
     vec3 v2 = SampleVolume(uVelocity, CellFromWorld(mid)).xyz;
     position += uDeltaTime * v2;
-    vec3 half_ = vec3(uGrid) * uCellSize * 0.5;
-    bool outside = any(greaterThan(abs(position), half_));
+    vec3 half_ = GridHalf();
+    bool outside = any(greaterThan(abs(position - uGridCentre), half_));
     if (age > uLifetime || outside)
     {
         position = SpawnPosition(pixel, uTime);
         age = 0.0;
     }
     fragColour = vec4(position, age);
+}
+`;
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                  WORLD GRID RELOCATION
+//------------------------------------------------------------------------------------------------------------------------
+
+// Slides a field by a whole number of cells when the simulated window steps to a neighbouring World Grid tile: the gas
+// stays exactly where it was in world space, cells that scroll in from outside the old window start empty.
+export const ShiftFragment = `#version 300 es
+precision highp float;
+precision highp sampler2D;
+${VolumeChunk}
+uniform sampler2D uSource;
+uniform ivec3 uShift;
+out vec4 fragColour;
+void main()
+{
+    ivec3 cell = CellFromFragment(gl_FragCoord.xy);
+    ivec3 source = cell + uShift;
+    fragColour = CellInside(source) ? FetchCell(uSource, source) : vec4(0.0);
 }
 `;
 
@@ -986,8 +1013,8 @@ void main()
 
     if (uShowVolume == 1)
     {
-        vec3 half_ = vec3(uGrid) * uCellSize * 0.5;
-        vec2 span = IntersectBox(origin, direction, -half_, half_);
+        vec3 half_ = GridHalf();
+        vec2 span = IntersectBox(origin, direction, uGridCentre - half_, uGridCentre + half_);
         float entry = max(span.x, 0.0);
         float exit = min(span.y, sceneDepth);
         if (exit > entry)
@@ -1013,7 +1040,7 @@ void main()
                 float sigmaSmoke = density * uAbsorption;
                 float sigmaFire = fire * uFireOpacity;
                 float sigma = sigmaSmoke + sigmaFire;
-                float lightTransmittance = (sigmaSmoke > 0.0) ? ShadowTransmittance(p, -half_, half_) : 1.0;
+                float lightTransmittance = (sigmaSmoke > 0.0) ? ShadowTransmittance(p, uGridCentre - half_, uGridCentre + half_) : 1.0;
                 // Soot is lit by the sun, the ambient sky, and the flame it is wrapped around.
                 vec3 scattering = uAlbedo * (uAmbientColour + sunLight * lightTransmittance + emission * 0.6);
                 vec3 contribution = scattering * sigmaSmoke * step_ + emission * (1.0 + sigmaFire) * step_;
@@ -1281,7 +1308,7 @@ void main()
     vec3 position = p.xyz;
     float age = p.w;
     vec3 velocity = v.xyz;
-    vec3 half_ = vec3(uGrid) * uCellSize * 0.5;
+    vec3 half_ = GridHalf();
     bool dead = age >= uLifetime;
     if (dead && uEmitterCount > 0)
     {
@@ -1313,7 +1340,7 @@ void main()
         if (kind != 0) velocity += CurlNoise(position * 1.7 + vec3(uTime * 0.8, seedValue * 9.0, 0.0)) * (kind == 2 ? 1.6 : 0.5) * uDeltaTime;
         velocity += (gas - velocity) * min(1.0, uDrag * dragScale * uDeltaTime * (0.6 + 0.8 * seedValue));
         position += velocity * uDeltaTime;
-        float floorY = -half_.y + uCellSize * 0.5;
+        float floorY = uGridCentre.y - half_.y + uCellSize * 0.5;
         if (position.y < floorY)
         {
             position.y = floorY;
@@ -1322,7 +1349,8 @@ void main()
             if (velocity.y < 0.25) velocity = vec3(0.0);
             if (kind == 1) age = uLifetime;
         }
-        if (any(greaterThan(abs(position.xz), half_.xz)) || position.y > half_.y) age = uLifetime;
+        vec3 local = position - uGridCentre;
+        if (any(greaterThan(abs(local.xz), half_.xz)) || local.y > half_.y) age = uLifetime;
     }
     fragColour = uOutput == 0 ? vec4(position, age) : vec4(velocity, v.w);
 }

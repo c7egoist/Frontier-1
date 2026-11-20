@@ -9,7 +9,7 @@ import { GpuContext } from './GpuContext.js';
 import { FluidSolver } from './FluidSolver.js';
 import { VolumeRenderer } from './VolumeRenderer.js';
 import { OrbitCamera, Vec3 } from './OrbitCamera.js';
-import { ScenePresets, createDomain, createEmitter, createForceGenerator, createCollider, createVisualizerSet, ForceTypeById, resolveDomainGrid, emitterTransform } from './ForceGeneratorCatalog.js';
+import { ScenePresets, createDomain, createEmitter, createForceGenerator, createCollider, createVisualizerSet, ForceTypeById, resolveDomainGrid, emitterTransform, gridWindowCentre, gridTileOf } from './ForceGeneratorCatalog.js';
 import { ParticleSimulation } from './ParticleSimulation.js';
 import { createParticleSystem, ParticleTemplateById, MaximumParticleSystems } from './ParticleCatalog.js';
 
@@ -27,6 +27,7 @@ export class FluidStudioApp
         this.playing = true;
         this.stepRequested = false;
         this.fixedDeltaTime = 1 / 60;
+        this.cameraFollowsGrid = true;
         this.lastFrameTime = 0;
         this.frameTimes = [];
         this.pointer = { mode: null, x: 0, y: 0, dragNode: null, dragPlanePoint: null, dragOffset: null, moved: false };
@@ -90,7 +91,8 @@ export class FluidStudioApp
         {
             if (this.playing || this.stepRequested)
             {
-                if (domain.SceneLoop > 0 && this.solver.time >= domain.SceneLoop) { this.solver.reset(); this.particles.resetAll(); }
+                if (domain.SceneLoop > 0 && this.solver.time >= domain.SceneLoop) { this.solver.reset(); this.particles.resetAll(); this.recentreGrid(); }
+                this.followGrid();
                 this.solver.step(this.scene, deltaTime);
                 this.solver.updateTracers(deltaTime, this.scene.Visualizers.Tracers.Lifetime);
                 this.solver.updateDebris(deltaTime, this.scene.Visualizers.Debris);
@@ -158,7 +160,7 @@ export class FluidStudioApp
         this.particles.resetAll();
         for (const [key, overrides] of Object.entries(preset.Visualizers || {})) Object.assign(this.scene.Visualizers[key], overrides);
         this.applyDomainResolution();
-        this.camera.frame(this.solver.domainHalfExtent);
+        this.camera.frame(this.solver.domainHalfExtent, this.solver.domainCentre);
         this.selection = this.scene.Forces[0] ? this.scene.Forces[0].Id : 'domain';
         this.playing = true;
         if (announce) this.notify();
@@ -167,7 +169,65 @@ export class FluidStudioApp
     applyDomainResolution()
     {
         const domain = resolveDomainGrid(this.scene.Domain);
-        this.solver.configure(domain.Resolution, domain.CellSize);
+        this.solver.configure(domain.Resolution, domain.CellSize, gridWindowCentre(domain));
+    }
+
+    //------------------------------------------------------------------------------------------------------------------------
+    //                                                  WORLD GRID
+    //------------------------------------------------------------------------------------------------------------------------
+
+    /** World position the sliding window keeps centred, or null when the grid is static. */
+    gridFollowTarget()
+    {
+        const domain = this.scene.Domain;
+        const time = this.solver.time;
+        switch (domain.Follow)
+        {
+            case 'Emitter':
+            {
+                const emitter = this.scene.Emitters.find((node) => node.Id === domain.FollowId) || this.scene.Emitters.find((node) => node.Enabled) || this.scene.Emitters[0];
+                return emitter ? emitterTransform(emitter, time).Position : null;
+            }
+            case 'Particles':
+            {
+                const node = (this.scene.Particles || []).find((system) => system.Id === domain.FollowId) || (this.scene.Particles || [])[0];
+                return node ? node.Position : null;
+            }
+            case 'Camera': return this.camera.target;
+            default: return null;
+        }
+    }
+
+    /**
+     * Sliding World Grid: when the follow target leaves the centre tile the window steps by whole tiles so the target's
+     * tile becomes the centre again. Fields are shifted by an exact cell offset, so smoke already laid down keeps its
+     * world position and keeps simulating — the gas is never clipped at the old box. Height only follows when enabled.
+     */
+    followGrid()
+    {
+        const domain = this.scene.Domain;
+        const target = this.gridFollowTarget();
+        if (!target) return;
+        const tile = gridTileOf(domain, target);
+        if (!domain.FollowHeight) tile[1] = domain.GridOrigin[1];
+        const delta = tile.map((value, axis) => value - domain.GridOrigin[axis]);
+        if (!delta.some((value) => value !== 0)) return;
+        domain.GridOrigin = tile;
+        const shift = delta.map((value, axis) => value * domain.TileCells[axis]);
+        this.solver.relocate(shift, gridWindowCentre(domain));
+        if (domain.Follow !== 'Camera' && this.cameraFollowsGrid) this.camera.target = Vec3.add(this.camera.target, shift.map((cells) => cells * domain.CellSize));
+        this.notify();
+    }
+
+    recentreGrid()
+    {
+        const domain = this.scene.Domain;
+        if (!domain.GridOrigin.some((value) => value !== 0)) return;
+        domain.GridOrigin = [0, 0, 0];
+        this.solver.relocate([0, 0, 0], gridWindowCentre(domain));
+        this.solver.reset();
+        this.camera.frame(this.solver.domainHalfExtent, this.solver.domainCentre);
+        this.notify();
     }
 
     notify()
@@ -203,10 +263,10 @@ export class FluidStudioApp
     {
         const type = ForceTypeById[typeId];
         const existing = this.scene.Forces.filter((force) => force.Type === typeId).length;
-        const half = this.solver.domainHalfExtent;
+        const half = this.solver.domainHalfExtent, centre = this.solver.domainCentre;
         const force = createForceGenerator(typeId, {
             Name: existing > 0 ? `${type.Name} ${existing + 1}` : type.Name,
-            Position: [((this.scene.Forces.length % 3) - 1) * half[0] * 0.35, (Math.random() - 0.5) * half[1] * 0.4, 0],
+            Position: [centre[0] + ((this.scene.Forces.length % 3) - 1) * half[0] * 0.35, centre[1] + (Math.random() - 0.5) * half[1] * 0.4, centre[2]],
         });
         this.scene.Forces.push(force);
         this.select(force.Id);
@@ -215,8 +275,8 @@ export class FluidStudioApp
 
     addEmitter(shape = 'Sphere')
     {
-        const half = this.solver.domainHalfExtent;
-        const emitter = createEmitter({ Name: `${shape} Emitter`, Shape: shape, Position: [0, -half[1] * 0.8, 0] });
+        const half = this.solver.domainHalfExtent, centre = this.solver.domainCentre;
+        const emitter = createEmitter({ Name: `${shape} Emitter`, Shape: shape, Position: [centre[0], centre[1] - half[1] * 0.8, centre[2]] });
         this.scene.Emitters.push(emitter);
         this.select(emitter.Id);
         return emitter;
@@ -227,10 +287,10 @@ export class FluidStudioApp
         if (this.scene.Particles.length >= MaximumParticleSystems) return null;
         const template = ParticleTemplateById[templateId];
         const existing = this.scene.Particles.filter((node) => node.Template === templateId).length;
-        const half = this.solver.domainHalfExtent;
+        const half = this.solver.domainHalfExtent, centre = this.solver.domainCentre;
         const node = createParticleSystem(templateId, {
             Name: existing > 0 ? `${template.Name} ${existing + 1}` : template.Name,
-            Position: template.Defaults.Mode === 'Cloner' ? [0, 0, 0] : [0, template.Defaults.Direction && template.Defaults.Direction[1] < 0 ? half[1] * 0.9 : -half[1] * 0.85, 0],
+            Position: template.Defaults.Mode === 'Cloner' ? [...centre] : [centre[0], centre[1] + (template.Defaults.Direction && template.Defaults.Direction[1] < 0 ? half[1] * 0.9 : -half[1] * 0.85), centre[2]],
         });
         this.scene.Particles.push(node);
         this.select(node.Id);
@@ -294,11 +354,12 @@ export class FluidStudioApp
 
     afterNodeUpdate(node, key)
     {
-        if (node.Kind === 'Domain' && (key === 'Size' || key === 'MaxCells'))
+        if (node.Kind === 'Domain' && key === 'Follow') this.followGrid();
+        if (node.Kind === 'Domain' && (key === 'Size' || key === 'MaxCells' || key === 'Tiles'))
         {
             node.Size = node.Size.map((extent) => Math.max(0.5, Math.min(20, extent)));
             this.applyDomainResolution();
-            this.camera.frame(this.solver.domainHalfExtent);
+            this.camera.frame(this.solver.domainHalfExtent, this.solver.domainCentre);
         }
         if (node.Kind === 'Visualizer' && key === 'Lifetime' && node.Id === 'vis-tracers') this.solver.tracersNeedReset = true;
         if (node.Kind === 'Visualizer' && key === 'Lifetime' && node.Id === 'vis-debris') this.solver.debrisNeedReset = true;
@@ -315,7 +376,7 @@ export class FluidStudioApp
     togglePlay() { this.playing = !this.playing; this.notify(); }
     stepOnce() { this.playing = false; this.stepRequested = true; this.notify(); }
     reset() { this.solver.reset(); this.particles.resetAll(); this.notify(); }
-    frameDomain() { this.camera.frame(this.solver.domainHalfExtent); }
+    frameDomain() { this.camera.frame(this.solver.domainHalfExtent, this.solver.domainCentre); }
 
     setCameraPreset(name)
     {
@@ -323,7 +384,7 @@ export class FluidStudioApp
         const [yaw, pitch] = presets[name] || presets.threeQuarter;
         this.camera.yaw = yaw;
         this.camera.pitch = pitch;
-        this.camera.frame(this.solver.domainHalfExtent);
+        this.camera.frame(this.solver.domainHalfExtent, this.solver.domainCentre);
     }
 
     //------------------------------------------------------------------------------------------------------------------------
@@ -463,9 +524,9 @@ export class FluidStudioApp
             if (current && start)
             {
                 const offset = Vec3.sub(current, start);
-                const half = this.solver.domainHalfExtent;
+                const half = this.solver.domainHalfExtent, centre = this.solver.domainCentre;
                 const position = Vec3.add(planePoint, event.shiftKey ? [offset[0], 0, offset[2]] : offset);
-                node.Position = position.map((value, axis) => Math.max(-half[axis] * 1.5, Math.min(half[axis] * 1.5, Math.round(value * 100) / 100)));
+                node.Position = position.map((value, axis) => Math.max(centre[axis] - half[axis] * 1.5, Math.min(centre[axis] + half[axis] * 1.5, Math.round(value * 100) / 100)));
                 this.onStateChange(this.snapshot());
             }
             return;

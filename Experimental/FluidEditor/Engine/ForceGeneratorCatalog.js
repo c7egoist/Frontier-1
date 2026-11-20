@@ -260,6 +260,20 @@ export const ScenePresets = Object.freeze([
         ],
     },
     {
+        Id: 'preset-drift-run', Name: 'Drift Run · World Grid', Icon: 'track', Summary: 'A car slaloming down an endless strip: the 3 × 1 × 3 tile world grid follows the tyre, so the smoke trail streams back through tile seams and lingers behind instead of hitting a wall.',
+        Domain: { Resolution: [120, 22, 120], Size: [4, 2.2, 4], MaxCells: 40, Tiles: [3, 1, 3], Follow: 'Emitter', Buoyancy: 0.1, AmbientTemperature: 0, Cooling: 0.4, Vorticity: 0.3, Dissipation: 0.995, Gravity: 0.3, VelocityDissipation: 0.998, PressureIterations: 20 },
+        Boundary: 'OpenAll',
+        Look: { Albedo: '#d2d2d6', Absorption: 3.0, Anisotropy: 0.55, Exposure: 1.1 },
+        Visualizers: { Debris: { Visible: true, Count: 512, Lifetime: 2.5, Size: 2.0, Drag: 0.6, Bounce: 0.3, Glow: 0.05 } },
+        Emitters: [
+            { Name: 'Rear Tyre', Shape: 'Disc', Position: [-4, -0.98, 0], Radius: 0.24, Density: 2.4, Temperature: 0.4, Fuel: 0, Velocity: [-2.6, 0.6, 0], Jitter: 0.45, Orientation: [1, 0, 0], PathKind: 'Slalom', PathRadius: 1.3, PathSpeed: 2.2, Debris: 0.05, DebrisSpeed: 3.5, DebrisKind: 'Rubble' },
+        ],
+        Forces: [
+            { Type: 'DirectionalWind', Name: 'Crosswind', Position: [0, 0, 0], Strength: 0.35, Direction: [0, 0, 1], Falloff: 'Constant', Frequency: 0.4, Secondary: 0.5 },
+            { Type: 'DragBaffle', Name: 'Ceiling Brake', Position: [0, 0.8, 0], Strength: 1.4, Radius: 6, Falloff: 'Plateau' },
+        ],
+    },
+    {
         Id: 'preset-tyre-drift', Name: 'Tyre Drift Smoke', Icon: 'tyre', Summary: 'A spinning tyre circling the pad: dense white rubber smoke trailing behind, hugging the ground and shearing in the crosswind.',
         Domain: { Resolution: [96, 36, 96], Size: [7, 2.6, 7], Buoyancy: 0.12, AmbientTemperature: 0, Cooling: 0.4, Vorticity: 0.3, Dissipation: 0.994, Gravity: 0.3, VelocityDissipation: 0.998 },
         Boundary: 'OpenAll',
@@ -443,7 +457,9 @@ export function createForceGenerator(typeId, overrides = {})
 }
 
 export const DebrisKinds = Object.freeze(['Rubble', 'Ember', 'Paper']);
-export const EmitterPathKinds = Object.freeze(['None', 'Circle', 'Line', 'Figure8']);
+export const EmitterPathKinds = Object.freeze(['None', 'Circle', 'Line', 'Figure8', 'Straight', 'Slalom']);
+export const GridFollowModes = Object.freeze(['None', 'Emitter', 'Particles', 'Camera']);
+export const MaximumGridTiles = 5;
 
 /** Animated emitter transform: returns { Position, Velocity } for an emitter following its motion path at `time`. */
 export function emitterTransform(emitter, time)
@@ -463,6 +479,22 @@ export function emitterTransform(emitter, time)
         const s = Math.sin(angle);
         offset = [s * radius, 0, 0];
         heading = [Math.cos(angle) >= 0 ? 1 : -1, 0, 0];
+    }
+    else if (kind === 'Straight')
+    {
+        // Unbounded drive: PathSpeed is metres per second along +X; PathRadius is ignored. Pair with a following World Grid.
+        offset = [time * speed, 0, 0];
+        heading = [1, 0, 0];
+    }
+    else if (kind === 'Slalom')
+    {
+        // Unbounded drive weaving left/right: PathRadius is the weave half-width, PathSpeed the forward speed.
+        const period = Math.max(radius * 2.5, 0.5);
+        const weave = time * speed / period;
+        offset = [time * speed, 0, Math.sin(weave) * radius];
+        const dz = Math.cos(weave) * radius * speed / period;
+        const length = Math.hypot(speed, dz) || 1;
+        heading = [speed / length, 0, dz / length];
     }
     else
     {
@@ -532,12 +564,36 @@ export const ResolutionPresets = Object.freeze({ Draft: 32, Low: 48, Medium: 64,
 // longest axis, and `CellSize` + per-axis `Resolution` are derived so shrinking the voxel count makes the gas coarser.
 export function resolveDomainGrid(domain)
 {
+    // World Grid: the domain `Size` is one tile; the simulated window spans `Tiles` adjacent tiles per axis as a single
+    // seamless field. Cells per tile are integers so the window can slide by whole tiles with an exact texel copy.
+    const tiles = (domain.Tiles || [1, 1, 1]).map((count) => Math.max(1, Math.min(MaximumGridTiles, Math.round(count || 1))));
     const longest = Math.max(domain.Size[0], domain.Size[1], domain.Size[2]);
     const maxCells = Math.max(8, Math.min(160, Math.round(domain.MaxCells)));
-    const cellSize = longest / maxCells;
+    let cellSize = longest / maxCells;
+    // Keep the whole window inside the 160-cell solver limit per axis: coarsen the voxel rather than block the grid.
+    for (let axis = 0; axis < 3; axis += 1) cellSize = Math.max(cellSize, domain.Size[axis] * tiles[axis] / 160);
+    const multi = tiles[0] * tiles[1] * tiles[2] > 1;
+    const tileCells = domain.Size.map((extent) => Math.max(multi ? 4 : 8, Math.round(extent / cellSize)));
+    domain.Tiles = tiles;
+    domain.TileCells = tileCells;
     domain.CellSize = cellSize;
-    domain.Resolution = domain.Size.map((extent) => Math.max(8, Math.min(160, Math.round(extent / cellSize))));
+    domain.Resolution = tileCells.map((cells, axis) => Math.max(8, Math.min(160, cells * tiles[axis])));
+    if (!domain.GridOrigin) domain.GridOrigin = [0, 0, 0];
+    if (!GridFollowModes.includes(domain.Follow)) domain.Follow = 'None';
     return domain;
+}
+
+/** World-space centre of the simulated window: tile index × tile pitch (tile 0 is centred on the origin). */
+export function gridWindowCentre(domain)
+{
+    const origin = domain.GridOrigin || [0, 0, 0];
+    return [0, 1, 2].map((axis) => origin[axis] * domain.TileCells[axis] * domain.CellSize);
+}
+
+/** Tile index containing a world position (tiles are centred on multiples of the tile pitch). */
+export function gridTileOf(domain, position)
+{
+    return [0, 1, 2].map((axis) => Math.floor(position[axis] / (domain.TileCells[axis] * domain.CellSize) + 0.5));
 }
 
 export function createDomain(overrides = {})
@@ -563,6 +619,10 @@ export function createDomain(overrides = {})
         TimeScale: overrides.TimeScale ?? 1.0,
         Combustion: overrides.Combustion ?? 1.0,
         SceneLoop: overrides.SceneLoop ?? 0,
+        Tiles: overrides.Tiles ? [...overrides.Tiles] : [1, 1, 1],
+        Follow: overrides.Follow || 'None',
+        FollowHeight: overrides.FollowHeight ?? false,
+        GridOrigin: overrides.GridOrigin ? [...overrides.GridOrigin] : [0, 0, 0],
     });
 }
 
