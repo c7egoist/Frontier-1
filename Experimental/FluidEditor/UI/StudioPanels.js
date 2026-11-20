@@ -7,7 +7,7 @@
 import { icon } from './StudioIcons.js';
 import {
     ForceGeneratorTypes, ForceTypeById, FalloffCurves, EmitterShapes, ColourRamps, SliceAxes, ScalarChannels, AdvectionSchemes, BoundaryModes,
-    ScenePresets, RampStops, MaximumForceGenerators, SmokeLooks, FireLooks, ResolutionPresets, VolumeFilters, FalloffLabels, ForceCategories, VectorModes, timingEnvelope, isKeyed,
+    ScenePresets, RampStops, MaximumForceGenerators, SmokeLooks, FireLooks, ResolutionPresets, VolumeFilters, FalloffLabels, ForceCategories, VectorModes, timingEnvelope, isKeyed, DebrisKinds,
 } from '../Engine/ForceGeneratorCatalog.js';
 const BoundaryLabels = { ClosedBox: 'Closed Box', OpenTop: 'Open Top', OpenAll: 'Open All' };
 
@@ -141,7 +141,7 @@ export function mountStudioUI({ app, refs })
         {
             case 'Domain': return `${node.Size.map((extent) => extent.toFixed(1)).join(' × ')} m · ${(node.CellSize * 100).toFixed(1)} cm voxels · ${BoundaryLabels[node.Boundary]}`;
             case 'Force': return `${ForceTypeById[node.Type].Name} · ${formatNumber(node.Strength, 1)} · ${FalloffLabels[node.Falloff]}${keyedSuffix(node)}`;
-            case 'Emitter': return `${node.Shape} · ρ ${formatNumber(node.Density, 1)} · T ${formatNumber(node.Temperature, 1)}${node.Fuel > 0 ? ' · fuel' : ''}${node.Debris > 0 ? ' · debris' : ''}${keyedSuffix(node)}`;
+            case 'Emitter': return `${node.Shape} · ρ ${formatNumber(node.Density, 1)} · T ${formatNumber(node.Temperature, 1)}${node.Fuel > 0 ? ' · fuel' : ''}${node.Debris > 0 ? ` · ${(node.DebrisKind || 'rubble').toLowerCase()}` : ''}${keyedSuffix(node)}`;
             case 'Collider': return `Sphere · r ${formatNumber(node.Radius, 2)} m`;
             default:
                 if (node.Id === 'vis-vectors') return `${node.Axis} slice · stride ${node.Stride}`;
@@ -502,9 +502,10 @@ export function mountStudioUI({ app, refs })
         ]));
         host.appendChild(card('Exit Velocity', 'm/s', [vector(emitter, 'Velocity', 'Velocity', 0.1)]));
         host.appendChild(card('Debris', 'Ballistic ejecta', [
+            choice(emitter, 'DebrisKind', 'Kind', DebrisKinds),
             slider(emitter, 'Debris', 'Debris amount', 0, 1, 0.02),
             slider(emitter, 'DebrisSpeed', 'Ejection speed', 0, 20, 0.5, 'm/s', 1),
-            element('p', 'note', 'Debris particles launch from the emitter while it is active, fly under gravity, get dragged by the gas, bounce on the floor and cool from ember to ash. Shown by the Debris visualizer.'),
+            element('p', 'note', 'Rubble: heavy, bounces, cools from ember to ash. Ember: near-weightless glowing sparks that drift up with the heat and die on the floor. Paper: light sheets that flutter and get carried by the gas. Shown by the Debris visualizer.'),
         ]));
         host.appendChild(timingCard(emitter));
         host.appendChild(nodeActions(emitter));

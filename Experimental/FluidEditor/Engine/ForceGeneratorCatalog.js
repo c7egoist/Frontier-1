@@ -187,15 +187,15 @@ export const FireLooks = Object.freeze({
 export const ScenePresets = Object.freeze([
     {
         Id: 'preset-campfire', Name: 'Campfire', Icon: 'flame', Summary: 'Fuel-burning flame with rising embers, soot plume and a gentle crosswind.',
-        Domain: { Resolution: [48, 80, 48], Size: [3, 5, 3], Buoyancy: 1.5, AmbientTemperature: 0, Cooling: 1.5, Vorticity: 0.45, Dissipation: 0.994, Combustion: 1.6 },
+        Domain: { Resolution: [48, 80, 48], Size: [3, 5, 3], Buoyancy: 1.3, AmbientTemperature: 0, Cooling: 1.4, Vorticity: 0.25, Dissipation: 0.994, Combustion: 1.5 },
         Look: { Albedo: '#4b4b4f', Absorption: 4.2, FireIntensity: 5.5, FireSoftness: 3.0, FireOpacity: 1.6 },
-        Visualizers: { Debris: { Visible: true, Count: 1024, Lifetime: 2.6, Size: 2.0, Drag: 2.4, Glow: 1.2 } },
+        Visualizers: { Debris: { Visible: true, Count: 1024, Lifetime: 3.2, Size: 2.0, Drag: 2.4, Glow: 2.0 } },
         Emitters: [
-            { Name: 'Fire Source', Shape: 'Disc', Position: [0, -2.3, 0], Radius: 0.42, Density: 0.3, Temperature: 5.0, Fuel: 1.3, Velocity: [0, 1.0, 0], Jitter: 0.75, Debris: 0.12, DebrisSpeed: 2.4 },
+            { Name: 'Fire Source', Shape: 'Disc', Position: [0, -2.3, 0], Radius: 0.42, Density: 0.3, Temperature: 5.0, Fuel: 1.3, Velocity: [0, 0.8, 0], Jitter: 0.5, Debris: 0.16, DebrisSpeed: 1.4, DebrisKind: 'Ember' },
         ],
         Forces: [
-            { Type: 'DirectionalWind', Position: [0, 0, 0], Strength: 0.8, Direction: [1, 0, 0.2], Falloff: 'Constant', Frequency: 0.5, Secondary: 0.7 },
-            { Type: 'CurlNoiseTurbulence', Name: 'Flame Flicker', Position: [0, -1.4, 0], Strength: 1.6, Radius: 1.1, Falloff: 'Gaussian', Frequency: 3.0, Secondary: 1.3 },
+            { Type: 'DirectionalWind', Name: 'Breeze', Position: [0, 0, 0], Strength: 0.35, Direction: [1, 0, 0.2], Falloff: 'Constant', Frequency: 0.3, Secondary: 0.5 },
+            { Type: 'CurlNoiseTurbulence', Name: 'Flame Flicker', Position: [0, -1.6, 0], Strength: 0.5, Radius: 0.8, Falloff: 'Gaussian', Frequency: 3.5, Secondary: 1.0 },
         ],
     },
     {
@@ -242,8 +242,10 @@ export const ScenePresets = Object.freeze([
         Id: 'preset-tornado', Name: 'Tornado Funnel', Icon: 'vortex', Summary: 'Tight vortex with inward pull and axis attraction lofting a dust funnel — no turbulence to break the shape.',
         Domain: { Resolution: [48, 84, 48], Size: [4, 7, 4], Buoyancy: 0.15, AmbientTemperature: 0, Cooling: 0.3, Vorticity: 0.1, Dissipation: 0.997 },
         Look: { Albedo: '#b89c74', Absorption: 2.6, Anisotropy: 0.3 },
+        Visualizers: { Debris: { Visible: true, Count: 1536, Lifetime: 9, Size: 3.5, Drag: 3.0, Bounce: 0.1, Glow: 0.1 } },
         Emitters: [
             { Name: 'Dust Ring', Shape: 'Disc', Position: [0, -3.4, 0], Radius: 0.9, Density: 0.9, Temperature: 0.1, Fuel: 0, Velocity: [0, 0.4, 0], Jitter: 0.35 },
+            { Name: 'Loose Paper', Shape: 'Disc', Position: [0, -3.4, 0], Radius: 1.7, Density: 0, Temperature: 0, Fuel: 0, Velocity: [0, 0, 0], Jitter: 0, Debris: 0.08, DebrisSpeed: 1.2, DebrisKind: 'Paper' },
         ],
         Forces: [
             { Type: 'VortexColumn', Position: [0, 0, 0], Strength: 14, Radius: 1.1, Falloff: 'Plateau', Frequency: 1.8, Secondary: 2.2 },
@@ -345,6 +347,8 @@ export function createForceGenerator(typeId, overrides = {})
     };
 }
 
+export const DebrisKinds = Object.freeze(['Rubble', 'Ember', 'Paper']);
+
 export function createEmitter(overrides = {})
 {
     return {
@@ -369,6 +373,7 @@ export function createEmitter(overrides = {})
         Repeat: overrides.Repeat ?? 0,
         Debris: overrides.Debris ?? 0,
         DebrisSpeed: overrides.DebrisSpeed ?? 6,
+        DebrisKind: overrides.DebrisKind || 'Rubble',
     };
 }
 

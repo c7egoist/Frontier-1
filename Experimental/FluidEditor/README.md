@@ -59,7 +59,7 @@ Falloff envelopes: `Smooth · Linear · Inverse² · Infinite · Gaussian · Pla
 
 - **Volume Render** — single-pass ray-march with jittered steps, directional shadow march, Henyey-Greenstein forward scattering, editable **fire incandescence ramp** (ember → flame → core colours, ignition temperature, span, flame opacity, emission), soot lit by its own flame, editable smoke albedo / extinction / ambient / sun / exposure with `Wood · Gas · Fuel · Magic` fire and `Soot · Grey · Steam · Dust` smoke look chips, ACES tone map; analytic ground grid + sphere colliders share the same ray.
 - **Velocity Vectors** — GPU-generated arrow lines on an axis-aligned slice (stride, scale, Turbo / Engineering / Plasma / Diverging ramps).
-- **Debris** — ballistic GPU particles launched from emitters with a Debris amount: gravity, gas-coupled drag, floor bounce, ember-to-ash cooling, streak trails.
+- **Debris** — GPU particles launched from emitters with a Debris amount, in three kinds: **Rubble** (heavy, bounces, ember→ash), **Ember** (weightless glowing sparks that ride the heat), **Paper** (light fluttering sheets carried by the gas). Gravity, gas-coupled drag, floor bounce, streak trails.
 - **Force Vectors** — GPU-evaluated Σ-force arrows on a slice plane or as a sparse 3D lattice, coloured by |F|.
 - **Scalar Slice** — heat-map of `Speed · Pressure · Vorticity · Temperature · Density · Divergence · Force |F|` (force magnitude is evaluated live from the generator uniforms).
 - **Flow Tracers** — 8 192 GPU particles with speed-coloured points + trails.

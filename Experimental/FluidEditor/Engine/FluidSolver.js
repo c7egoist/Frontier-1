@@ -7,7 +7,7 @@
 
 import { computeVolumeLayout } from './GpuContext.js';
 import * as Shaders from './FluidShaders.js';
-import { ForceTypeById, FalloffCurves, EmitterShapes, BoundaryModes, MaximumForceGenerators, MaximumEmitters, MaximumColliders, timingEnvelope } from './ForceGeneratorCatalog.js';
+import { ForceTypeById, FalloffCurves, EmitterShapes, BoundaryModes, MaximumForceGenerators, MaximumEmitters, MaximumColliders, timingEnvelope, DebrisKinds } from './ForceGeneratorCatalog.js';
 
 export class FluidSolver
 {
@@ -165,7 +165,7 @@ export class FluidSolver
             arrays.b.set([emitter.Velocity[0], emitter.Velocity[1], emitter.Velocity[2], emitter.Density * envelope], offset);
             arrays.c.set([emitter.Temperature * envelope, emitter.Fuel * envelope, emitter.Jitter, Math.max(0, EmitterShapes.indexOf(emitter.Shape))], offset);
             arrays.d.set([emitter.Orientation[0], emitter.Orientation[1], emitter.Orientation[2], emitter.Pulse], offset);
-            arrays.e.set([emitter.Debris || 0, emitter.DebrisSpeed || 0, envelope, 0], offset);
+            arrays.e.set([emitter.Debris || 0, emitter.DebrisSpeed || 0, envelope, Math.max(0, DebrisKinds.indexOf(emitter.DebrisKind))], offset);
             count += 1;
         }
         arrays.count = count;

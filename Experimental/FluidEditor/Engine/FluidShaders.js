@@ -1252,7 +1252,7 @@ uniform int   uReset;
 uniform int   uEmitterCount;
 uniform vec4  uEmitterA[MAX_EMITTERS];  // position.xyz, radius
 uniform vec4  uEmitterB[MAX_EMITTERS];  // velocity.xyz, density
-uniform vec4  uEmitterE[MAX_EMITTERS];  // debris amount, debris speed, envelope, unused
+uniform vec4  uEmitterE[MAX_EMITTERS];  // debris amount, debris speed, envelope, kind (0 rubble, 1 ember, 2 paper)
 uniform float uDeltaTime;
 uniform float uTime;
 uniform float uLifetime;
@@ -1295,6 +1295,7 @@ void main()
             position = a.xyz + direction * a.w * Hash31(vec3(pixel.yx, uTime));
             float speed = e.y * (0.35 + 0.65 * Hash31(vec3(pixel, uTime + 9.1)));
             velocity = uEmitterB[index].xyz + direction * speed + vec3(0.0, 0.45 * e.y, 0.0);
+            v.w = floor(e.w + 0.5) + fract(v.w);
             age = 0.0;
             dead = false;
         }
@@ -1302,9 +1303,15 @@ void main()
     if (!dead)
     {
         age += uDeltaTime;
+        int kind = int(floor(v.w));
+        float seedValue = fract(v.w);
         vec3 gas = SampleVolume(uVelocity, CellFromWorld(position)).xyz;
-        velocity += vec3(0.0, -uGravity, 0.0) * uDeltaTime;
-        velocity += (gas - velocity) * min(1.0, uDrag * uDeltaTime * (0.6 + 0.8 * v.w));
+        float gravityScale = kind == 1 ? 0.12 : (kind == 2 ? 0.3 : 1.0);
+        float dragScale = kind == 1 ? 3.0 : (kind == 2 ? 4.0 : 1.0);
+        velocity += vec3(0.0, -uGravity * gravityScale, 0.0) * uDeltaTime;
+        if (kind == 1) velocity += vec3(0.0, 0.9 + 0.6 * seedValue, 0.0) * uDeltaTime * exp(-age * 0.6);
+        if (kind != 0) velocity += CurlNoise(position * 1.7 + vec3(uTime * 0.8, seedValue * 9.0, 0.0)) * (kind == 2 ? 1.6 : 0.5) * uDeltaTime;
+        velocity += (gas - velocity) * min(1.0, uDrag * dragScale * uDeltaTime * (0.6 + 0.8 * seedValue));
         position += velocity * uDeltaTime;
         float floorY = -half_.y + uCellSize * 0.5;
         if (position.y < floorY)
@@ -1313,6 +1320,7 @@ void main()
             velocity.y = abs(velocity.y) * uBounce;
             velocity.xz *= 0.55;
             if (velocity.y < 0.25) velocity = vec3(0.0);
+            if (kind == 1) age = uLifetime;
         }
         if (any(greaterThan(abs(position.xz), half_.xz)) || position.y > half_.y) age = uLifetime;
     }
@@ -1342,17 +1350,39 @@ void main()
     vec4 velocity = texelFetch(uVelocities, pixel, 0);
     bool respawned = current.w < previous.w;
     vec3 position = (end == 1 && !respawned) ? previous.xyz : current.xyz;
+    int kind = int(floor(velocity.w));
+    float seed = fract(velocity.w);
     float alive = current.w < uLifetime ? 1.0 : 0.0;
-    float heat = exp(-current.w * (1.6 / max(uGlow, 0.05))) * (0.6 + 0.4 * velocity.w);
-    vec3 ember = mix(vec3(0.95, 0.22, 0.04), vec3(1.0, 0.85, 0.45), velocity.w);
-    vec3 ash = mix(vec3(0.16, 0.14, 0.13), vec3(0.32, 0.29, 0.26), velocity.w);
-    vec3 colour = mix(ash, ember * (1.0 + 1.5 * heat), smoothstep(0.0, 0.5, heat));
+    float life = current.w / max(uLifetime, 1e-3);
+    float heat = exp(-current.w * (1.6 / max(uGlow, 0.05))) * (0.6 + 0.4 * seed);
+    vec3 colour;
+    float sizeScale = 1.0;
+    if (kind == 1)
+    {
+        float flicker = 0.7 + 0.3 * sin(current.w * (14.0 + 20.0 * seed) + seed * 40.0);
+        heat = (1.0 - life) * flicker;
+        colour = mix(vec3(0.9, 0.18, 0.02), vec3(1.0, 0.78, 0.35), seed * 0.6 + 0.4 * heat) * (1.2 + 1.8 * heat);
+        sizeScale = 0.55 + 0.5 * heat;
+    }
+    else if (kind == 2)
+    {
+        float tumble = 0.55 + 0.45 * abs(sin(current.w * (5.0 + 6.0 * seed) + seed * 20.0));
+        colour = mix(vec3(0.78, 0.74, 0.66), vec3(0.96, 0.94, 0.88), seed) * tumble;
+        sizeScale = 1.4 + 0.8 * seed;
+        heat = 0.0;
+    }
+    else
+    {
+        vec3 ember = mix(vec3(0.95, 0.22, 0.04), vec3(1.0, 0.85, 0.45), seed);
+        vec3 ash = mix(vec3(0.16, 0.14, 0.13), vec3(0.32, 0.29, 0.26), seed);
+        colour = mix(ash, ember * (1.0 + 1.5 * heat), smoothstep(0.0, 0.5, heat));
+    }
     float speed = length(velocity.xyz);
-    float fade = 1.0 - smoothstep(0.8, 1.0, current.w / max(uLifetime, 1e-3));
-    float alpha = alive * fade * (end == 1 ? 0.35 * smoothstep(0.3, 3.0, speed) : 0.95);
+    float fade = 1.0 - smoothstep(0.8, 1.0, life);
+    float alpha = alive * fade * (end == 1 ? (kind == 2 ? 0.0 : 0.35 * smoothstep(0.3, 3.0, speed)) : 0.95);
     vColour = vec4(colour, alpha);
     gl_Position = uViewProjection * vec4(position, 1.0);
-    gl_PointSize = uPointSize * (0.55 + 0.9 * velocity.w) * (1.0 + 0.8 * heat);
+    gl_PointSize = uPointSize * sizeScale * (0.55 + 0.9 * seed) * (1.0 + 0.8 * heat);
 }
 `;
 
