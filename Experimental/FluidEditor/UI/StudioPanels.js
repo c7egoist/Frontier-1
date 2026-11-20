@@ -553,7 +553,8 @@ export function mountStudioUI({ app, refs })
             element('p', 'note', 'Every clone is tethered to its lattice home. Drag any force gizmo through the formation to displace it; the spring pulls it back.'),
         ] : [
             slider(node, 'Rate', 'Spawn rate', 0, 40, 0.5, '/s', 1),
-            slider(node, 'Lifetime', 'Lifetime', 0.1, 15, 0.1, 's'),
+            slider(node, 'Lifetime', 'Lifetime', 0.1, 40, 0.1, 's'),
+            slider(node, 'Linger', 'Fade-out after death', 0, 10, 0.1, 's'),
             slider(node, 'Speed', 'Launch speed', 0, 15, 0.1, 'm/s'),
             slider(node, 'Spread', 'Spread (0 = axis, 1 = omni)', 0, 1, 0.02),
         ]));
@@ -781,7 +782,7 @@ export function mountStudioUI({ app, refs })
         else
         {
             host.appendChild(card('Gizmos', 'Forces + emitters', [slider(visualizer, 'Opacity', 'Opacity', 0, 1, 0.02)]));
-            host.appendChild(element('p', 'note', 'Gizmos are inspection overlays only — they never alter solver state. Click a gizmo centre to select it, drag to move (hold Shift to lock height).'));
+            host.appendChild(element('p', 'note', 'Gizmos are inspection overlays only — they never alter solver state. Hidden by default: the selected node always shows its gizmo; Edit mode or this toggle shows all. Click a gizmo centre to select it, drag to move (hold Shift to lock height).'));
         }
     }
 

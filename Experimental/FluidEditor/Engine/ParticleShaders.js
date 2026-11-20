@@ -105,6 +105,7 @@ uniform float uBounce;
 uniform float uNoiseScale;
 uniform float uNoiseSpeed;
 uniform float uDissolve;
+uniform float uLinger;
 out vec4 fragColour;
 
 vec3 RandomDirection(vec3 seed)
@@ -135,9 +136,11 @@ void main()
     float age = p.w;
     vec3 half_ = vec3(uGrid) * uCellSize * 0.5;
     bool alive = uMode == 1 || age < uLifetime;
+    bool lingering = !alive && age < uLifetime + uLinger;
     if (index >= uCount) { fragColour = uOutput == 0 ? vec4(0.0, -1e4, 0.0, uLifetime + 1.0) : vec4(0.0, 0.0, 0.0, seed); return; }
 
-    if (!alive)
+    if (lingering) age += uDeltaTime;
+    if (!alive && !lingering)
     {
         float chance = uRate * uEnvelope * uDeltaTime;
         if (Hash31(vec3(pixel, uTime)) < chance)
@@ -172,7 +175,7 @@ void main()
             velocity.y = abs(velocity.y) * uBounce;
             velocity.xz *= 0.7;
         }
-        if (uMode == 0 && (any(greaterThan(abs(position.xz), half_.xz * 1.05)) || position.y > half_.y * 1.2 || position.y < -half_.y * 1.5)) age = uLifetime;
+        if (uMode == 0 && (any(greaterThan(abs(position.xz), half_.xz * 1.05)) || position.y > half_.y * 1.2 || position.y < -half_.y * 1.5)) age = max(age, uLifetime);
     }
     fragColour = uOutput == 0 ? vec4(position, age) : vec4(velocity, v.w);
 }
@@ -191,11 +194,13 @@ uniform float uBrightnessJitter;
 uniform float uCycleSpeed;
 uniform float uBrightness;
 uniform float uLifetime;
+uniform float uLinger;
 uniform float uMaxSpeed;
 uniform float uDisplacementRange;
 uniform float uFlicker;
 uniform float uTime;
 uniform float uDomainHeight;
+float gLinger = 1.0;
 vec3 HueToRgb(float h)
 {
     vec3 k = mod(vec3(5.0, 3.0, 1.0) + h * 6.0, 6.0);
@@ -241,6 +246,8 @@ vec3 ParticleShade(int particle, vec4 current, vec4 velocity, out float life, ou
     flicker = uFlicker > 0.0 ? mix(1.0, 0.35 + 0.65 * (0.5 + 0.5 * sin(uTime * (3.0 + 5.0 * velocity.w) + velocity.w * 50.0)), uFlicker) : 1.0;
     float fade = uMode == 1 ? 1.0 : smoothstep(0.0, 0.05, life) * (1.0 - smoothstep(0.75, 1.0, life));
     alpha = alive * fade * flicker;
+    // Trails outlive the particle: expose the linger fade (1 while alive → 0 at lifetime + linger).
+    gLinger = uMode == 1 ? 1.0 : (particle < uCount ? clamp(1.0 - (current.w - uLifetime) / max(uLinger, 1e-3), 0.0, 1.0) : 0.0);
     if (uColourMode != 4) colour *= 0.85 + 0.3 * flicker;
     return colour;
 }
@@ -321,6 +328,7 @@ uniform int   uTrailLength;
 uniform int   uHead;
 uniform int   uAdvance;
 uniform int   uReset;
+uniform float uLifetime;
 out vec4 fragColour;
 void main()
 {
@@ -332,7 +340,8 @@ void main()
     vec4 old = texelFetch(uTrails, texel, 0);
     bool respawned = uReset == 1 || current.w < previous.w || old.w < 0.5 || distance(current.xyz, previous.xyz) > 2.0;
     if (respawned) { fragColour = vec4(current.xyz, 1.0); return; }
-    fragColour = (uAdvance == 1 && slot == uHead) ? vec4(current.xyz, 1.0) : old;
+    bool frozen = current.w >= uLifetime && uLifetime > 0.0;
+    fragColour = (uAdvance == 1 && slot == uHead && !frozen) ? vec4(current.xyz, 1.0) : old;
 }
 `;
 
@@ -392,6 +401,8 @@ void main()
     vec4 velocity = texelFetch(uVelocities, pixel, 0);
     float life, alpha, flicker;
     vec3 colour = ParticleShade(particle, current, velocity, life, alpha, flicker);
+    // Ribbons ignore the head's life fade: they persist and dissolve over the linger window.
+    alpha = gLinger * flicker * smoothstep(0.0, 0.03, life);
 
     int span = segment / uSubdivisions;
     int sub = segment - span * uSubdivisions;

@@ -111,6 +111,7 @@ export class ParticleSimulation
         gl.uniform1i(uniforms.uHead, record.trailHead);
         gl.uniform1i(uniforms.uAdvance, advance ? 1 : 0);
         gl.uniform1i(uniforms.uReset, record.trailNeedsReset ? 1 : 0);
+        gl.uniform1f(uniforms.uLifetime, node.Mode === 'Cloner' ? 0 : Math.max(0.05, node.Lifetime));
         context.dispatch(record.trails.write);
         record.trails.swap();
         record.trailNeedsReset = false;
@@ -201,6 +202,7 @@ export class ParticleSimulation
             gl.uniform1f(uniforms.uNoiseScale, node.NoiseScale);
             gl.uniform1f(uniforms.uNoiseSpeed, node.NoiseSpeed);
             gl.uniform1f(uniforms.uDissolve, node.Dissolve);
+            gl.uniform1f(uniforms.uLinger, node.Linger);
             for (const output of [0, 1])
             {
                 context.textureUnit = 0;
@@ -234,6 +236,7 @@ export class ParticleSimulation
         gl.uniform1f(uniforms.uCycleSpeed, node.CycleSpeed);
         gl.uniform1f(uniforms.uBrightness, node.Brightness);
         gl.uniform1f(uniforms.uLifetime, Math.max(0.05, node.Lifetime));
+        gl.uniform1f(uniforms.uLinger, node.Linger);
         gl.uniform1f(uniforms.uMaxSpeed, node.MaxSpeed);
         gl.uniform1f(uniforms.uDisplacementRange, node.DisplacementRange);
         gl.uniform1f(uniforms.uFlicker, node.Flicker);

@@ -186,6 +186,12 @@ export const FireLooks = Object.freeze({
 
 export const ScenePresets = Object.freeze([
     {
+        Id: 'preset-blank', Name: 'Blank Stage', Icon: 'domain', Summary: 'Empty 4 × 6 × 4 m domain — build from the Asset Browser.',
+        Domain: { Resolution: [48, 72, 48], Size: [4, 6, 4], Buoyancy: 1.2, AmbientTemperature: 0, Cooling: 0.6, Vorticity: 0.35, Dissipation: 0.996 },
+        Look: { Albedo: '#8e8f94', Absorption: 3.2 },
+        Emitters: [], Forces: [],
+    },
+    {
         Id: 'preset-campfire', Name: 'Campfire', Icon: 'flame', Summary: 'Fuel-burning flame with rising embers, soot plume and a gentle crosswind.',
         Domain: { Resolution: [48, 80, 48], Size: [3, 5, 3], Buoyancy: 1.3, AmbientTemperature: 0, Cooling: 1.4, Vorticity: 0.25, Dissipation: 0.994, Combustion: 1.5 },
         Look: { Albedo: '#4b4b4f', Absorption: 4.2, FireIntensity: 5.5, FireSoftness: 3.0, FireOpacity: 1.6 },
@@ -574,6 +580,6 @@ export function createVisualizerSet()
         Tracers: { Id: 'vis-tracers', Kind: 'Visualizer', Name: 'Flow Tracers', Visible: false, Count: 8192, Lifetime: 4.0, Ramp: 'Turbo', MaxSpeed: 6, Size: 2.0 },
         Debris: { Id: 'vis-debris', Kind: 'Visualizer', Name: 'Debris', Visible: false, Count: 2048, Lifetime: 5.0, Size: 3.0, Gravity: 9.8, Drag: 1.2, Bounce: 0.35, Glow: 1.0 },
         ForceVectors: { Id: 'vis-forces', Kind: 'Visualizer', Name: 'Force Vectors', Visible: false, Mode: 'Slice', Axis: 'Z', Offset: 0.5, Stride: 3, Scale: 0.04, Ramp: 'Plasma', MaxForce: 20 },
-        ForceGizmos: { Id: 'vis-gizmos', Kind: 'Visualizer', Name: 'Force Gizmos', Visible: true, Opacity: 0.9 },
+        ForceGizmos: { Id: 'vis-gizmos', Kind: 'Visualizer', Name: 'Force Gizmos', Visible: false, Opacity: 0.9 },
     };
 }

@@ -196,6 +196,9 @@ renderer.render(scene, new OrbitCamera(), null, 1 / 60);
 check(particles.records.size === ParticleTemplates.length, `Every particle template allocates GPU state (${particles.records.size} systems)`);
 check(mockGl.__calls.uniformErrors.length === 0, `Every uniform written exists in its shader (${mockGl.__calls.uniformErrors.length} mismatches)`);
 for (const error of mockGl.__calls.uniformErrors.slice(0, 12)) console.log('     ↳ ' + error);
+check(renderer.lineVertexCount === 24, `Gizmos hidden by default: only the domain box (${renderer.lineVertexCount} line vertices)`);
+scene.Visualizers.ForceGizmos.Visible = true;
+renderer.render(scene, new OrbitCamera(), scene.Forces[0].Id, 1 / 60);
 check(renderer.lineVertexCount > 100, `Gizmo batch produced ${renderer.lineVertexCount} line vertices for ${scene.Forces.length} forces`);
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -278,7 +281,7 @@ for (const type of ForceGeneratorTypes)
     check(app.selection === force.Id, `Add ${type.Name} selects the new node`);
     renders += refs.inspector.children.length;
 }
-check(app.scene.Forces.length === ForceGeneratorTypes.length + 2, 'All generator types construct into the scene');
+check(app.scene.Forces.length === ForceGeneratorTypes.length && app.scene.PresetId === 'preset-blank', 'All generator types construct into the blank starting scene');
 app.scene.Visualizers.ForceVectors.Visible = true; app.scene.Visualizers.ForceVectors.Mode = 'Volume'; app.frame(70);
 check(app.supported, 'Sparse-volume force vector overlay renders');
 app.addEmitter('Disc'); app.addCollider();

@@ -884,11 +884,12 @@ export class VolumeRenderer
         this.beginLines();
         const half = solver.domainHalfExtent;
         this.box([0, 0, 0], half, [0.62, 0.66, 0.74, selection === 'domain' ? 0.95 : 0.45]);
-        if (gizmos.Visible)
+        const show = (node) => gizmos.Visible ? node.Visible : node.Id === selection;
+        if (true)
         {
-            for (const force of scene.Forces) if (force.Visible) this.forceGizmo(force, force.Id === selection, gizmos.Opacity * (0.3 + 0.7 * timingEnvelope(force, solver.time)), solver.time);
-            for (const emitter of scene.Emitters) if (emitter.Visible) this.emitterGizmo(emitter, emitter.Id === selection, gizmos.Opacity * (0.3 + 0.7 * timingEnvelope(emitter, solver.time)), solver.time);
-            for (const node of scene.Particles || []) if (node.Visible) this.particleGizmo(node, node.Id === selection, gizmos.Opacity * (0.3 + 0.7 * timingEnvelope(node, solver.time)), solver.time);
+            for (const force of scene.Forces) if (show(force)) this.forceGizmo(force, force.Id === selection, gizmos.Opacity * (0.3 + 0.7 * timingEnvelope(force, solver.time)), solver.time);
+            for (const emitter of scene.Emitters) if (show(emitter)) this.emitterGizmo(emitter, emitter.Id === selection, gizmos.Opacity * (0.3 + 0.7 * timingEnvelope(emitter, solver.time)), solver.time);
+            for (const node of scene.Particles || []) if (show(node)) this.particleGizmo(node, node.Id === selection, gizmos.Opacity * (0.3 + 0.7 * timingEnvelope(node, solver.time)), solver.time);
             for (const collider of scene.Colliders) if (collider.Visible && collider.Id === selection) this.sphereWire(collider.Position, collider.Radius * 1.04, [1, 1, 1, 0.8]);
         }
         if (this.lineVertexCount === 0) return;

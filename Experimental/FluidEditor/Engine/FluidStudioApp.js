@@ -388,12 +388,10 @@ export class FluidStudioApp
     pickableNodes()
     {
         const nodes = [];
-        if (this.scene.Visualizers.ForceGizmos.Visible)
-        {
-            for (const force of this.scene.Forces) if (force.Visible) nodes.push(force);
-            for (const emitter of this.scene.Emitters) if (emitter.Visible) nodes.push(emitter);
-            for (const node of this.scene.Particles) if (node.Visible) nodes.push(node);
-        }
+        const show = (node) => (this.scene.Visualizers.ForceGizmos.Visible ? node.Visible : node.Id === this.selection);
+        for (const force of this.scene.Forces) if (show(force)) nodes.push(force);
+        for (const emitter of this.scene.Emitters) if (show(emitter)) nodes.push(emitter);
+        for (const node of this.scene.Particles) if (show(node)) nodes.push(node);
         for (const collider of this.scene.Colliders) if (collider.Visible) nodes.push(collider);
         return nodes;
     }
