@@ -55,6 +55,7 @@ for (const preset of ScenePresets)
 for (const shape of ParticleShapes) check(shape === 'Point' || ParticleShaders.ParticleShapeChunk.includes(`uShape == ${ParticleShapes.indexOf(shape)}`), `Particle shape ${shape} sampled by GLSL`);
 for (const mode of ParticleColourModes) check(mode === 'Life' || ParticleShaders.ParticleRenderVertex.includes(`uColourMode == ${ParticleColourModes.indexOf(mode)}`), `Particle colour rule ${mode} shaded by GLSL`);
 check(ParticleTemplates.length >= 10 && particleTextureSide(16384) === 128 && particleTextureSide(500) === 24, `${ParticleTemplates.length} particle templates · texture sizing`);
+check(ParticleTemplates.every((template) => (template.Defaults.Palette || []).length >= 2 && template.Defaults.Palette.length <= 8) && createParticleSystem('sparks', { ColourStart: '#ff0000', ColourEnd: '#0000ff', Palette: [] }).Palette.join() === '#ff0000,#0000ff', 'Palettes: every template carries 2–8 stops; legacy Start/End back-fill');
 for (const preset of ScenePresets) for (const node of preset.Particles || []) check(ParticleTemplates.some((template) => template.Id === node.Template), `${preset.Name}: particle template ${node.Template} resolves`);
 
 //------------------------------------------------------------------------------------------------------------------------

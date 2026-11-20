@@ -272,13 +272,14 @@ export const ScenePresets = Object.freeze([
         Domain: { Resolution: [48, 48, 48], Size: [5, 5, 5], Buoyancy: 0, AmbientTemperature: 0, Cooling: 0, Vorticity: 0, Dissipation: 0.99, PressureIterations: 8 },
         Look: { Visible: false },
         Particles: [
-            { Template: 'grid-cloner', Name: 'Grid Cloner', Position: [0, 0, 0], Radius: 1.7, Count: 4096 },
+            { Template: 'grid-cloner', Name: 'Grid Cloner', Position: [0, 0, 0], Radius: 1.7, Count: 4096, Spring: 5, Damping: 2.5, SizeStart: 5, SizeEnd: 5 },
             { Template: 'ring-cloner', Name: 'Ring Cloner', Position: [0, -2.2, 0], Radius: 2.1, Count: 720, Direction: [0, 1, 0] },
         ],
         Forces: [
-            { Type: 'PointRepulsor', Name: 'Push Probe', Position: [0.8, 0.4, 0.3], Strength: 14, Radius: 1.1, Falloff: 'SmoothStep', Secondary: 0.2 },
-            { Type: 'Orbit', Position: [0, 0, 0], Strength: 5, Radius: 2.4, Falloff: 'Plateau', Frequency: 0.3, Secondary: 0.4 },
-            { Type: 'CurlNoiseTurbulence', Position: [0, 0, 0], Strength: 1.6, Radius: 3.0, Frequency: 0.9, Secondary: 0.5 },
+            { Type: 'PointRepulsor', Name: 'Push Probe', Position: [0.8, 0.4, 0.3], Strength: 28, Radius: 1.5, Falloff: 'SmoothStep', Secondary: 0.2 },
+            { Type: 'RadialBurst', Name: 'Heartbeat', Position: [0, 0, 0], Strength: 30, Radius: 2.6, Falloff: 'Cosine', Frequency: 2.4, Secondary: 0.12 },
+            { Type: 'VortexColumn', Name: 'Twist', Position: [0, -2.2, 0], Strength: 6, Radius: 2.4, Falloff: 'Plateau', Frequency: 0.2, Secondary: 0.0 },
+            { Type: 'CurlNoiseTurbulence', Position: [0, 0, 0], Strength: 2.2, Radius: 3.0, Frequency: 0.9, Secondary: 0.5 },
         ],
     },
     {

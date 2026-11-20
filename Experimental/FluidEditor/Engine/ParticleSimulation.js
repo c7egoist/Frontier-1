@@ -10,7 +10,7 @@
 
 import * as ParticleShaders from './ParticleShaders.js';
 import { FullscreenVertex } from './FluidShaders.js';
-import { ParticleShapes, ParticleModes, ParticleColourModes, ParticleBlendModes, ParticleRenderStyles, particleTextureSide } from './ParticleCatalog.js';
+import { ParticleShapes, ParticleModes, ParticleColourModes, ParticleBlendModes, ParticleRenderStyles, ParticleRampSources, MaximumPaletteStops, particleTextureSide } from './ParticleCatalog.js';
 import { ColourRamps, timingEnvelope } from './ForceGeneratorCatalog.js';
 
 function hexToRgb(hex)
@@ -39,6 +39,7 @@ export class ParticleSimulation
         };
         this.emptyVao = this.gl.createVertexArray();
         this.statistics = { systems: 0, particles: 0 };
+        this.paletteScratch = new Float32Array(MaximumPaletteStops * 3);
     }
 
     //------------------------------------------------------------------------------------------------------------------------
@@ -197,8 +198,16 @@ export class ParticleSimulation
             gl.uniformMatrix4fv(uniforms.uViewProjection, false, matrices.viewProjection);
             gl.uniform1i(uniforms.uColourMode, Math.max(0, ParticleColourModes.indexOf(node.ColourMode)));
             gl.uniform1i(uniforms.uRampMode, Math.max(0, ColourRamps.indexOf(node.Ramp)));
-            gl.uniform3fv(uniforms.uColourStart, hexToRgb(node.ColourStart));
-            gl.uniform3fv(uniforms.uColourEnd, hexToRgb(node.ColourEnd));
+            const palette = node.Palette && node.Palette.length ? node.Palette.slice(0, MaximumPaletteStops) : ['#ffffff'];
+            this.paletteScratch.fill(0);
+            palette.forEach((hex, index) => this.paletteScratch.set(hexToRgb(hex), index * 3));
+            gl.uniform3fv(uniforms.uPalette, this.paletteScratch);
+            gl.uniform1i(uniforms.uPaletteCount, palette.length);
+            gl.uniform1i(uniforms.uRampSource, Math.max(0, ParticleRampSources.indexOf(node.RampSource)));
+            gl.uniform1f(uniforms.uHueJitter, node.HueJitter);
+            gl.uniform1f(uniforms.uBrightnessJitter, node.BrightnessJitter);
+            gl.uniform1f(uniforms.uCycleSpeed, node.CycleSpeed);
+            gl.uniform1f(uniforms.uBrightness, node.Brightness);
             gl.uniform1f(uniforms.uLifetime, Math.max(0.05, node.Lifetime));
             gl.uniform1f(uniforms.uSizeStart, node.SizeStart);
             gl.uniform1f(uniforms.uSizeEnd, node.SizeEnd);

@@ -184,10 +184,15 @@ uniform mat4  uViewProjection;
 uniform ivec2 uParticleSize;
 uniform int   uMode;
 uniform int   uTrail;
-uniform int   uColourMode;    // 0 life, 1 speed, 2 displacement, 3 height, 4 seed
+uniform int   uColourMode;    // 0 life, 1 speed, 2 displacement, 3 height, 4 random hue, 5 swatch, 6 cycle
 uniform int   uRampMode;
-uniform vec3  uColourStart;
-uniform vec3  uColourEnd;
+uniform int   uRampSource;    // 0 palette gradient, 1 analytic ramp
+uniform vec3  uPalette[8];
+uniform int   uPaletteCount;
+uniform float uHueJitter;
+uniform float uBrightnessJitter;
+uniform float uCycleSpeed;
+uniform float uBrightness;
 uniform float uLifetime;
 uniform float uSizeStart;
 uniform float uSizeEnd;
@@ -204,6 +209,25 @@ vec3 HueToRgb(float h)
     vec3 k = mod(vec3(5.0, 3.0, 1.0) + h * 6.0, 6.0);
     return 1.0 - clamp(min(k, 4.0 - k), 0.0, 1.0) * 0.85;
 }
+vec3 PaletteGradient(float t)
+{
+    int count = max(uPaletteCount, 1);
+    if (count == 1) return uPalette[0];
+    float x = clamp(t, 0.0, 1.0) * float(count - 1);
+    int i = int(min(floor(x), float(count - 2)));
+    return mix(uPalette[i], uPalette[i + 1], x - float(i));
+}
+vec3 PaletteSwatch(float seed)
+{
+    return uPalette[int(min(floor(seed * float(uPaletteCount)), float(uPaletteCount - 1)))];
+}
+vec3 Gradient(float t) { return uRampSource == 1 ? Ramp(uRampMode, t) : PaletteGradient(t); }
+vec3 HueRotate(vec3 colour, float angle)
+{
+    const vec3 k = vec3(0.57735);
+    float c = cos(angle), s = sin(angle);
+    return colour * c + cross(k, colour) * s + k * dot(k, colour) * (1.0 - c);
+}
 void main()
 {
     int particle = uTrail == 1 ? gl_VertexID / 2 : gl_VertexID;
@@ -219,11 +243,16 @@ void main()
     float speed = length(velocity.xyz);
     float t;
     vec3 colour;
-    if (uColourMode == 1) { t = clamp(speed / max(uMaxSpeed, 1e-3), 0.0, 1.0); colour = Ramp(uRampMode, t); }
-    else if (uColourMode == 2) { vec3 home = ShapePoint(particle, vec3(0.0), true); t = clamp(distance(current.xyz, home) / max(uDisplacementRange, 1e-3), 0.0, 1.0); colour = Ramp(uRampMode, t); }
-    else if (uColourMode == 3) { t = clamp(current.y / max(uDomainHeight, 1e-3) + 0.5, 0.0, 1.0); colour = Ramp(uRampMode, t); }
+    if (uColourMode == 1) { t = clamp(speed / max(uMaxSpeed, 1e-3), 0.0, 1.0); colour = Gradient(t); }
+    else if (uColourMode == 2) { vec3 home = ShapePoint(particle, vec3(0.0), true); t = clamp(distance(current.xyz, home) / max(uDisplacementRange, 1e-3), 0.0, 1.0); colour = Gradient(t); }
+    else if (uColourMode == 3) { t = clamp(current.y / max(uDomainHeight, 1e-3) + 0.5, 0.0, 1.0); colour = Gradient(t); }
     else if (uColourMode == 4) { colour = HueToRgb(velocity.w); t = life; }
-    else { t = life; colour = mix(uColourStart, uColourEnd, life); }
+    else if (uColourMode == 5) { colour = PaletteSwatch(fract(velocity.w * 7.31 + 0.137)); t = life; }
+    else if (uColourMode == 6) { t = fract(uTime * uCycleSpeed + velocity.w * 0.35 + float(particle) / float(max(uCount, 1)) * 0.5); colour = PaletteGradient(abs(t * 2.0 - 1.0)); }
+    else { t = life; colour = PaletteGradient(life); }
+    if (uHueJitter > 0.0) colour = HueRotate(colour, (fract(velocity.w * 13.7) - 0.5) * uHueJitter * 6.2831853);
+    if (uBrightnessJitter > 0.0) colour *= 1.0 + (fract(velocity.w * 29.3) - 0.5) * 2.0 * uBrightnessJitter;
+    colour = max(colour, 0.0) * uBrightness;
     float flicker = uFlicker > 0.0 ? mix(1.0, 0.35 + 0.65 * (0.5 + 0.5 * sin(uTime * (3.0 + 5.0 * velocity.w) + velocity.w * 50.0)), uFlicker) : 1.0;
     float fade = uMode == 1 ? 1.0 : smoothstep(0.0, 0.05, life) * (1.0 - smoothstep(0.75, 1.0, life));
     float alpha = alive * fade * flicker * (end == 1 ? 0.3 * smoothstep(0.2, 2.5, speed) : 1.0);

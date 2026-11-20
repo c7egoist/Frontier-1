@@ -9,7 +9,7 @@ import {
     ForceGeneratorTypes, ForceTypeById, FalloffCurves, EmitterShapes, ColourRamps, SliceAxes, ScalarChannels, AdvectionSchemes, BoundaryModes,
     ScenePresets, RampStops, MaximumForceGenerators, SmokeLooks, FireLooks, ResolutionPresets, VolumeFilters, FalloffLabels, ForceCategories, VectorModes, timingEnvelope, isKeyed, DebrisKinds, EmitterPathKinds,
 } from '../Engine/ForceGeneratorCatalog.js';
-import { ParticleTemplates, ParticleTemplateById, ParticleCategories, ParticleShapes, ParticleModes, ParticleColourModes, ParticleColourLabels, ParticleBlendModes, ParticleRenderStyles, MaximumParticleSystems } from '../Engine/ParticleCatalog.js';
+import { ParticleTemplates, ParticleTemplateById, ParticleCategories, ParticleShapes, ParticleModes, ParticleColourModes, ParticleColourLabels, ParticleBlendModes, ParticleRenderStyles, ParticleRampSources, PalettePresets, MaximumPaletteStops, MaximumParticleSystems } from '../Engine/ParticleCatalog.js';
 const BoundaryLabels = { ClosedBox: 'Closed Box', OpenTop: 'Open Top', OpenAll: 'Open All' };
 
 function element(tag, className, html)
@@ -563,13 +563,21 @@ export function mountStudioUI({ app, refs })
             slider(node, 'Noise', 'Curl-noise wander', 0, 4, 0.05),
             slider(node, 'Bounce', 'Floor restitution (−0.05 = pass through)', -0.05, 0.95, 0.05),
         ]));
-        host.appendChild(card('Look', 'Sprite shading', [
+        const scalar = ['Speed', 'Displacement', 'Height'].includes(node.ColourMode);
+        const usesPalette = !scalar || node.RampSource !== 'Ramp';
+        host.appendChild(card('Colour', ParticleColourLabels[node.ColourMode], [
             choice(node, 'ColourMode', 'Colour rule', ParticleColourModes, ParticleColourLabels),
-            node.ColourMode === 'Life' ? colour(node, 'ColourStart', 'Start colour') : null,
-            node.ColourMode === 'Life' ? colour(node, 'ColourEnd', 'End colour') : null,
-            ['Speed', 'Displacement', 'Height'].includes(node.ColourMode) ? choice(node, 'Ramp', 'Colour ramp', ColourRamps) : null,
-            node.ColourMode === 'Speed' ? slider(node, 'MaxSpeed', 'Ramp max speed', 0.5, 20, 0.1, 'm/s') : null,
-            node.ColourMode === 'Displacement' ? slider(node, 'DisplacementRange', 'Ramp max displacement', 0.05, 3, 0.05, 'm') : null,
+            scalar ? choice(node, 'RampSource', 'Gradient source', ParticleRampSources, { Palette: 'Palette gradient', Ramp: 'Analytic ramp' }) : null,
+            scalar && node.RampSource === 'Ramp' ? choice(node, 'Ramp', 'Colour ramp', ColourRamps) : null,
+            usesPalette && node.ColourMode !== 'Seed' ? paletteControl(node) : null,
+            node.ColourMode === 'Speed' ? slider(node, 'MaxSpeed', 'Gradient max speed', 0.5, 20, 0.1, 'm/s') : null,
+            node.ColourMode === 'Displacement' ? slider(node, 'DisplacementRange', 'Gradient max displacement', 0.05, 3, 0.05, 'm') : null,
+            node.ColourMode === 'Cycle' ? slider(node, 'CycleSpeed', 'Cycle speed', 0, 3, 0.05, 'Hz') : null,
+            slider(node, 'HueJitter', 'Per-particle hue randomness', 0, 1, 0.02),
+            slider(node, 'BrightnessJitter', 'Per-particle brightness randomness', 0, 1, 0.02),
+            slider(node, 'Brightness', 'Brightness', 0.1, 4, 0.05, '×'),
+        ]));
+        host.appendChild(card('Sprite', 'Size & blending', [
             slider(node, 'SizeStart', 'Size at birth', 0.5, 12, 0.5, 'px'),
             slider(node, 'SizeEnd', 'Size at death', 0.5, 12, 0.5, 'px'),
             slider(node, 'Flicker', 'Flicker', 0, 1, 0.05),
@@ -578,6 +586,55 @@ export function mountStudioUI({ app, refs })
         ]));
         host.appendChild(timingCard(node));
         host.appendChild(nodeActions(node));
+    }
+
+    function paletteControl(node)
+    {
+        const control = element('div', 'control palette');
+        const head = element('div', 'control-head', `<span>Palette <span class="unit">${node.Palette.length} stops</span></span>`);
+        const tools = element('div', 'palette-tools');
+        const add = element('button', 'mini', '+');
+        add.title = 'Add stop'; add.disabled = node.Palette.length >= MaximumPaletteStops;
+        add.addEventListener('click', () => app.updateNode(node.Id, 'Palette', [...node.Palette, node.Palette[node.Palette.length - 1]]));
+        const shuffle = element('button', 'mini', icon('reset', 10));
+        shuffle.title = 'Shuffle order';
+        shuffle.addEventListener('click', () => app.updateNode(node.Id, 'Palette', [...node.Palette].sort(() => Math.random() - 0.5)));
+        const reverse = element('button', 'mini', '⇄');
+        reverse.title = 'Reverse';
+        reverse.addEventListener('click', () => app.updateNode(node.Id, 'Palette', [...node.Palette].reverse()));
+        tools.append(add, shuffle, reverse);
+        head.appendChild(tools);
+        control.appendChild(head);
+        const strip = element('div', 'palette-strip');
+        strip.style.background = `linear-gradient(90deg, ${node.Palette.length > 1 ? node.Palette.join(', ') : `${node.Palette[0]}, ${node.Palette[0]}`})`;
+        control.appendChild(strip);
+        const stops = element('div', 'palette-stops');
+        node.Palette.forEach((hex, index) =>
+        {
+            const stop = element('div', 'palette-stop');
+            const input = document.createElement('input');
+            input.type = 'color'; input.value = hex; input.title = `Stop ${index + 1}`;
+            input.addEventListener('input', () => { const next = [...node.Palette]; next[index] = input.value; app.updateNode(node.Id, 'Palette', next); });
+            stop.appendChild(input);
+            if (node.Palette.length > 1)
+            {
+                const remove = element('button', 'mini', '×');
+                remove.title = 'Remove stop';
+                remove.addEventListener('click', () => app.updateNode(node.Id, 'Palette', node.Palette.filter((_, i) => i !== index)));
+                stop.appendChild(remove);
+            }
+            stops.appendChild(stop);
+        });
+        control.appendChild(stops);
+        const presets = element('div', 'choice-row');
+        for (const [name, swatches] of Object.entries(PalettePresets))
+        {
+            const button = element('button', '', `<span class="swatch-dots">${swatches.map((hex) => `<i style="background:${hex}"></i>`).join('')}</span>${name}`);
+            button.addEventListener('click', () => app.updateNode(node.Id, 'Palette', [...swatches]));
+            presets.appendChild(button);
+        }
+        control.appendChild(presets);
+        return control;
     }
 
     function renderColliderInspector(host, collider)
