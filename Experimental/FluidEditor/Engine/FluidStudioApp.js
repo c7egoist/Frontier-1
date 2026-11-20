@@ -86,13 +86,16 @@ export class FluidStudioApp
         {
             if (this.playing || this.stepRequested)
             {
+                if (domain.SceneLoop > 0 && this.solver.time >= domain.SceneLoop) this.solver.reset();
                 this.solver.step(this.scene, deltaTime);
                 this.solver.updateTracers(deltaTime, this.scene.Visualizers.Tracers.Lifetime);
+                this.solver.updateDebris(deltaTime, this.scene.Visualizers.Debris);
                 this.stepRequested = false;
             }
-            else if (this.solver.tracersNeedReset)
+            else
             {
-                this.solver.updateTracers(0, this.scene.Visualizers.Tracers.Lifetime);
+                if (this.solver.tracersNeedReset) this.solver.updateTracers(0, this.scene.Visualizers.Tracers.Lifetime);
+                if (this.solver.debrisNeedReset) this.solver.updateDebris(0, this.scene.Visualizers.Debris);
             }
             this.lastMatrices = this.renderer.render(this.scene, this.camera, this.selection, deltaTime);
         }
@@ -143,6 +146,7 @@ export class FluidStudioApp
             Visualizers: createVisualizerSet(),
         };
         Object.assign(this.scene.Visualizers.Volume, preset.Look || {});
+        for (const [key, overrides] of Object.entries(preset.Visualizers || {})) Object.assign(this.scene.Visualizers[key], overrides);
         this.applyDomainResolution();
         this.camera.frame(this.solver.domainHalfExtent);
         this.selection = this.scene.Forces[0] ? this.scene.Forces[0].Id : 'domain';
@@ -270,7 +274,9 @@ export class FluidStudioApp
             this.applyDomainResolution();
             this.camera.frame(this.solver.domainHalfExtent);
         }
-        if (node.Kind === 'Visualizer' && key === 'Lifetime') this.solver.tracersNeedReset = true;
+        if (node.Kind === 'Visualizer' && key === 'Lifetime' && node.Id === 'vis-tracers') this.solver.tracersNeedReset = true;
+        if (node.Kind === 'Visualizer' && key === 'Lifetime' && node.Id === 'vis-debris') this.solver.debrisNeedReset = true;
+        if ((node.Kind === 'Force' || node.Kind === 'Emitter') && (key === 'StartTime' || key === 'Duration' || key === 'Repeat') && this.solver.time > (node.StartTime || 0) + (node.Duration || 0) + 0.5) this.solver.reset();
     }
 
     //------------------------------------------------------------------------------------------------------------------------

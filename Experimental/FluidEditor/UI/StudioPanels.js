@@ -7,7 +7,7 @@
 import { icon } from './StudioIcons.js';
 import {
     ForceGeneratorTypes, ForceTypeById, FalloffCurves, EmitterShapes, ColourRamps, SliceAxes, ScalarChannels, AdvectionSchemes, BoundaryModes,
-    ScenePresets, RampStops, MaximumForceGenerators, SmokeLooks, FireLooks, ResolutionPresets, VolumeFilters, FalloffLabels, ForceCategories, VectorModes,
+    ScenePresets, RampStops, MaximumForceGenerators, SmokeLooks, FireLooks, ResolutionPresets, VolumeFilters, FalloffLabels, ForceCategories, VectorModes, timingEnvelope, isKeyed,
 } from '../Engine/ForceGeneratorCatalog.js';
 const BoundaryLabels = { ClosedBox: 'Closed Box', OpenTop: 'Open Top', OpenAll: 'Open All' };
 
@@ -40,7 +40,7 @@ function nodeIcon(node)
     if (node.Kind === 'Emitter') return node.Fuel > 0 ? 'flame' : 'smoke';
     if (node.Kind === 'Collider') return 'collider';
     if (node.Kind === 'Domain') return 'domain';
-    return { 'vis-volume': 'volume', 'vis-vectors': 'vectors', 'vis-slice': 'slice', 'vis-tracers': 'tracers', 'vis-gizmos': 'gizmo', 'vis-forces': 'dburst' }[node.Id] || 'cube';
+    return { 'vis-volume': 'volume', 'vis-vectors': 'vectors', 'vis-slice': 'slice', 'vis-tracers': 'tracers', 'vis-gizmos': 'gizmo', 'vis-forces': 'dburst', 'vis-debris': 'debris' }[node.Id] || 'cube';
 }
 
 function nodeTint(node)
@@ -140,8 +140,8 @@ export function mountStudioUI({ app, refs })
         switch (node.Kind)
         {
             case 'Domain': return `${node.Size.map((extent) => extent.toFixed(1)).join(' × ')} m · ${(node.CellSize * 100).toFixed(1)} cm voxels · ${BoundaryLabels[node.Boundary]}`;
-            case 'Force': return `${ForceTypeById[node.Type].Name} · ${formatNumber(node.Strength, 1)} · ${FalloffLabels[node.Falloff]}`;
-            case 'Emitter': return `${node.Shape} · ρ ${formatNumber(node.Density, 1)} · T ${formatNumber(node.Temperature, 1)}${node.Fuel > 0 ? ' · fuel' : ''}`;
+            case 'Force': return `${ForceTypeById[node.Type].Name} · ${formatNumber(node.Strength, 1)} · ${FalloffLabels[node.Falloff]}${keyedSuffix(node)}`;
+            case 'Emitter': return `${node.Shape} · ρ ${formatNumber(node.Density, 1)} · T ${formatNumber(node.Temperature, 1)}${node.Fuel > 0 ? ' · fuel' : ''}${node.Debris > 0 ? ' · debris' : ''}${keyedSuffix(node)}`;
             case 'Collider': return `Sphere · r ${formatNumber(node.Radius, 2)} m`;
             default:
                 if (node.Id === 'vis-vectors') return `${node.Axis} slice · stride ${node.Stride}`;
@@ -149,8 +149,37 @@ export function mountStudioUI({ app, refs })
                 if (node.Id === 'vis-tracers') return `${node.Count} tracers · ${formatNumber(node.Lifetime, 1)} s`;
                 if (node.Id === 'vis-volume') return `${node.Steps} steps · ${node.ShadowSteps} shadow`;
                 if (node.Id === 'vis-forces') return `${node.Mode} · stride ${node.Stride}`;
+                if (node.Id === 'vis-debris') return `${node.Count} particles · ${formatNumber(node.Lifetime, 1)} s`;
                 return 'Force + emitter overlays';
         }
+    }
+
+    function keyedSuffix(node)
+    {
+        if (!isKeyed(node)) return '';
+        return ` · ⏱ ${formatNumber(node.StartTime || 0, 1)}${node.Duration > 0 ? `–${formatNumber((node.StartTime || 0) + node.Duration, 1)}` : '+'} s`;
+    }
+
+    function timingCard(node)
+    {
+        const time = app.solver ? app.solver.time : 0;
+        const envelope = timingEnvelope(node, time);
+        const stateText = !isKeyed(node) ? 'ALWAYS' : envelope > 0 ? `LIVE ${Math.round(envelope * 100)}%` : time < (node.StartTime || 0) ? 'WAITING' : 'DONE';
+        const track = element('div', 'key-track');
+        const loop = app.scene.Domain.SceneLoop > 0 ? app.scene.Domain.SceneLoop : Math.max(6, (node.StartTime || 0) + (node.Duration || 2) + 1);
+        const left = Math.min(100, ((node.StartTime || 0) / loop) * 100);
+        const width = node.Duration > 0 ? Math.min(100 - left, (node.Duration / loop) * 100) : 100 - left;
+        track.innerHTML = `<span class="key-span" style="left:${left}%;width:${width}%"></span><span class="key-head" style="left:${Math.min(100, (time % loop) / loop * 100)}%"></span>`;
+        const tile = statusTile('Keyed', stateText, 'clock', isKeyed(node), () => app.updateNode(node.Id, 'Duration', isKeyed(node) ? 0 : 1.0));
+        return card('Timing Keys', `${formatNumber(time, 1)} s / ${formatNumber(loop, 1)} s`, [
+            tile,
+            track,
+            slider(node, 'StartTime', 'Start time', 0, 20, 0.05, 's'),
+            slider(node, 'Duration', 'Duration (0 = stays on)', 0, 20, 0.05, 's'),
+            slider(node, 'Fade', 'Fade in / out', 0.01, 2, 0.01, 's'),
+            slider(node, 'Repeat', 'Repeat every (0 = once)', 0, 20, 0.1, 's'),
+            element('p', 'note', 'Keys scale the strength (or emission) by a trapezoid envelope on the solver clock. Set a Scene Loop on the domain to replay the sequence automatically.'),
+        ]);
     }
 
     function renderTreeItem(node, selection)
@@ -374,6 +403,7 @@ export function mountStudioUI({ app, refs })
             slider(domain, 'Dissipation', 'Density retention', 0.95, 1, 0.001, '', 3),
             slider(domain, 'VelocityDissipation', 'Velocity retention', 0.95, 1, 0.001, '', 3),
             slider(domain, 'TimeScale', 'Time scale', 0.1, 3, 0.05, '×'),
+            slider(domain, 'SceneLoop', 'Scene loop (0 = off)', 0, 30, 0.5, 's', 1),
         ]));
         const actions = element('div', 'action-row');
         const reset = element('button', '', `${icon('reset', 12)} Reset fields`);
@@ -439,6 +469,7 @@ export function mountStudioUI({ app, refs })
             vector(force, 'Position', 'Position (m)'),
             vector(force, 'Direction', 'Direction / axis', 0.1),
         ]));
+        host.appendChild(timingCard(force));
         host.appendChild(nodeActions(force));
     }
 
@@ -470,6 +501,12 @@ export function mountStudioUI({ app, refs })
             slider(emitter, 'Pulse', 'Pulse period', 0, 5, 0.1, 's'),
         ]));
         host.appendChild(card('Exit Velocity', 'm/s', [vector(emitter, 'Velocity', 'Velocity', 0.1)]));
+        host.appendChild(card('Debris', 'Ballistic ejecta', [
+            slider(emitter, 'Debris', 'Debris amount', 0, 1, 0.02),
+            slider(emitter, 'DebrisSpeed', 'Ejection speed', 0, 20, 0.5, 'm/s', 1),
+            element('p', 'note', 'Debris particles launch from the emitter while it is active, fly under gravity, get dragged by the gas, bounce on the floor and cool from ember to ash. Shown by the Debris visualizer.'),
+        ]));
+        host.appendChild(timingCard(emitter));
         host.appendChild(nodeActions(emitter));
     }
 
@@ -567,6 +604,19 @@ export function mountStudioUI({ app, refs })
                 choice(visualizer, 'Ramp', 'Colour ramp', ColourRamps),
             ]));
         }
+        else if (visualizer.Id === 'vis-debris')
+        {
+            host.appendChild(card('Debris', 'Ballistic GPU particles', [
+                slider(visualizer, 'Count', 'Particle budget', 256, 4096, 256, '', 0),
+                slider(visualizer, 'Lifetime', 'Lifetime', 1, 15, 0.5, 's'),
+                slider(visualizer, 'Size', 'Point size', 1, 8, 0.5, 'px'),
+                slider(visualizer, 'Gravity', 'Gravity', 0, 20, 0.1, 'm/s²'),
+                slider(visualizer, 'Drag', 'Gas coupling', 0, 6, 0.1),
+                slider(visualizer, 'Bounce', 'Floor restitution', 0, 0.9, 0.05),
+                slider(visualizer, 'Glow', 'Ember glow time', 0.1, 4, 0.1, 's'),
+            ]));
+            host.appendChild(element('p', 'note', 'Debris is sourced from emitters with a Debris amount above zero. Hot fragments glow, cool to ash, and come to rest on the domain floor.'));
+        }
         else if (visualizer.Id === 'vis-tracers')
         {
             host.appendChild(card('Flow Tracers', 'GPU particles', [
@@ -634,7 +684,7 @@ export function mountStudioUI({ app, refs })
         cameraSelect.appendChild(select);
         rowB.appendChild(cameraSelect);
         rowB.appendChild(element('div', 'toolbar-spacer'));
-        for (const [id, glyph, title] of [['vis-volume', 'volume', 'Volume render'], ['vis-vectors', 'vectors', 'Velocity vectors'], ['vis-slice', 'slice', 'Scalar slice'], ['vis-tracers', 'tracers', 'Flow tracers'], ['vis-forces', 'dburst', 'Force field vectors'], ['vis-gizmos', 'gizmo', 'Force gizmos']])
+        for (const [id, glyph, title] of [['vis-volume', 'volume', 'Volume render'], ['vis-vectors', 'vectors', 'Velocity vectors'], ['vis-slice', 'slice', 'Scalar slice'], ['vis-tracers', 'tracers', 'Flow tracers'], ['vis-forces', 'dburst', 'Force field vectors'], ['vis-debris', 'debris', 'Debris particles'], ['vis-gizmos', 'gizmo', 'Force gizmos']])
         {
             const visualizer = Object.values(scene.Visualizers).find((candidate) => candidate.Id === id);
             const button = element('button', 'view-toggle' + (visualizer.Visible ? ' active' : ''), icon(glyph, 14));

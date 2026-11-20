@@ -15,7 +15,7 @@ import { VolumeRenderer } from './Engine/VolumeRenderer.js';
 import { OrbitCamera } from './Engine/OrbitCamera.js';
 import {
     ForceGeneratorTypes, ForceTypeById, FalloffCurves, EmitterShapes, BoundaryModes, ScenePresets, createDomain, createEmitter, createForceGenerator,
-    createCollider, createVisualizerSet, MaximumForceGenerators,
+    createCollider, createVisualizerSet, MaximumForceGenerators, timingEnvelope,
 } from './Engine/ForceGeneratorCatalog.js';
 
 const Folder = path.dirname(fileURLToPath(import.meta.url));
@@ -273,12 +273,19 @@ ui.toggleDrawer(true, 'forces');
 check(refs.drawer.children.length === 2 && refs.drawer.children[1].children.reduce((sum, group) => sum + group.children[1].children.length, 0) === ForceGeneratorTypes.length, 'Asset drawer lists every force generator card grouped by category');
 app.loadPreset('preset-campfire');
 app.updateNode(app.scene.Domain.Id, 'MaxCells', 48);
-check(app.solver.layout.height === 48 && app.solver.layout.width === 24, 'MaxCells edits rebuild the solver fields at fixed world size (3×6×3 m → 24×48×24)');
+check(app.solver.layout.height === 48 && app.solver.layout.width === 29, `MaxCells edits rebuild the solver fields at fixed world size (3×5×3 m → ${app.solver.layout.width}×${app.solver.layout.height}×${app.solver.layout.depth})`);
 app.updateNode(app.scene.Domain.Id, 'Size', [4, 6, 4]);
 check(app.solver.layout.width === 32 && Math.abs(app.scene.Domain.CellSize - 0.125) < 1e-9, 'Size edits keep the voxel count on the longest axis');
 const exported = app.exportJson();
 app.importJson(exported);
 check(app.scene.Domain.Resolution.join() === '32,48,32' && app.scene.Domain.MaxCells === 48, 'Export → import preserves the edited domain');
+app.loadPreset('preset-demolition');
+const charge = app.scene.Emitters[0];
+check(timingEnvelope(charge, 0.1) === 0 && timingEnvelope(charge, 0.3) === 1 && timingEnvelope(charge, 1.0) === 0, 'Timing keys gate the ground charge (waiting → live → done)');
+check(timingEnvelope({ StartTime: 1, Duration: 1, Fade: 0.5, Repeat: 3 }, 4.5) === 1 && timingEnvelope({}, 99) === 1, 'Repeat keys loop; un-keyed nodes stay on');
+app.scene.Visualizers.Debris.Visible = true; app.frame(80); app.frame(96); app.frame(112);
+check(app.supported && app.solver.debrisPositions && app.solver.debrisVelocities, 'Debris particle ping-pong integrates + renders through the app loop');
+app.scene.Domain.SceneLoop = 0.01; app.frame(130); check(app.solver.frame <= 1, 'Scene loop restarts the solver clock');
 
 console.log(Failures === 0 ? '\n🟢 Fluid Studio validation passed' : `\n🔴 Fluid Studio validation failed (${Failures})`);
 process.exit(Failures === 0 ? 0 : 1);

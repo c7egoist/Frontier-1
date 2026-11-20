@@ -36,6 +36,10 @@ Fields are 3D grids stored as 2D tile atlases (`RGBA16F`, hardware bilinear + ma
 | 6 | Projection | `DivergenceFragment` → `PressureFragment` × N Jacobi → `GradientFragment` with closed / open-top / open boundaries and solid Neumann cells |
 | 7 | Tracers | `TracerUpdateFragment` — RK2 particle integration, lifetime respawn, previous-frame copy for trails |
 
+### Timing keys (forces + emitters)
+
+Every force generator and emitter carries `StartTime · Duration · Fade · Repeat`. The solver scales strength (or emission) by a trapezoid envelope on its own clock, so a curl-noise generator can be live only during an explosion's roll-up and silent afterwards; a Scene Loop on the domain replays the sequence. Keyed nodes show a ⏱ range in the Outliner, a key track in the Inspector and a dimmed gizmo while inactive.
+
 ### Force generators (`Engine/ForceGeneratorCatalog.js` ↔ `ForceFieldChunk`) — the merged ForceField editor
 
 | Category | Types |
@@ -55,6 +59,7 @@ Falloff envelopes: `Smooth · Linear · Inverse² · Infinite · Gaussian · Pla
 
 - **Volume Render** — single-pass ray-march with jittered steps, directional shadow march, Henyey-Greenstein forward scattering, editable **fire incandescence ramp** (ember → flame → core colours, ignition temperature, span, flame opacity, emission), soot lit by its own flame, editable smoke albedo / extinction / ambient / sun / exposure with `Wood · Gas · Fuel · Magic` fire and `Soot · Grey · Steam · Dust` smoke look chips, ACES tone map; analytic ground grid + sphere colliders share the same ray.
 - **Velocity Vectors** — GPU-generated arrow lines on an axis-aligned slice (stride, scale, Turbo / Engineering / Plasma / Diverging ramps).
+- **Debris** — ballistic GPU particles launched from emitters with a Debris amount: gravity, gas-coupled drag, floor bounce, ember-to-ash cooling, streak trails.
 - **Force Vectors** — GPU-evaluated Σ-force arrows on a slice plane or as a sparse 3D lattice, coloured by |F|.
 - **Scalar Slice** — heat-map of `Speed · Pressure · Vorticity · Temperature · Density · Divergence · Force |F|` (force magnitude is evaluated live from the generator uniforms).
 - **Flow Tracers** — 8 192 GPU particles with speed-coloured points + trails.

@@ -31,6 +31,8 @@ const Glyphs = {
     brownian: '<path d="M4 16l3-6 2 4 3-9 2 7 2-3 2 5 2-2"/>',
     shockwave: '<circle cx="12" cy="12" r="2"/><circle cx="12" cy="12" r="6" stroke-dasharray="2 2"/><circle cx="12" cy="12" r="9"/>',
     implosion: '<circle cx="12" cy="12" r="2.5"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><path d="M10 5l2 2 2-2M10 19l2-2 2 2M5 10l2 2-2 2M19 10l-2 2 2 2"/><circle cx="12" cy="12" r="9" stroke-dasharray="2 3"/>',
+    debris: '<path d="M12 4l1.5 3.5L17 9l-3.5 1.5L12 14l-1.5-3.5L7 9l3.5-1.5z"/><path d="M5 17l1-2 1 2M17 18l1-2 1 2M11 20l1-2 1 2"/><path d="M4 21h16"/>',
+    clock: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>',
     collider: '<circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4a12 12 0 0 1 0 16M12 4a12 12 0 0 0 0 16"/>',
     camera: '<rect x="3" y="7" width="13" height="10" rx="2"/><path d="M16 10l5-2v8l-5-2z"/>',
     vectors: '<path d="M4 20L20 4"/><path d="M13 4h7v7"/><path d="M4 12l5-5M4 6l2-2"/>',

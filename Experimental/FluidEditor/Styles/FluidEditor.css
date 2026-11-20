@@ -265,3 +265,7 @@ input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; border: 0; bo
     .dock-left { display: none; }
     .dock-right { max-height: 42vh; }
 }
+
+.key-track { position: relative; height: 10px; margin: 4px 0 8px; border-radius: 6px; background: #141416; border: 1px solid rgba(255,255,255,.07); overflow: hidden; }
+.key-span { position: absolute; top: 0; bottom: 0; background: linear-gradient(90deg, rgba(255,180,84,.55), rgba(255,180,84,.85)); border-radius: 6px; }
+.key-head { position: absolute; top: -1px; bottom: -1px; width: 2px; background: #38bdf8; box-shadow: 0 0 6px #38bdf8; }

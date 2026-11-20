@@ -6,7 +6,7 @@
 
 import * as Shaders from './FluidShaders.js';
 import { Vec3 } from './OrbitCamera.js';
-import { ForceTypeById, ColourRamps, ScalarChannels, SliceAxes, VolumeFilters, VectorModes } from './ForceGeneratorCatalog.js';
+import { ForceTypeById, ColourRamps, ScalarChannels, SliceAxes, VolumeFilters, VectorModes, timingEnvelope } from './ForceGeneratorCatalog.js';
 
 function hexToRgb(hex)
 {
@@ -28,6 +28,7 @@ export class VolumeRenderer
             forceVectors: context.createProgram('ForceVectors', Shaders.ForceVectorVertex, Shaders.ColourFragment),
             slice: context.createProgram('Slice', Shaders.SliceVertex, Shaders.SliceFragment),
             tracers: context.createProgram('Tracers', Shaders.TracerRenderVertex, Shaders.ColourFragment),
+            debris: context.createProgram('Debris', Shaders.DebrisRenderVertex, Shaders.ColourFragment),
             lines: context.createProgram('Lines', Shaders.LineVertex, Shaders.ColourFragment),
         };
         this.emptyVao = gl.createVertexArray();
@@ -72,6 +73,7 @@ export class VolumeRenderer
         if (visualizers.ForceVectors && visualizers.ForceVectors.Visible) this.renderForceVectors(visualizers.ForceVectors, matrices);
         if (visualizers.Tracers.Visible) this.renderTracers(visualizers.Tracers, matrices, deltaTime);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        if (visualizers.Debris && visualizers.Debris.Visible) this.renderDebris(visualizers.Debris, matrices);
         this.renderGizmos(scene, matrices, selection);
         gl.disable(gl.BLEND);
         return matrices;
@@ -227,6 +229,28 @@ export class VolumeRenderer
         gl.uniform1f(uniforms.uRespawnDistance, solver.cellSize * 10);
         gl.uniform1f(uniforms.uLifetime, settings.Lifetime);
         gl.uniform1i(uniforms.uRampMode, Math.max(0, ColourRamps.indexOf(settings.Ramp)));
+        gl.bindVertexArray(this.emptyVao);
+        gl.uniform1i(uniforms.uTrail, 1);
+        gl.drawArrays(gl.LINES, 0, count * 2);
+        gl.uniform1i(uniforms.uTrail, 0);
+        gl.drawArrays(gl.POINTS, 0, count);
+        gl.bindVertexArray(null);
+    }
+
+    renderDebris(settings, matrices)
+    {
+        const gl = this.gl, context = this.context, solver = this.solver;
+        const count = Math.min(solver.debrisCount, Math.max(0, Math.round(settings.Count)));
+        if (count === 0) return;
+        const uniforms = context.use(this.programs.debris);
+        context.bindTexture('uPositions', solver.debrisPositions.read.texture);
+        context.bindTexture('uVelocities', solver.debrisVelocities.read.texture);
+        context.bindTexture('uPrevious', solver.debrisPrevious.texture);
+        gl.uniformMatrix4fv(uniforms.uViewProjection, false, matrices.viewProjection);
+        gl.uniform2i(uniforms.uParticleSize, solver.debrisSize[0], solver.debrisSize[1]);
+        gl.uniform1f(uniforms.uPointSize, settings.Size * (typeof window !== "undefined" ? Math.min(window.devicePixelRatio || 1, 1.5) : 1));
+        gl.uniform1f(uniforms.uLifetime, settings.Lifetime);
+        gl.uniform1f(uniforms.uGlow, settings.Glow);
         gl.bindVertexArray(this.emptyVao);
         gl.uniform1i(uniforms.uTrail, 1);
         gl.drawArrays(gl.LINES, 0, count * 2);
@@ -811,8 +835,8 @@ export class VolumeRenderer
         this.box([0, 0, 0], half, [0.62, 0.66, 0.74, selection === 'domain' ? 0.95 : 0.45]);
         if (gizmos.Visible)
         {
-            for (const force of scene.Forces) if (force.Visible) this.forceGizmo(force, force.Id === selection, gizmos.Opacity, solver.time);
-            for (const emitter of scene.Emitters) if (emitter.Visible) this.emitterGizmo(emitter, emitter.Id === selection, gizmos.Opacity);
+            for (const force of scene.Forces) if (force.Visible) this.forceGizmo(force, force.Id === selection, gizmos.Opacity * (0.3 + 0.7 * timingEnvelope(force, solver.time)), solver.time);
+            for (const emitter of scene.Emitters) if (emitter.Visible) this.emitterGizmo(emitter, emitter.Id === selection, gizmos.Opacity * (0.3 + 0.7 * timingEnvelope(emitter, solver.time)));
             for (const collider of scene.Colliders) if (collider.Visible && collider.Id === selection) this.sphereWire(collider.Position, collider.Radius * 1.04, [1, 1, 1, 0.8]);
         }
         if (this.lineVertexCount === 0) return;

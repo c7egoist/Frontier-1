@@ -1234,6 +1234,128 @@ void main()
 }
 `;
 
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                  DEBRIS PARTICLES
+//------------------------------------------------------------------------------------------------------------------------
+
+export const DebrisUpdateFragment = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+${VolumeChunk}
+${NoiseChunk}
+#define MAX_EMITTERS 6
+uniform sampler2D uPositions;     // xyz position, w age
+uniform sampler2D uVelocities;    // xyz velocity, w seed
+uniform sampler2D uVelocity;      // gas velocity volume
+uniform int   uOutput;            // 0 positions, 1 velocities
+uniform int   uReset;
+uniform int   uEmitterCount;
+uniform vec4  uEmitterA[MAX_EMITTERS];  // position.xyz, radius
+uniform vec4  uEmitterB[MAX_EMITTERS];  // velocity.xyz, density
+uniform vec4  uEmitterE[MAX_EMITTERS];  // debris amount, debris speed, envelope, unused
+uniform float uDeltaTime;
+uniform float uTime;
+uniform float uLifetime;
+uniform float uGravity;
+uniform float uDrag;
+uniform float uBounce;
+out vec4 fragColour;
+vec3 RandomDirection(vec3 seed)
+{
+    float z = Hash31(seed) * 2.0 - 1.0;
+    float a = Hash31(seed.zxy + 5.1) * 6.2831853;
+    float r = sqrt(max(0.0, 1.0 - z * z));
+    return vec3(r * cos(a), z, r * sin(a));
+}
+void main()
+{
+    vec2 pixel = floor(gl_FragCoord.xy);
+    vec4 p = texelFetch(uPositions, ivec2(pixel), 0);
+    vec4 v = texelFetch(uVelocities, ivec2(pixel), 0);
+    float seed = Hash31(vec3(pixel, 11.7));
+    if (uReset == 1)
+    {
+        fragColour = uOutput == 0 ? vec4(0.0, -1e4, 0.0, uLifetime + 1.0) : vec4(0.0, 0.0, 0.0, seed);
+        return;
+    }
+    vec3 position = p.xyz;
+    float age = p.w;
+    vec3 velocity = v.xyz;
+    vec3 half_ = vec3(uGrid) * uCellSize * 0.5;
+    bool dead = age >= uLifetime;
+    if (dead && uEmitterCount > 0)
+    {
+        int index = int(mod(pixel.x + pixel.y * 7.0, float(uEmitterCount)));
+        vec4 e = uEmitterE[index];
+        float chance = e.x * e.z * uDeltaTime * 9.0;
+        if (Hash31(vec3(pixel, uTime)) < chance)
+        {
+            vec4 a = uEmitterA[index];
+            vec3 direction = RandomDirection(vec3(pixel, uTime + 3.3));
+            position = a.xyz + direction * a.w * Hash31(vec3(pixel.yx, uTime));
+            float speed = e.y * (0.35 + 0.65 * Hash31(vec3(pixel, uTime + 9.1)));
+            velocity = uEmitterB[index].xyz + direction * speed + vec3(0.0, 0.45 * e.y, 0.0);
+            age = 0.0;
+            dead = false;
+        }
+    }
+    if (!dead)
+    {
+        age += uDeltaTime;
+        vec3 gas = SampleVolume(uVelocity, CellFromWorld(position)).xyz;
+        velocity += vec3(0.0, -uGravity, 0.0) * uDeltaTime;
+        velocity += (gas - velocity) * min(1.0, uDrag * uDeltaTime * (0.6 + 0.8 * v.w));
+        position += velocity * uDeltaTime;
+        float floorY = -half_.y + uCellSize * 0.5;
+        if (position.y < floorY)
+        {
+            position.y = floorY;
+            velocity.y = abs(velocity.y) * uBounce;
+            velocity.xz *= 0.55;
+            if (velocity.y < 0.25) velocity = vec3(0.0);
+        }
+        if (any(greaterThan(abs(position.xz), half_.xz)) || position.y > half_.y) age = uLifetime;
+    }
+    fragColour = uOutput == 0 ? vec4(position, age) : vec4(velocity, v.w);
+}
+`;
+
+export const DebrisRenderVertex = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+uniform sampler2D uPositions;
+uniform sampler2D uVelocities;
+uniform sampler2D uPrevious;
+uniform mat4  uViewProjection;
+uniform ivec2 uParticleSize;
+uniform float uPointSize;
+uniform float uLifetime;
+uniform float uGlow;
+uniform int   uTrail;
+out vec4 vColour;
+void main()
+{
+    int particle = uTrail == 1 ? gl_VertexID / 2 : gl_VertexID;
+    int end = uTrail == 1 ? gl_VertexID - particle * 2 : 0;
+    ivec2 pixel = ivec2(particle - (particle / uParticleSize.x) * uParticleSize.x, particle / uParticleSize.x);
+    vec4 current = texelFetch(uPositions, pixel, 0);
+    vec4 previous = texelFetch(uPrevious, pixel, 0);
+    vec4 velocity = texelFetch(uVelocities, pixel, 0);
+    bool respawned = current.w < previous.w;
+    vec3 position = (end == 1 && !respawned) ? previous.xyz : current.xyz;
+    float alive = current.w < uLifetime ? 1.0 : 0.0;
+    float heat = exp(-current.w * (1.6 / max(uGlow, 0.05))) * (0.6 + 0.4 * velocity.w);
+    vec3 ember = mix(vec3(0.95, 0.22, 0.04), vec3(1.0, 0.85, 0.45), velocity.w);
+    vec3 ash = mix(vec3(0.16, 0.14, 0.13), vec3(0.32, 0.29, 0.26), velocity.w);
+    vec3 colour = mix(ash, ember * (1.0 + 1.5 * heat), smoothstep(0.0, 0.5, heat));
+    float speed = length(velocity.xyz);
+    float fade = 1.0 - smoothstep(0.8, 1.0, current.w / max(uLifetime, 1e-3));
+    float alpha = alive * fade * (end == 1 ? 0.35 * smoothstep(0.3, 3.0, speed) : 0.95);
+    vColour = vec4(colour, alpha);
+    gl_Position = uViewProjection * vec4(position, 1.0);
+    gl_PointSize = uPointSize * (0.55 + 0.9 * velocity.w) * (1.0 + 0.8 * heat);
+}
+`;
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                  GIZMO LINES
 //------------------------------------------------------------------------------------------------------------------------

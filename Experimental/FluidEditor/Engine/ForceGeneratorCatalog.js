@@ -186,50 +186,69 @@ export const FireLooks = Object.freeze({
 
 export const ScenePresets = Object.freeze([
     {
-        Id: 'preset-campfire', Name: 'Campfire', Icon: 'flame', Summary: 'Fuel-burning flame with soot plume and gentle crosswind.',
-        Domain: { Resolution: [48, 96, 48], Size: [3, 6, 3], Buoyancy: 1.6, AmbientTemperature: 0, Cooling: 0.8, Vorticity: 0.35, Dissipation: 0.995, Combustion: 1.2 },
-        Look: { Albedo: '#4b4b4f', Absorption: 4.0, FireIntensity: 4.5 },
+        Id: 'preset-campfire', Name: 'Campfire', Icon: 'flame', Summary: 'Fuel-burning flame with rising embers, soot plume and a gentle crosswind.',
+        Domain: { Resolution: [48, 80, 48], Size: [3, 5, 3], Buoyancy: 1.5, AmbientTemperature: 0, Cooling: 1.5, Vorticity: 0.45, Dissipation: 0.994, Combustion: 1.6 },
+        Look: { Albedo: '#4b4b4f', Absorption: 4.2, FireIntensity: 5.5, FireSoftness: 3.0, FireOpacity: 1.6 },
+        Visualizers: { Debris: { Visible: true, Count: 1024, Lifetime: 2.6, Size: 2.0, Drag: 2.4, Glow: 1.2 } },
         Emitters: [
-            { Name: 'Fire Source', Shape: 'Disc', Position: [0, -2.7, 0], Radius: 0.42, Density: 0.3, Temperature: 4.5, Fuel: 1.0, Velocity: [0, 1.2, 0], Jitter: 0.6 },
+            { Name: 'Fire Source', Shape: 'Disc', Position: [0, -2.3, 0], Radius: 0.42, Density: 0.3, Temperature: 5.0, Fuel: 1.3, Velocity: [0, 1.0, 0], Jitter: 0.75, Debris: 0.12, DebrisSpeed: 2.4 },
         ],
         Forces: [
-            { Type: 'DirectionalWind', Position: [0, 0, 0], Strength: 1.2, Direction: [1, 0, 0.2], Falloff: 'Constant', Frequency: 0.5, Secondary: 0.6 },
-            { Type: 'CurlNoiseTurbulence', Position: [0, 0.3, 0], Strength: 2.5, Radius: 2.0, Frequency: 2.4, Secondary: 0.9 },
+            { Type: 'DirectionalWind', Position: [0, 0, 0], Strength: 0.8, Direction: [1, 0, 0.2], Falloff: 'Constant', Frequency: 0.5, Secondary: 0.7 },
+            { Type: 'CurlNoiseTurbulence', Name: 'Flame Flicker', Position: [0, -1.4, 0], Strength: 1.6, Radius: 1.1, Falloff: 'Gaussian', Frequency: 3.0, Secondary: 1.3 },
         ],
     },
     {
-        Id: 'preset-smoke-plume', Name: 'Smoke Plume', Icon: 'smoke', Summary: 'Dense cold smoke rising through a vortex column.',
-        Domain: { Resolution: [48, 96, 48], Size: [3, 6, 3], Buoyancy: 0.9, AmbientTemperature: 0, Cooling: 0.4, Vorticity: 0.5, Dissipation: 0.998 },
+        Id: 'preset-smoke-plume', Name: 'Smoke Plume', Icon: 'smoke', Summary: 'Cold smoke that rises, cools and thins out before the roof of the domain.',
+        Domain: { Resolution: [48, 84, 48], Size: [4, 7, 4], Buoyancy: 0.55, AmbientTemperature: 0, Cooling: 0.9, Vorticity: 0.45, Dissipation: 0.996 },
         Look: { Albedo: '#8e8f94', Absorption: 3.2 },
         Emitters: [
-            { Name: 'Smoke Stack', Shape: 'Sphere', Position: [0, -2.5, 0], Radius: 0.35, Density: 1.4, Temperature: 1.1, Fuel: 0, Velocity: [0, 1.5, 0], Jitter: 0.3 },
+            { Name: 'Smoke Stack', Shape: 'Sphere', Position: [0, -3.0, 0], Radius: 0.35, Density: 1.2, Temperature: 0.9, Fuel: 0, Velocity: [0, 0.9, 0], Jitter: 0.3 },
         ],
         Forces: [
-            { Type: 'VortexColumn', Position: [0, 0, 0], Strength: 7, Radius: 1.6, Frequency: 0.6, Secondary: 1.2 },
+            { Type: 'VortexColumn', Position: [0, -0.5, 0], Strength: 4.0, Radius: 1.4, Frequency: 0.4, Secondary: 0.4 },
+            { Type: 'DragBaffle', Name: 'Ceiling Brake', Position: [0, 2.7, 0], Strength: 1.2, Radius: 2.2, Falloff: 'Plateau' },
         ],
     },
     {
-        Id: 'preset-explosion', Name: 'Explosion', Icon: 'burst', Summary: 'Radial burst detonation with high-temperature fireball.',
-        Domain: { Resolution: [64, 96, 64], Size: [4, 6, 4], Buoyancy: 1.0, AmbientTemperature: 0, Cooling: 1.1, Vorticity: 0.6, Dissipation: 0.993, Combustion: 1.8 },
-        Look: { Albedo: '#3f3d3c', Absorption: 4.5, FireIntensity: 6.0, FireOpacity: 2.0, FireSoftness: 4.5, FireEmber: '#b3120a', FireFlame: '#ff6a00', FireCore: '#ffd27a', Exposure: 1.0 },
+        Id: 'preset-explosion', Name: 'Explosion', Icon: 'burst', Summary: 'Single keyed detonation — 0.35 s fireball, short roll-up turbulence, then a free-rising mushroom that never reaches the roof.',
+        Domain: { Resolution: [60, 80, 60], Size: [6, 8, 6], Buoyancy: 0.8, AmbientTemperature: 0, Cooling: 1.4, Vorticity: 0.5, Dissipation: 0.992, Combustion: 1.8, SceneLoop: 7 },
+        Look: { Albedo: '#3f3d3c', Absorption: 4.5, FireIntensity: 6.0, FireOpacity: 2.0, FireSoftness: 4.0, FireEmber: '#b3120a', FireFlame: '#ff6a00', FireCore: '#ffd27a', Exposure: 1.0 },
         Emitters: [
-            { Name: 'Detonation Core', Shape: 'Sphere', Position: [0, -2.2, 0], Radius: 0.55, Density: 0.6, Temperature: 7.5, Fuel: 1.6, Velocity: [0, 0, 0], Jitter: 1.0, Pulse: 2.6 },
+            { Name: 'Detonation Core', Shape: 'Sphere', Position: [0, -3.0, 0], Radius: 0.6, Density: 1.2, Temperature: 6.5, Fuel: 1.4, Velocity: [0, 0, 0], Jitter: 0.8, StartTime: 0.2, Duration: 0.35, Fade: 0.08 },
         ],
         Forces: [
-            { Type: 'RadialBurst', Position: [0, -2.2, 0], Strength: 55, Radius: 1.8, Frequency: 2.6, Secondary: 0.1 },
-            { Type: 'CurlNoiseTurbulence', Position: [0, 0, 0], Strength: 6, Radius: 2.6, Frequency: 1.6, Secondary: 1.2 },
+            { Type: 'RadialBurst', Position: [0, -3.0, 0], Strength: 42, Radius: 2.2, Frequency: 6, Secondary: 0.12, Tertiary: 0.2, StartTime: 0.2, Duration: 0.5, Fade: 0.05 },
+            { Type: 'CurlNoiseTurbulence', Name: 'Roll-up Turbulence', Position: [0, -1.5, 0], Strength: 2.2, Radius: 2.6, Frequency: 1.2, Secondary: 0.8, StartTime: 0.3, Duration: 2.4, Fade: 0.5 },
+            { Type: 'DragBaffle', Name: 'Ceiling Brake', Position: [0, 3.0, 0], Strength: 1.6, Radius: 2.6, Falloff: 'Plateau' },
         ],
     },
     {
-        Id: 'preset-tornado', Name: 'Tornado Funnel', Icon: 'vortex', Summary: 'Strong vortex with axial lift and inward pull lofting dust.',
-        Domain: { Resolution: [48, 96, 48], Size: [3, 6, 3], Buoyancy: 0.3, AmbientTemperature: 0, Cooling: 0.2, Vorticity: 0.25, Dissipation: 0.998 },
+        Id: 'preset-demolition', Name: 'Demolition Blast', Icon: 'debris', Summary: 'Ground charge: fireball, floor dust skirt and ballistic debris that arcs, falls and tumbles to rest.',
+        Domain: { Resolution: [60, 80, 60], Size: [6, 8, 6], Buoyancy: 0.75, AmbientTemperature: 0, Cooling: 1.5, Vorticity: 0.45, Dissipation: 0.993, Combustion: 1.7, SceneLoop: 8 },
+        Look: { Albedo: '#6b645c', Absorption: 4.2, FireIntensity: 5.5, FireOpacity: 1.8, FireSoftness: 4.0, FireEmber: '#a8160c', FireFlame: '#ff7a1a', FireCore: '#ffe3a0', Exposure: 1.0 },
+        Visualizers: { Debris: { Visible: true, Count: 3072, Lifetime: 6.5, Size: 3.0, Drag: 0.9, Bounce: 0.35, Glow: 0.8 } },
+        Emitters: [
+            { Name: 'Ground Charge', Shape: 'Sphere', Position: [0, -3.3, 0], Radius: 0.55, Density: 1.4, Temperature: 6.0, Fuel: 1.3, Velocity: [0, 0, 0], Jitter: 0.8, StartTime: 0.2, Duration: 0.3, Fade: 0.06, Debris: 1.0, DebrisSpeed: 11 },
+            { Name: 'Dust Skirt', Shape: 'Disc', Position: [0, -3.7, 0], Radius: 1.5, Density: 1.6, Temperature: 0.5, Fuel: 0, Velocity: [0, 1.8, 0], Jitter: 0.6, StartTime: 0.3, Duration: 0.6, Fade: 0.15 },
+        ],
+        Forces: [
+            { Type: 'RadialBurst', Position: [0, -3.3, 0], Strength: 38, Radius: 2.4, Frequency: 6, Secondary: 0.12, Tertiary: 0.2, StartTime: 0.2, Duration: 0.45, Fade: 0.05 },
+            { Type: 'CurlNoiseTurbulence', Name: 'Roll-up Turbulence', Position: [0, -1.6, 0], Strength: 2.0, Radius: 2.6, Frequency: 1.2, Secondary: 0.8, StartTime: 0.3, Duration: 2.2, Fade: 0.5 },
+            { Type: 'DragBaffle', Name: 'Ceiling Brake', Position: [0, 3.0, 0], Strength: 1.6, Radius: 2.6, Falloff: 'Plateau' },
+        ],
+    },
+    {
+        Id: 'preset-tornado', Name: 'Tornado Funnel', Icon: 'vortex', Summary: 'Tight vortex with inward pull and axis attraction lofting a dust funnel — no turbulence to break the shape.',
+        Domain: { Resolution: [48, 84, 48], Size: [4, 7, 4], Buoyancy: 0.15, AmbientTemperature: 0, Cooling: 0.3, Vorticity: 0.1, Dissipation: 0.997 },
         Look: { Albedo: '#b89c74', Absorption: 2.6, Anisotropy: 0.3 },
         Emitters: [
-            { Name: 'Dust Ring', Shape: 'Disc', Position: [0, -2.8, 0], Radius: 1.1, Density: 0.8, Temperature: 0.2, Fuel: 0, Velocity: [0, 0.3, 0], Jitter: 0.5 },
+            { Name: 'Dust Ring', Shape: 'Disc', Position: [0, -3.4, 0], Radius: 0.9, Density: 0.9, Temperature: 0.1, Fuel: 0, Velocity: [0, 0.4, 0], Jitter: 0.35 },
         ],
         Forces: [
-            { Type: 'VortexColumn', Position: [0, 0, 0], Strength: 18, Radius: 1.4, Falloff: 'Linear', Frequency: 1.4, Secondary: 4.0 },
-            { Type: 'DragBaffle', Position: [0, 2.0, 0], Strength: 2.5, Radius: 1.3 },
+            { Type: 'VortexColumn', Position: [0, 0, 0], Strength: 14, Radius: 1.1, Falloff: 'Plateau', Frequency: 1.8, Secondary: 2.2 },
+            { Type: 'AxisAttractor', Name: 'Funnel Core', Position: [0, 0, 0], Strength: 6, Radius: 1.6 },
+            { Type: 'DragBaffle', Name: 'Ceiling Brake', Position: [0, 2.8, 0], Strength: 1.5, Radius: 2.0, Falloff: 'Plateau' },
         ],
     },
     {
@@ -262,6 +281,33 @@ export const ScenePresets = Object.freeze([
 ]);
 
 //------------------------------------------------------------------------------------------------------------------------
+//                                                  TIMING KEYS
+//------------------------------------------------------------------------------------------------------------------------
+
+/** Keyed activation envelope (0..1) for a force or emitter at simulation time `time`. Duration 0 = stays on after StartTime. */
+export function timingEnvelope(node, time)
+{
+    const start = node.StartTime || 0;
+    const duration = node.Duration || 0;
+    const fade = Math.max(0.001, node.Fade ?? 0.15);
+    const repeat = node.Repeat || 0;
+    if (start <= 0 && duration <= 0) return 1;
+    let local = time - start;
+    if (local < 0) return 0;
+    if (repeat > 0) local = local % repeat;
+    const rise = Math.min(1, local / fade);
+    if (duration <= 0) return rise;
+    if (local >= duration) return 0;
+    const fall = Math.min(1, (duration - local) / fade);
+    return Math.min(rise, fall);
+}
+
+export function isKeyed(node)
+{
+    return (node.StartTime || 0) > 0 || (node.Duration || 0) > 0;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
 //                                                  FACTORY HELPERS
 //------------------------------------------------------------------------------------------------------------------------
 
@@ -292,6 +338,10 @@ export function createForceGenerator(typeId, overrides = {})
         Frequency: overrides.Frequency ?? type.Defaults.Frequency,
         Secondary: overrides.Secondary ?? type.Defaults.Secondary,
         Tertiary: overrides.Tertiary ?? type.Defaults.Tertiary ?? 0,
+        StartTime: overrides.StartTime ?? 0,
+        Duration: overrides.Duration ?? 0,
+        Fade: overrides.Fade ?? 0.15,
+        Repeat: overrides.Repeat ?? 0,
     };
 }
 
@@ -313,6 +363,12 @@ export function createEmitter(overrides = {})
         Velocity: [...(overrides.Velocity || [0, 1, 0])],
         Jitter: overrides.Jitter ?? 0.4,
         Pulse: overrides.Pulse ?? 0.0,
+        StartTime: overrides.StartTime ?? 0,
+        Duration: overrides.Duration ?? 0,
+        Fade: overrides.Fade ?? 0.15,
+        Repeat: overrides.Repeat ?? 0,
+        Debris: overrides.Debris ?? 0,
+        DebrisSpeed: overrides.DebrisSpeed ?? 6,
     };
 }
 
@@ -365,6 +421,7 @@ export function createDomain(overrides = {})
         Boundary: overrides.Boundary || 'OpenTop',
         TimeScale: overrides.TimeScale ?? 1.0,
         Combustion: overrides.Combustion ?? 1.0,
+        SceneLoop: overrides.SceneLoop ?? 0,
     });
 }
 
@@ -380,6 +437,7 @@ export function createVisualizerSet()
         VelocityVectors: { Id: 'vis-vectors', Kind: 'Visualizer', Name: 'Velocity Vectors', Visible: true, Axis: 'Z', Offset: 0.5, Stride: 2, Scale: 0.35, Ramp: 'Turbo', MaxSpeed: 6 },
         ScalarSlice: { Id: 'vis-slice', Kind: 'Visualizer', Name: 'Scalar Slice', Visible: false, Axis: 'Y', Offset: 0.35, Channel: 'Speed', Ramp: 'Turbo', Range: 6, Opacity: 0.85 },
         Tracers: { Id: 'vis-tracers', Kind: 'Visualizer', Name: 'Flow Tracers', Visible: true, Count: 8192, Lifetime: 4.0, Ramp: 'Turbo', MaxSpeed: 6, Size: 2.0 },
+        Debris: { Id: 'vis-debris', Kind: 'Visualizer', Name: 'Debris', Visible: false, Count: 2048, Lifetime: 5.0, Size: 3.0, Gravity: 9.8, Drag: 1.2, Bounce: 0.35, Glow: 1.0 },
         ForceVectors: { Id: 'vis-forces', Kind: 'Visualizer', Name: 'Force Vectors', Visible: false, Mode: 'Slice', Axis: 'Z', Offset: 0.5, Stride: 3, Scale: 0.04, Ramp: 'Plasma', MaxForce: 20 },
         ForceGizmos: { Id: 'vis-gizmos', Kind: 'Visualizer', Name: 'Force Gizmos', Visible: true, Opacity: 0.9 },
     };

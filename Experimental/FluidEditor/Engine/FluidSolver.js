@@ -7,7 +7,7 @@
 
 import { computeVolumeLayout } from './GpuContext.js';
 import * as Shaders from './FluidShaders.js';
-import { ForceTypeById, FalloffCurves, EmitterShapes, BoundaryModes, MaximumForceGenerators, MaximumEmitters, MaximumColliders } from './ForceGeneratorCatalog.js';
+import { ForceTypeById, FalloffCurves, EmitterShapes, BoundaryModes, MaximumForceGenerators, MaximumEmitters, MaximumColliders, timingEnvelope } from './ForceGeneratorCatalog.js';
 
 export class FluidSolver
 {
@@ -34,6 +34,7 @@ export class FluidSolver
             b: new Float32Array(MaximumEmitters * 4),
             c: new Float32Array(MaximumEmitters * 4),
             d: new Float32Array(MaximumEmitters * 4),
+            e: new Float32Array(MaximumEmitters * 4),
             count: 0,
         };
         this.colliderArray = { data: new Float32Array(MaximumColliders * 4), count: 0 };
@@ -59,6 +60,7 @@ export class FluidSolver
             gradient: create('Gradient', Shaders.GradientFragment),
             thermodynamics: create('Thermodynamics', Shaders.ThermodynamicsFragment),
             tracerUpdate: create('TracerUpdate', Shaders.TracerUpdateFragment),
+            debrisUpdate: create('DebrisUpdate', Shaders.DebrisUpdateFragment),
         };
     }
 
@@ -84,6 +86,10 @@ export class FluidSolver
         };
         this.tracers = context.createPingPong(this.tracerSize[0], this.tracerSize[1], { rgba32f: true, nearest: true });
         this.tracerPrevious = context.createTarget(this.tracerSize[0], this.tracerSize[1], { rgba32f: true, nearest: true });
+        this.debrisSize = [64, 64];
+        this.debrisPositions = context.createPingPong(this.debrisSize[0], this.debrisSize[1], { rgba32f: true, nearest: true });
+        this.debrisVelocities = context.createPingPong(this.debrisSize[0], this.debrisSize[1], { rgba32f: true, nearest: true });
+        this.debrisPrevious = context.createTarget(this.debrisSize[0], this.debrisSize[1], { rgba32f: true, nearest: true });
         this.reset();
     }
 
@@ -100,6 +106,9 @@ export class FluidSolver
         context.destroyTarget(this.fields.scratchB);
         context.destroyPingPong(this.tracers);
         context.destroyTarget(this.tracerPrevious);
+        context.destroyPingPong(this.debrisPositions);
+        context.destroyPingPong(this.debrisVelocities);
+        context.destroyTarget(this.debrisPrevious);
         this.fields = null;
     }
 
@@ -116,6 +125,7 @@ export class FluidSolver
         this.time = 0;
         this.frame = 0;
         this.tracersNeedReset = true;
+        this.debrisNeedReset = true;
     }
 
     //------------------------------------------------------------------------------------------------------------------------
@@ -130,9 +140,10 @@ export class FluidSolver
         {
             if (!force.Enabled || count >= MaximumForceGenerators) continue;
             const type = ForceTypeById[force.Type];
+            const envelope = timingEnvelope(force, this.time);
             const offset = count * 4;
             arrays.a.set([force.Position[0], force.Position[1], force.Position[2], force.Radius], offset);
-            arrays.b.set([force.Direction[0], force.Direction[1], force.Direction[2], force.Strength], offset);
+            arrays.b.set([force.Direction[0], force.Direction[1], force.Direction[2], force.Strength * envelope], offset);
             arrays.c.set([type.Code, Math.max(0, FalloffCurves.indexOf(force.Falloff)), force.Frequency, force.Secondary], offset);
             arrays.d.set([force.Tertiary || 0, 0, 0, 0], offset);
             count += 1;
@@ -147,11 +158,14 @@ export class FluidSolver
         for (const emitter of emitters)
         {
             if (!emitter.Enabled || count >= MaximumEmitters) continue;
+            const envelope = timingEnvelope(emitter, this.time);
+            if (envelope <= 0 && !(emitter.Debris > 0)) continue;
             const offset = count * 4;
             arrays.a.set([emitter.Position[0], emitter.Position[1], emitter.Position[2], emitter.Radius], offset);
-            arrays.b.set([emitter.Velocity[0], emitter.Velocity[1], emitter.Velocity[2], emitter.Density], offset);
-            arrays.c.set([emitter.Temperature, emitter.Fuel, emitter.Jitter, Math.max(0, EmitterShapes.indexOf(emitter.Shape))], offset);
+            arrays.b.set([emitter.Velocity[0], emitter.Velocity[1], emitter.Velocity[2], emitter.Density * envelope], offset);
+            arrays.c.set([emitter.Temperature * envelope, emitter.Fuel * envelope, emitter.Jitter, Math.max(0, EmitterShapes.indexOf(emitter.Shape))], offset);
             arrays.d.set([emitter.Orientation[0], emitter.Orientation[1], emitter.Orientation[2], emitter.Pulse], offset);
+            arrays.e.set([emitter.Debris || 0, emitter.DebrisSpeed || 0, envelope, 0], offset);
             count += 1;
         }
         arrays.count = count;
@@ -410,6 +424,60 @@ export class FluidSolver
             gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
             gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
         }
+    }
+
+    //------------------------------------------------------------------------------------------------------------------------
+    //                                                  DEBRIS
+    //------------------------------------------------------------------------------------------------------------------------
+
+    updateDebris(deltaTime, settings)
+    {
+        if (!this.fields) return;
+        const gl = this.gl, context = this.context;
+        gl.disable(gl.BLEND);
+        const copyPrevious = () =>
+        {
+            gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.debrisPositions.read.framebuffer);
+            gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.debrisPrevious.framebuffer);
+            gl.blitFramebuffer(0, 0, this.debrisSize[0], this.debrisSize[1], 0, 0, this.debrisSize[0], this.debrisSize[1], gl.COLOR_BUFFER_BIT, gl.NEAREST);
+            gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+            gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+        };
+        copyPrevious();
+        const uniforms = context.use(this.programs.debrisUpdate);
+        this.applyVolumeUniforms(uniforms);
+        for (const output of [0, 1])
+        {
+            context.textureUnit = 0;
+            context.bindTexture('uPositions', this.debrisPositions.read.texture);
+            context.bindTexture('uVelocities', this.debrisVelocities.read.texture);
+            context.bindTexture('uVelocity', this.fields.velocity.read.texture);
+            gl.uniform1i(uniforms.uOutput, output);
+            gl.uniform1i(uniforms.uReset, this.debrisNeedReset ? 1 : 0);
+            gl.uniform1i(uniforms.uEmitterCount, this.emitterArrays.count);
+            gl.uniform4fv(uniforms.uEmitterA, this.emitterArrays.a);
+            gl.uniform4fv(uniforms.uEmitterB, this.emitterArrays.b);
+            gl.uniform4fv(uniforms.uEmitterE, this.emitterArrays.e);
+            gl.uniform1f(uniforms.uDeltaTime, deltaTime);
+            gl.uniform1f(uniforms.uTime, this.time);
+            gl.uniform1f(uniforms.uLifetime, settings.Lifetime);
+            gl.uniform1f(uniforms.uGravity, settings.Gravity);
+            gl.uniform1f(uniforms.uDrag, settings.Drag);
+            gl.uniform1f(uniforms.uBounce, settings.Bounce);
+            context.dispatch(output === 0 ? this.debrisPositions.write : this.debrisVelocities.write);
+        }
+        this.debrisPositions.swap();
+        this.debrisVelocities.swap();
+        if (this.debrisNeedReset)
+        {
+            this.debrisNeedReset = false;
+            copyPrevious();
+        }
+    }
+
+    get debrisCount()
+    {
+        return this.debrisSize[0] * this.debrisSize[1];
     }
 
     get tracerCount()
