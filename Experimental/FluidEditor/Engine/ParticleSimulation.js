@@ -9,7 +9,7 @@
 //------------------------------------------------------------------------------------------------------------------------
 
 import * as ParticleShaders from './ParticleShaders.js';
-import { FullscreenVertex } from './FluidShaders.js';
+import { FullscreenVertex, sparse } from './FluidShaders.js';
 import { ParticleShapes, ParticleModes, ParticleColourModes, ParticleBlendModes, ParticleRenderStyles, ParticleRampSources, ParticleSprites, ParticleSizeModes, ParticleTrailModes, ParticleTrailColours, MaximumPaletteStops, particleTextureSide, effectiveTrailLength } from './ParticleCatalog.js';
 import { ColourRamps, timingEnvelope } from './ForceGeneratorCatalog.js';
 
@@ -27,18 +27,33 @@ function normalise(vector)
 
 export class ParticleSimulation
 {
+    get programs()
+    {
+        const key = this.solver.sparse ? 'sparse' : 'fixed';
+        if (!this.programSets[key]) this.programSets[key] = this.buildPrograms(this.solver.sparse);
+        return this.programSets[key];
+    }
+
+    buildPrograms(sparseMode)
+    {
+        const context = this.context;
+        const t = sparseMode ? sparse : (source) => source;
+        const suffix = sparseMode ? '.sparse' : '';
+        return {
+            update: context.createProgram('ParticleUpdate' + suffix, FullscreenVertex, t(ParticleShaders.ParticleUpdateFragment)),
+            render: context.createProgram('ParticleRender' + suffix, t(ParticleShaders.ParticleRenderVertex), ParticleShaders.ParticleFragment),
+            trailUpdate: context.createProgram('TrailUpdate' + suffix, FullscreenVertex, t(ParticleShaders.TrailUpdateFragment)),
+            trails: context.createProgram('Trails' + suffix, t(ParticleShaders.TrailVertex), ParticleShaders.ParticleFragment),
+        };
+    }
+
     constructor(context, solver)
     {
         this.context = context;
         this.gl = context.gl;
         this.solver = solver;
         this.records = new Map();
-        this.programs = {
-            update: context.createProgram('ParticleUpdate', FullscreenVertex, ParticleShaders.ParticleUpdateFragment),
-            render: context.createProgram('ParticleRender', ParticleShaders.ParticleRenderVertex, ParticleShaders.ParticleFragment),
-            trailUpdate: context.createProgram('TrailUpdate', FullscreenVertex, ParticleShaders.TrailUpdateFragment),
-            trails: context.createProgram('Trails', ParticleShaders.TrailVertex, ParticleShaders.ParticleFragment),
-        };
+        this.programSets = {};
         this.emptyVao = this.gl.createVertexArray();
         this.statistics = { systems: 0, particles: 0 };
         this.paletteScratch = new Float32Array(MaximumPaletteStops * 3);

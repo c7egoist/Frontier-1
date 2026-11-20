@@ -21,6 +21,7 @@ export class FluidSolver
         this.fields = null;
         this.tracerSize = [128, 64];
         this.gridCentre = [0, 0, 0];
+        this.cellOrigin = [0, 0, 0];
         this.relocations = 0;
         this.tracers = null;
         this.statistics = { stepMilliseconds: 0, passes: 0 };
@@ -49,8 +50,23 @@ export class FluidSolver
 
     compilePrograms()
     {
-        const create = (label, fragment) => this.context.createProgram(label, Shaders.FullscreenVertex, fragment);
-        this.programs = {
+        this.programSets = {};
+        this.sparse = false;
+    }
+
+    /** Kernels are compiled per addressing mode on first use: fixed window (VolumeChunk) or sparse tiles (SparseVolumeChunk). */
+    get programs()
+    {
+        const key = this.sparse ? 'sparse' : 'fixed';
+        if (!this.programSets[key]) this.programSets[key] = this.buildPrograms(this.sparse);
+        return this.programSets[key];
+    }
+
+    buildPrograms(sparseMode)
+    {
+        const transform = sparseMode ? Shaders.sparse : (source) => source;
+        const create = (label, fragment) => this.context.createProgram(label + (sparseMode ? '.sparse' : ''), Shaders.FullscreenVertex, transform(fragment));
+        const programs = {
             advect: create('Advect', Shaders.AdvectFragment),
             macCormack: create('MacCormack', Shaders.MacCormackFragment),
             inject: create('Inject', Shaders.InjectFragment),
@@ -65,6 +81,8 @@ export class FluidSolver
             debrisUpdate: create('DebrisUpdate', Shaders.DebrisUpdateFragment),
             shift: create('Shift', Shaders.ShiftFragment),
         };
+        if (sparseMode) programs.occupancy = this.context.createProgram('Occupancy', Shaders.FullscreenVertex, Shaders.OccupancyFragment);
+        return programs;
     }
 
     configure(resolution, cellSize, centre = [0, 0, 0])
@@ -74,7 +92,9 @@ export class FluidSolver
         const unchanged = this.layout && this.layout.width === width && this.layout.height === height && this.layout.depth === depth;
         this.cellSize = cellSize;
         this.gridCentre = [centre[0], centre[1], centre[2]];
-        if (unchanged) return;
+        this.cellOrigin = [-Math.floor(width / 2), -Math.floor(height / 2), -Math.floor(depth / 2)];
+        if (this.sparse) { this.destroyFields(); this.sparse = false; this.tilePool = null; }
+        if (unchanged && this.fields) return;
         this.destroyFields();
         this.layout = layout;
         const context = this.context;
@@ -113,7 +133,229 @@ export class FluidSolver
         context.destroyPingPong(this.debrisPositions);
         context.destroyPingPong(this.debrisVelocities);
         context.destroyTarget(this.debrisPrevious);
+        if (this.tilePool)
+        {
+            this.gl.deleteTexture(this.tilePool.lookup.texture);
+            this.gl.deleteTexture(this.tilePool.slotTable.texture);
+            context.destroyTarget(this.tilePool.occupancy);
+        }
         this.fields = null;
+    }
+
+    //------------------------------------------------------------------------------------------------------------------------
+    //                                                  INFINITE (SPARSE TILE) GRID
+    //------------------------------------------------------------------------------------------------------------------------
+
+    /**
+     * Unbounded world: T³ tiles are allocated on demand out of a pool of `maxTiles` atlas slots. Tiles containing an
+     * emitter are always resident; the scheduler reads a per-slot occupancy summary back every few frames, allocates the
+     * neighbour across any face gas is pressing on, and frees tiles that have gone empty — so the gas is never clipped
+     * and the only limit is the pool size (not a fixed box).
+     */
+    configureInfinite(tileCells, cellSize, maxTiles)
+    {
+        const T = Math.max(8, Math.min(48, Math.round(tileCells)));
+        const slots = Math.max(4, Math.min(256, Math.round(maxTiles)));
+        const sliceCols = Math.ceil(Math.sqrt(T)), sliceRows = Math.ceil(T / sliceCols);
+        const slotsX = Math.ceil(Math.sqrt(slots)), slotsY = Math.ceil(slots / slotsX);
+        const blockW = T * sliceCols, blockH = T * sliceRows;
+        const unchanged = this.sparse && this.tilePool && this.tilePool.cells === T && this.tilePool.slots === slots;
+        this.cellSize = cellSize;
+        if (unchanged) { this.tilePool.size = T * cellSize; this.updateBounds(); return; }
+        this.destroyFields();
+        this.sparse = true;
+        const context = this.context;
+        const w = slotsX * blockW, h = slotsY * blockH;
+        this.tilePool = {
+            cells: T, size: T * cellSize, slots, slotsX, slotsY, sliceCols, sliceRows, blockW, blockH,
+            entries: new Array(slots).fill(null),
+            map: new Map(),
+            lookupOrigin: [-32, 0, -32],
+            lookupData: new Int16Array(64 * 1024).fill(-1),
+            slotData: new Int32Array(slots * 4),
+            lookup: context.createIntegerTexture(64, 1024, 1),
+            slotTable: context.createIntegerTexture(slots, 1, 4),
+            occupancy: context.createTarget(3, slots, { rgba32f: true, nearest: true }),
+            readback: new Float32Array(3 * slots * 4),
+            dirty: true, interval: 3, band: Math.max(3, Math.round(T * 0.25)), stride: T >= 32 ? 2 : 1,
+            allocations: 0, frees: 0,
+        };
+        this.layout = { width: T, height: T, depth: T, tilesX: sliceCols, tilesY: sliceRows, textureWidth: w, textureHeight: h, cellCount: 0 };
+        this.fields = {
+            velocity: context.createPingPong(w, h),
+            state: context.createPingPong(w, h),
+            pressure: context.createPingPong(w, h),
+            divergence: context.createTarget(w, h),
+            curl: context.createTarget(w, h),
+            scratchA: context.createTarget(w, h),
+            scratchB: context.createTarget(w, h),
+        };
+        this.tracers = context.createPingPong(this.tracerSize[0], this.tracerSize[1], { rgba32f: true, nearest: true });
+        this.tracerPrevious = context.createTarget(this.tracerSize[0], this.tracerSize[1], { rgba32f: true, nearest: true });
+        this.debrisSize = [64, 64];
+        this.debrisPositions = context.createPingPong(this.debrisSize[0], this.debrisSize[1], { rgba32f: true, nearest: true });
+        this.debrisVelocities = context.createPingPong(this.debrisSize[0], this.debrisSize[1], { rgba32f: true, nearest: true });
+        this.debrisPrevious = context.createTarget(this.debrisSize[0], this.debrisSize[1], { rgba32f: true, nearest: true });
+        this.reset();
+    }
+
+    get residentTiles()
+    {
+        return this.tilePool ? this.tilePool.entries.filter(Boolean) : [];
+    }
+
+    tileKey(tile) { return `${tile[0]},${tile[1]},${tile[2]}`; }
+
+    tileOfWorld(position)
+    {
+        const size = this.tilePool.size;
+        return [Math.floor(position[0] / size), Math.floor(position[1] / size), Math.floor(position[2] / size)];
+    }
+
+    tileInLookup(tile)
+    {
+        const o = this.tilePool.lookupOrigin;
+        return tile[0] >= o[0] && tile[0] < o[0] + 64 && tile[1] >= o[1] && tile[1] < o[1] + 16 && tile[2] >= o[2] && tile[2] < o[2] + 64;
+    }
+
+    allocateTile(tile, pinned, mean = 0)
+    {
+        const pool = this.tilePool;
+        if (tile[1] < 0 || !this.tileInLookup(tile)) return -1;
+        const key = this.tileKey(tile);
+        const existing = pool.map.get(key);
+        if (existing !== undefined) { pool.entries[existing].pinned = pool.entries[existing].pinned || pinned; return existing; }
+        let slot = pool.entries.findIndex((entry) => entry === null);
+        if (slot < 0)
+        {
+            // Pool exhausted: evict the thinnest unpinned tile if it carries less gas than the one asking.
+            let weakest = -1, weakestMean = Math.max(mean, 0.01);
+            pool.entries.forEach((entry, index) => { if (entry && !entry.pinned && entry.mean < weakestMean) { weakest = index; weakestMean = entry.mean; } });
+            if (weakest < 0) return -1;
+            this.freeTile(weakest);
+            slot = weakest;
+        }
+        pool.entries[slot] = { tile: [tile[0], tile[1], tile[2]], pinned, since: this.frame, mean: 0, peak: 0 };
+        pool.map.set(key, slot);
+        const x = (slot % pool.slotsX) * pool.blockW, y = Math.floor(slot / pool.slotsX) * pool.blockH;
+        for (const pair of [this.fields.velocity, this.fields.state, this.fields.pressure])
+        {
+            this.context.clearRegion(pair.read, x, y, pool.blockW, pool.blockH);
+            this.context.clearRegion(pair.write, x, y, pool.blockW, pool.blockH);
+        }
+        pool.allocations += 1;
+        pool.dirty = true;
+        return slot;
+    }
+
+    freeTile(slot)
+    {
+        const pool = this.tilePool;
+        const entry = pool.entries[slot];
+        if (!entry) return;
+        pool.map.delete(this.tileKey(entry.tile));
+        pool.entries[slot] = null;
+        pool.frees += 1;
+        pool.dirty = true;
+    }
+
+    /** Emitter tiles are pinned every frame; occupancy drives growth / shrink every `interval` frames. */
+    scheduleTiles(scene)
+    {
+        const pool = this.tilePool;
+        const gl = this.gl, context = this.context;
+        for (const entry of pool.entries) if (entry) entry.pinned = false;
+        const required = [];
+        for (const emitter of scene.Emitters)
+        {
+            if (!emitter.Enabled || timingEnvelope(emitter, this.time) <= 0) continue;
+            const { Position: position } = emitterTransform(emitter, this.time);
+            const reach = emitter.Radius + pool.size * 0.15;
+            const lo = this.tileOfWorld([position[0] - reach, position[1] - reach, position[2] - reach]);
+            const hi = this.tileOfWorld([position[0] + reach, position[1] + reach, position[2] + reach]);
+            for (let x = lo[0]; x <= hi[0]; x += 1) for (let y = Math.max(0, lo[1]); y <= hi[1]; y += 1) for (let z = lo[2]; z <= hi[2]; z += 1) required.push([x, y, z]);
+        }
+        // Keep the lookup window centred on the emitters (or the resident gas) so the lattice is effectively endless.
+        const focusSource = required.length ? required : this.residentTiles.map((entry) => entry.tile);
+        if (focusSource.length)
+        {
+            const focus = [0, 1, 2].map((axis) => Math.round(focusSource.reduce((sum, tile) => sum + tile[axis], 0) / focusSource.length));
+            const o = pool.lookupOrigin;
+            if (Math.abs(focus[0] - (o[0] + 32)) > 16 || Math.abs(focus[2] - (o[2] + 32)) > 16 || focus[1] - o[1] > 12)
+            {
+                pool.lookupOrigin = [focus[0] - 32, Math.max(0, focus[1] - 4), focus[2] - 32];
+                pool.entries.forEach((entry, slot) => { if (entry && !this.tileInLookup(entry.tile)) this.freeTile(slot); });
+                pool.dirty = true;
+            }
+        }
+        for (const tile of required) this.allocateTile(tile, true);
+
+        if (this.frame % pool.interval === 0 && this.residentTiles.length > 0)
+        {
+            // Occupancy summary → readback → grow across pressing faces, free what has emptied.
+            const uniforms = context.use(this.programs.occupancy);
+            this.applyVolumeUniforms(uniforms);
+            context.bindTexture('uState', this.fields.state.read.texture);
+            context.bindTexture('uVelocity', this.fields.velocity.read.texture);
+            gl.uniform1i(uniforms.uStride, pool.stride);
+            gl.uniform1i(uniforms.uBand, pool.band);
+            context.dispatch(pool.occupancy);
+            this.statistics.passes += 1;
+            const data = context.readTarget(pool.occupancy, pool.readback);
+            const perAxis = Math.ceil(pool.cells / pool.stride);
+            const samples = perAxis * perAxis * perAxis;
+            const bandSamples = Math.max(1, Math.ceil(pool.band / pool.stride)) * perAxis * perAxis;
+            const grow = [];
+            pool.entries.forEach((entry, slot) => {
+                if (!entry) return;
+                const base = slot * 12;
+                entry.mean = data[base + 0] / samples;
+                entry.peak = data[base + 1];
+                const faces = [data[base + 4], data[base + 5], data[base + 6], data[base + 7], data[base + 8], data[base + 9]].map((sum) => sum / bandSamples);
+                const directions = [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]];
+                faces.forEach((mean, face) => { if (mean > 0.0025) grow.push({ tile: [entry.tile[0] + directions[face][0], entry.tile[1] + directions[face][1], entry.tile[2] + directions[face][2]], mean }); });
+                if (!entry.pinned && entry.mean < 0.0015 && entry.peak < 0.02 && this.frame - entry.since > 90) this.freeTile(slot);
+            });
+            grow.sort((a, b) => b.mean - a.mean);
+            for (const request of grow) if (!pool.map.has(this.tileKey(request.tile))) this.allocateTile(request.tile, false, request.mean);
+        }
+        if (pool.dirty) this.uploadTileTables();
+    }
+
+    uploadTileTables()
+    {
+        const pool = this.tilePool;
+        pool.lookupData.fill(-1);
+        pool.slotData.fill(0);
+        const o = pool.lookupOrigin;
+        pool.entries.forEach((entry, slot) => {
+            if (!entry) return;
+            const r = [entry.tile[0] - o[0], entry.tile[1] - o[1], entry.tile[2] - o[2]];
+            pool.lookupData[r[0] + (r[2] + 64 * r[1]) * 64] = slot;
+            pool.slotData[slot * 4] = entry.tile[0]; pool.slotData[slot * 4 + 1] = entry.tile[1]; pool.slotData[slot * 4 + 2] = entry.tile[2]; pool.slotData[slot * 4 + 3] = 1;
+        });
+        this.context.uploadIntegerTexture(pool.lookup, pool.lookupData);
+        this.context.uploadIntegerTexture(pool.slotTable, pool.slotData);
+        pool.dirty = false;
+        this.updateBounds();
+    }
+
+    /** Bounding box of resident tiles → uGrid / uCellOrigin / uGridCentre (an empty pool frames tile 0). */
+    updateBounds()
+    {
+        const pool = this.tilePool;
+        const resident = this.residentTiles;
+        const T = pool.cells;
+        let lo = [0, 0, 0], hi = [0, 0, 0];
+        if (resident.length)
+        {
+            lo = [Infinity, Infinity, Infinity]; hi = [-Infinity, -Infinity, -Infinity];
+            for (const { tile } of resident) for (let axis = 0; axis < 3; axis += 1) { lo[axis] = Math.min(lo[axis], tile[axis]); hi[axis] = Math.max(hi[axis], tile[axis]); }
+        }
+        this.cellOrigin = lo.map((value) => value * T);
+        const extent = hi.map((value, axis) => (value - lo[axis] + 1) * T);
+        this.layout = { ...this.layout, width: extent[0], height: extent[1], depth: extent[2], cellCount: resident.length * T * T * T, residentTiles: resident.length, poolSize: pool.slots };
+        this.gridCentre = extent.map((cells, axis) => (this.cellOrigin[axis] + cells * 0.5) * this.cellSize);
     }
 
     /**
@@ -123,6 +365,7 @@ export class FluidSolver
      */
     relocate(shiftCells, centre)
     {
+        if (this.sparse) return;
         this.gridCentre = [centre[0], centre[1], centre[2]];
         if (!this.fields || !shiftCells.some((value) => value !== 0)) return;
         const gl = this.gl, context = this.context, layout = this.layout;
@@ -151,6 +394,14 @@ export class FluidSolver
         }
         context.clearTarget(this.fields.divergence);
         context.clearTarget(this.fields.curl);
+        if (this.sparse)
+        {
+            const pool = this.tilePool;
+            pool.entries.fill(null);
+            pool.map.clear();
+            pool.dirty = true;
+            this.uploadTileTables();
+        }
         this.time = 0;
         this.frame = 0;
         this.tracersNeedReset = true;
@@ -222,6 +473,18 @@ export class FluidSolver
         if (uniforms.uTexSize) gl.uniform2f(uniforms.uTexSize, layout.textureWidth, layout.textureHeight);
         if (uniforms.uCellSize) gl.uniform1f(uniforms.uCellSize, this.cellSize);
         if (uniforms.uGridCentre) gl.uniform3f(uniforms.uGridCentre, this.gridCentre[0], this.gridCentre[1], this.gridCentre[2]);
+        if (uniforms.uCellOrigin) gl.uniform3i(uniforms.uCellOrigin, this.cellOrigin[0], this.cellOrigin[1], this.cellOrigin[2]);
+        if (this.sparse && uniforms.uTileCells !== undefined)
+        {
+            const pool = this.tilePool;
+            gl.uniform1i(uniforms.uTileCells, pool.cells);
+            gl.uniform1i(uniforms.uSlotsX, pool.slotsX);
+            gl.uniform1i(uniforms.uSliceCols, pool.sliceCols);
+            gl.uniform1i(uniforms.uSliceRows, pool.sliceRows);
+            gl.uniform3i(uniforms.uLookupOrigin, pool.lookupOrigin[0], pool.lookupOrigin[1], pool.lookupOrigin[2]);
+            this.context.bindTexture('uTileLookup', pool.lookup.texture);
+            this.context.bindTexture('uSlotTable', pool.slotTable.texture);
+        }
     }
 
     applyForceUniforms(uniforms)
@@ -246,7 +509,7 @@ export class FluidSolver
 
     applyBoundaryUniform(uniforms, domain)
     {
-        if (uniforms.uBoundaryMode !== undefined) this.gl.uniform1i(uniforms.uBoundaryMode, Math.max(0, BoundaryModes.indexOf(domain.Boundary)));
+        if (uniforms.uBoundaryMode !== undefined) this.gl.uniform1i(uniforms.uBoundaryMode, this.sparse ? 3 : Math.max(0, BoundaryModes.indexOf(domain.Boundary)));
     }
 
     //------------------------------------------------------------------------------------------------------------------------
@@ -325,6 +588,7 @@ export class FluidSolver
         const gl = this.gl, context = this.context, programs = this.programs, fields = this.fields;
         const domain = scene.Domain;
         this.statistics.passes = 0;
+        if (this.sparse) this.scheduleTiles(scene);
         this.packForces(scene.Forces);
         this.packEmitters(scene.Emitters);
         this.packColliders(scene.Colliders);

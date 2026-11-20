@@ -7,7 +7,7 @@
 import { icon } from './StudioIcons.js';
 import {
     ForceGeneratorTypes, ForceTypeById, FalloffCurves, EmitterShapes, ColourRamps, SliceAxes, ScalarChannels, AdvectionSchemes, BoundaryModes,
-    ScenePresets, RampStops, MaximumForceGenerators, SmokeLooks, FireLooks, ResolutionPresets, VolumeFilters, FalloffLabels, ForceCategories, VectorModes, timingEnvelope, isKeyed, DebrisKinds, EmitterPathKinds, GridFollowModes, MaximumGridTiles,
+    ScenePresets, RampStops, MaximumForceGenerators, SmokeLooks, FireLooks, ResolutionPresets, VolumeFilters, FalloffLabels, ForceCategories, VectorModes, timingEnvelope, isKeyed, DebrisKinds, EmitterPathKinds, GridFollowModes, MaximumGridTiles, GridModes, MaximumTilePool,
 } from '../Engine/ForceGeneratorCatalog.js';
 import { ParticleTemplates, ParticleTemplateById, ParticleCategories, ParticleShapes, ParticleModes, ParticleColourModes, ParticleColourLabels, ParticleBlendModes, ParticleRenderStyles, ParticleRampSources, PalettePresets, MaximumPaletteStops, MaximumParticleSystems, ParticleSprites, ParticleSizeModes, ParticleTrailModes, ParticleTrailColours, MaximumTrailLength } from '../Engine/ParticleCatalog.js';
 const BoundaryLabels = { ClosedBox: 'Closed Box', OpenTop: 'Open Top', OpenAll: 'Open All' };
@@ -147,7 +147,7 @@ export function mountStudioUI({ app, refs })
     {
         switch (node.Kind)
         {
-            case 'Domain': return `${node.Size.map((extent) => extent.toFixed(1)).join(' × ')} m · ${(node.CellSize * 100).toFixed(1)} cm voxels · ${BoundaryLabels[node.Boundary]}`;
+            case 'Domain': return node.Grid === 'Infinite' ? `Infinite · ${node.TileSize} m tiles · ${(node.CellSize * 100).toFixed(1)} cm voxels` : `${node.Size.map((extent) => extent.toFixed(1)).join(' × ')} m · ${(node.CellSize * 100).toFixed(1)} cm voxels · ${BoundaryLabels[node.Boundary]}`;
             case 'Force': return `${ForceTypeById[node.Type].Name} · ${formatNumber(node.Strength, 1)} · ${FalloffLabels[node.Falloff]}${keyedSuffix(node)}`;
             case 'Emitter': return `${node.Shape} · ρ ${formatNumber(node.Density, 1)} · T ${formatNumber(node.Temperature, 1)}${node.Fuel > 0 ? ' · fuel' : ''}${node.Debris > 0 ? ` · ${(node.DebrisKind || 'rubble').toLowerCase()}` : ''}${keyedSuffix(node)}`;
             case 'Collider': return `Sphere · r ${formatNumber(node.Radius, 2)} m`;
@@ -219,7 +219,7 @@ export function mountStudioUI({ app, refs })
     {
         const current = preset.Id === currentId;
         const item = element('div', 'tree-item preset-item' + (current ? ' selected' : ''));
-        const grid = preset.Domain.Tiles && preset.Domain.Tiles.some((count) => count > 1) ? ` · ${preset.Domain.Tiles.join('×')} tile grid` : '';
+        const grid = preset.Domain.Grid === 'Infinite' ? ' · infinite grid' : preset.Domain.Tiles && preset.Domain.Tiles.some((count) => count > 1) ? ` · ${preset.Domain.Tiles.join('×')} tile grid` : '';
         item.innerHTML = `<span class="item-icon" style="color:${current ? '#f5a524' : '#9aa3b2'}">${icon(preset.Icon, 15)}</span><span class="item-meta"><strong>${preset.Name}</strong><span>${preset.Domain.Resolution.join('×')} cells${grid}</span></span><span class="load-hint">${current ? 'loaded' : 'load'}</span>`;
         item.title = preset.Summary;
         item.addEventListener('click', () => app.loadPreset(preset.Id));
@@ -417,7 +417,8 @@ export function mountStudioUI({ app, refs })
     {
         const metrics = state.metrics || {};
         const size = domain.Resolution.map((cells) => (cells * domain.CellSize).toFixed(1));
-        host.appendChild(hero('#64748b', `${domain.Resolution.join(' × ')}`, `${size.join(' × ')} m · ${BoundaryLabels[domain.Boundary]}`, `${formatCells(domain.Resolution[0] * domain.Resolution[1] * domain.Resolution[2])} cells`, 'domain'));
+        if (domain.Grid === 'Infinite') host.appendChild(hero('#64748b', 'Infinite', `${domain.TileSize} m tiles · ${domain.TileResolution}³ cells · pool ${domain.TilePool}`, `${metrics.residentTiles || 0} tiles resident`, 'infinite'));
+        else host.appendChild(hero('#64748b', `${domain.Resolution.join(' × ')}`, `${size.join(' × ')} m · ${BoundaryLabels[domain.Boundary]}`, `${formatCells(domain.Resolution[0] * domain.Resolution[1] * domain.Resolution[2])} cells`, 'domain'));
         host.appendChild(element('div', 'metric-grid',
             metric(formatCells(metrics.cells || 0), '', 'Cells') +
             metric((domain.CellSize * 100).toFixed(1), 'cm', 'Cell size') +
@@ -446,6 +447,24 @@ export function mountStudioUI({ app, refs })
             choice(domain, 'Boundary', 'Boundary', BoundaryModes, BoundaryLabels),
             element('p', 'note', 'Open faces let gas flow out of the domain (a sponge band fades it near the edge); closed walls contain it.'),
         ]));
+        const infinite = domain.Grid === 'Infinite';
+        const gridMode = choice(domain, 'Grid', 'Grid mode', GridModes, { Fixed: 'Fixed box / window', Infinite: 'Infinite tiles' });
+        if (infinite)
+        {
+            const resident = metrics.residentTiles || 0, pool = metrics.poolSize || domain.TilePool;
+            const poolStatus = element('div', 'status-grid');
+            poolStatus.appendChild(statusTile('Resident tiles', `${resident} / ${pool}`, 'grid', resident > 0, null, resident >= pool));
+            poolStatus.appendChild(statusTile('Live cells', formatCells(metrics.cells || 0), 'domain', true, null));
+            host.appendChild(card('World Grid', 'Infinite · sparse tiles', [
+                gridMode,
+                element('p', 'note', 'No box. The world is an endless lattice of cubic tiles that allocate themselves wherever gas arrives and free themselves when it has gone. Emitter tiles (amber) are always resident; the only budget is the tile pool.'),
+                slider(domain, 'TileSize', 'Tile edge', 0.5, 8, 0.25, 'm'),
+                slider(domain, 'TileResolution', 'Cells per tile edge', 8, 48, 4, 'cells', 0),
+                slider(domain, 'TilePool', `Tile pool (max ${MaximumTilePool})`, 4, MaximumTilePool, 4, 'tiles', 0),
+                element('p', 'note', `Voxel ${(domain.CellSize * 100).toFixed(1)} cm · up to ${formatCells(domain.TilePool * domain.TileResolution ** 3)} cells resident at once. When the pool is full the thinnest tile is recycled, so smoke furthest behind fades first.`),
+                poolStatus,
+            ]));
+        }
         const tiles = domain.Tiles || [1, 1, 1];
         const tileCount = tiles[0] * tiles[1] * tiles[2];
         const followTargets = domain.Follow === 'Emitter' ? snapshot.scene.Emitters : domain.Follow === 'Particles' ? (snapshot.scene.Particles || []) : [];
@@ -466,7 +485,8 @@ export function mountStudioUI({ app, refs })
         const gridStatus = element('div', 'status-grid');
         gridStatus.appendChild(statusTile('Window', `${tiles.join('×')} TILES`, 'grid', tileCount > 1, null));
         gridStatus.appendChild(statusTile('Origin tile', (domain.GridOrigin || [0, 0, 0]).join(', '), 'frame', (domain.GridOrigin || []).some((v) => v !== 0), () => app.recentreGrid()));
-        host.appendChild(card('World Grid', tileCount > 1 || domain.Follow !== 'None' ? `${tileCount} tile${tileCount > 1 ? 's' : ''} · ${(domain.TileCells || domain.Resolution).join('×')} cells each` : 'Single tile', [
+        if (!infinite) host.appendChild(card('World Grid', tileCount > 1 || domain.Follow !== 'None' ? `${tileCount} tile${tileCount > 1 ? 's' : ''} · ${(domain.TileCells || domain.Resolution).join('×')} cells each` : 'Single tile', [
+            gridMode,
             vector(domain, 'Tiles', `Tiles per axis (max ${MaximumGridTiles})`, 1, true),
             element('p', 'note', `The domain size above is one tile; the solver runs ${tiles.join(' × ')} tiles as one seamless field (${domain.Resolution.join(' × ')} cells), so gas crosses tile seams without hitting a wall.`),
             choice(domain, 'Follow', 'Follow', GridFollowModes, { None: 'Static', Emitter: 'Emitter', Particles: 'Particles', Camera: 'Camera' }),

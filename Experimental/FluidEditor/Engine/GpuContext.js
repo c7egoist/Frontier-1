@@ -114,6 +114,51 @@ export class GpuContext
         return { texture, framebuffer, width, height };
     }
 
+    /** Integer lookup texture (R16I or RGBA32I), nearest-filtered, uploaded with uploadIntegerTexture(). */
+    createIntegerTexture(width, height, channels = 1)
+    {
+        const gl = this.gl;
+        const texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texStorage2D(gl.TEXTURE_2D, 1, channels === 4 ? gl.RGBA32I : gl.R16I, width, height);
+        return { texture, width, height, channels };
+    }
+
+    uploadIntegerTexture(record, data)
+    {
+        const gl = this.gl;
+        gl.bindTexture(gl.TEXTURE_2D, record.texture);
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+        if (record.channels === 4) gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, record.width, record.height, gl.RGBA_INTEGER, gl.INT, data);
+        else gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, record.width, record.height, gl.RED_INTEGER, gl.SHORT, data);
+    }
+
+    /** Clears a rectangle of a render target (scissored). */
+    clearRegion(target, x, y, width, height)
+    {
+        const gl = this.gl;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
+        gl.viewport(0, 0, target.width, target.height);
+        gl.enable(gl.SCISSOR_TEST);
+        gl.scissor(x, y, width, height);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.disable(gl.SCISSOR_TEST);
+    }
+
+    /** Synchronous float readback of a render target. */
+    readTarget(target, buffer)
+    {
+        const gl = this.gl;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
+        gl.readPixels(0, 0, target.width, target.height, gl.RGBA, gl.FLOAT, buffer);
+        return buffer;
+    }
+
     createPingPong(width, height, options = {})
     {
         const pair = { read: this.createTarget(width, height, options), write: this.createTarget(width, height, options), width, height };

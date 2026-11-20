@@ -128,6 +128,8 @@ export class FluidStudioApp
             simulationTime: this.solver.time,
             simulationFrame: this.solver.frame,
             cells: layout.cellCount,
+            residentTiles: layout.residentTiles || 0,
+            poolSize: layout.poolSize || 0,
             resolution: [layout.width, layout.height, layout.depth],
             textureSize: [layout.textureWidth, layout.textureHeight],
             forces: this.scene.Forces.filter((force) => force.Enabled).length,
@@ -169,7 +171,8 @@ export class FluidStudioApp
     applyDomainResolution()
     {
         const domain = resolveDomainGrid(this.scene.Domain);
-        this.solver.configure(domain.Resolution, domain.CellSize, gridWindowCentre(domain));
+        if (domain.Grid === 'Infinite') this.solver.configureInfinite(domain.TileResolution, domain.CellSize, domain.TilePool);
+        else this.solver.configure(domain.Resolution, domain.CellSize, gridWindowCentre(domain));
     }
 
     //------------------------------------------------------------------------------------------------------------------------
@@ -206,6 +209,7 @@ export class FluidStudioApp
     followGrid()
     {
         const domain = this.scene.Domain;
+        if (domain.Grid === 'Infinite') return;
         const target = this.gridFollowTarget();
         if (!target) return;
         const tile = gridTileOf(domain, target);
@@ -355,6 +359,21 @@ export class FluidStudioApp
     afterNodeUpdate(node, key)
     {
         if (node.Kind === 'Domain' && key === 'Follow') this.followGrid();
+        if (node.Kind === 'Domain' && key === 'Grid')
+        {
+            // The fixed box floor sits at −Size.y/2; the infinite grid's ground is y = 0. Lift / lower every node so the scene
+            // keeps standing on the floor when the mode flips.
+            const lift = node.Size[1] * 0.5 * (node.Grid === 'Infinite' ? 1 : -1);
+            for (const list of [this.scene.Emitters, this.scene.Forces, this.scene.Colliders, this.scene.Particles || []]) for (const item of list) item.Position = [item.Position[0], item.Position[1] + lift, item.Position[2]];
+            this.applyDomainResolution();
+            this.solver.reset();
+            this.particles.resetAll();
+            this.camera.frame(this.solver.domainHalfExtent, this.solver.domainCentre);
+        }
+        if (node.Kind === 'Domain' && (key === 'TileSize' || key === 'TileResolution' || key === 'TilePool'))
+        {
+            this.applyDomainResolution();
+        }
         if (node.Kind === 'Domain' && (key === 'Size' || key === 'MaxCells' || key === 'Tiles'))
         {
             node.Size = node.Size.map((extent) => Math.max(0.5, Math.min(20, extent)));

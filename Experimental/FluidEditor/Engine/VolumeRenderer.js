@@ -16,21 +16,37 @@ function hexToRgb(hex)
 
 export class VolumeRenderer
 {
+    /** Overlay programs follow the solver's addressing mode (fixed window vs sparse tiles), compiled on first use. */
+    get programs()
+    {
+        const key = this.solver.sparse ? 'sparse' : 'fixed';
+        if (!this.programSets[key]) this.programSets[key] = this.buildPrograms(this.solver.sparse);
+        return this.programSets[key];
+    }
+
+    buildPrograms(sparseMode)
+    {
+        const context = this.context;
+        const t = sparseMode ? Shaders.sparse : (source) => source;
+        const suffix = sparseMode ? '.sparse' : '';
+        return {
+            scene: context.createProgram('Scene' + suffix, Shaders.FullscreenVertex, t(Shaders.SceneFragment)),
+            vectors: context.createProgram('Vectors' + suffix, t(Shaders.VectorVertex), Shaders.ColourFragment),
+            forceVectors: context.createProgram('ForceVectors' + suffix, t(Shaders.ForceVectorVertex), Shaders.ColourFragment),
+            slice: context.createProgram('Slice' + suffix, t(Shaders.SliceVertex), t(Shaders.SliceFragment)),
+            tracers: context.createProgram('Tracers' + suffix, t(Shaders.TracerRenderVertex), Shaders.ColourFragment),
+            debris: context.createProgram('Debris' + suffix, t(Shaders.DebrisRenderVertex), Shaders.ColourFragment),
+            lines: context.createProgram('Lines' + suffix, Shaders.LineVertex, Shaders.ColourFragment),
+        };
+    }
+
     constructor(context, solver)
     {
         this.context = context;
         this.solver = solver;
         this.gl = context.gl;
         const gl = this.gl;
-        this.programs = {
-            scene: context.createProgram('Scene', Shaders.FullscreenVertex, Shaders.SceneFragment),
-            vectors: context.createProgram('Vectors', Shaders.VectorVertex, Shaders.ColourFragment),
-            forceVectors: context.createProgram('ForceVectors', Shaders.ForceVectorVertex, Shaders.ColourFragment),
-            slice: context.createProgram('Slice', Shaders.SliceVertex, Shaders.SliceFragment),
-            tracers: context.createProgram('Tracers', Shaders.TracerRenderVertex, Shaders.ColourFragment),
-            debris: context.createProgram('Debris', Shaders.DebrisRenderVertex, Shaders.ColourFragment),
-            lines: context.createProgram('Lines', Shaders.LineVertex, Shaders.ColourFragment),
-        };
+        this.programSets = {};
         this.emptyVao = gl.createVertexArray();
         this.lineVao = gl.createVertexArray();
         this.lineBuffer = gl.createBuffer();
@@ -110,7 +126,7 @@ export class VolumeRenderer
         gl.uniform3fv(uniforms.uAmbientColour, hexToRgb(volume.Ambient));
         gl.uniform1i(uniforms.uSteps, Math.round(volume.Steps));
         gl.uniform1i(uniforms.uShadowSteps, Math.round(volume.ShadowSteps));
-        gl.uniform1f(uniforms.uGroundHeight, solver.domainCentre[1] - solver.domainHalfExtent[1] - 0.02);
+        gl.uniform1f(uniforms.uGroundHeight, solver.sparse ? -0.02 : solver.domainCentre[1] - solver.domainHalfExtent[1] - 0.02);
         gl.uniform1i(uniforms.uShowVolume, volume.Visible ? 1 : 0);
         gl.uniform1i(uniforms.uVoxelPreview, VolumeFilters.indexOf(volume.Filter) === 1 ? 1 : 0);
         gl.uniform1i(uniforms.uFrame, solver.frame & 1023);
@@ -917,19 +933,44 @@ export class VolumeRenderer
         }
     }
 
+    /** Infinite grid: one wire cube per resident tile (pinned emitter tiles brighter) plus the ground lattice around them. */
+    infiniteGridGizmo(domain, selected)
+    {
+        const pool = this.solver.tilePool;
+        if (!pool) return;
+        const size = pool.size, h = size * 0.5;
+        const resident = this.solver.residentTiles;
+        for (const entry of resident)
+        {
+            const centre = [entry.tile[0] * size + h, entry.tile[1] * size + h, entry.tile[2] * size + h];
+            const alpha = entry.pinned ? (selected ? 0.9 : 0.6) : (selected ? 0.45 : 0.26);
+            const tint = entry.pinned ? [0.96, 0.65, 0.14] : [0.62, 0.66, 0.74];
+            this.box(centre, [h, h, h], [tint[0], tint[1], tint[2], alpha]);
+        }
+        // Ground lattice two tiles beyond the resident footprint: the endless grid the gas can expand into.
+        if (!resident.length) return;
+        let lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
+        for (const { tile } of resident) { lo = [Math.min(lo[0], tile[0]), Math.min(lo[1], tile[2])]; hi = [Math.max(hi[0], tile[0]), Math.max(hi[1], tile[2])]; }
+        const ghost = [0.62, 0.66, 0.74, selected ? 0.14 : 0.06];
+        const y = 0.004;
+        for (let x = lo[0] - 2; x <= hi[0] + 3; x += 1) this.line([x * size, y, (lo[1] - 2) * size], [x * size, y, (hi[1] + 3) * size], ghost);
+        for (let z = lo[1] - 2; z <= hi[1] + 3; z += 1) this.line([(lo[0] - 2) * size, y, z * size], [(hi[0] + 3) * size, y, z * size], ghost);
+    }
+
     renderGizmos(scene, matrices, selection)
     {
         const gl = this.gl, context = this.context, solver = this.solver;
         const gizmos = scene.Visualizers.ForceGizmos;
         this.beginLines();
         const half = solver.domainHalfExtent, centre = solver.domainCentre;
-        const tiles = scene.Domain.Tiles || [1, 1, 1];
+        if (solver.sparse) this.infiniteGridGizmo(scene.Domain, selection === 'domain');
+        const tiles = solver.sparse ? [1, 1, 1] : (scene.Domain.Tiles || [1, 1, 1]);
         const multi = tiles[0] * tiles[1] * tiles[2] > 1;
         // Multi-tile windows: the bright box is the single *tile* the domain size describes; the whole simulated window
         // is the dimmer outline around it, so gas visibly carries on past the tile into its neighbours.
         if (multi) this.box(centre, half.map((extent, axis) => extent / tiles[axis]), [0.62, 0.66, 0.74, selection === 'domain' ? 0.95 : 0.45]);
-        this.box(centre, half, multi ? [0.62, 0.66, 0.74, selection === 'domain' ? 0.45 : 0.2] : [0.62, 0.66, 0.74, selection === 'domain' ? 0.95 : 0.45]);
-        this.worldGridGizmo(scene.Domain, half, centre, selection === 'domain');
+        if (!solver.sparse) this.box(centre, half, multi ? [0.62, 0.66, 0.74, selection === 'domain' ? 0.45 : 0.2] : [0.62, 0.66, 0.74, selection === 'domain' ? 0.95 : 0.45]);
+        if (!solver.sparse) this.worldGridGizmo(scene.Domain, half, centre, selection === 'domain');
         const show = (node) => gizmos.Visible ? node.Visible : node.Id === selection;
         if (true)
         {

@@ -76,9 +76,10 @@ const validator = candidates.find((candidate) => fs.existsSync(candidate));
 if (validator)
 {
     const scratch = fs.mkdtempSync('/tmp/fluid-glsl-');
-    for (const [name, source] of shaderEntries)
+    const sparseEntries = shaderEntries.filter(([, source]) => source.includes(Shaders.VolumeChunk)).map(([name, source]) => [name + '.sparse', Shaders.sparse(source)]);
+    for (const [name, source] of [...shaderEntries, ...sparseEntries])
     {
-        const file = path.join(scratch, `${name}.${name.endsWith('Vertex') ? 'vert' : 'frag'}`);
+        const file = path.join(scratch, `${name.replace('.sparse', '_sparse')}.${name.endsWith('Vertex') || name.endsWith('Vertex.sparse') ? 'vert' : 'frag'}`);
         fs.writeFileSync(file, source);
         try { execFileSync(validator, [file], { stdio: 'pipe' }); check(true, `${name} compiles`); }
         catch (error) { check(false, `${name} compiles\n${error.stdout}`); }
@@ -110,7 +111,7 @@ function createMockGl()
     let shaderId = 0, programId = 0;
     const shaders = new Map(), programs = new Map();
     let currentProgram = null;
-    const constants = { VERTEX_SHADER: 1, FRAGMENT_SHADER: 2, COMPILE_STATUS: 3, LINK_STATUS: 4, ACTIVE_UNIFORMS: 5, TEXTURE_2D: 6, RGBA16F: 7, RGBA32F: 8, FRAMEBUFFER: 9, COLOR_ATTACHMENT0: 10, FRAMEBUFFER_COMPLETE: 11, ARRAY_BUFFER: 12, STATIC_DRAW: 13, DYNAMIC_DRAW: 14, FLOAT: 15, TRIANGLES: 16, LINES: 17, POINTS: 18, COLOR_BUFFER_BIT: 19, BLEND: 20, DEPTH_TEST: 21, SRC_ALPHA: 22, ONE: 23, ONE_MINUS_SRC_ALPHA: 24, NEAREST: 25, LINEAR: 26, TEXTURE_MIN_FILTER: 27, TEXTURE_MAG_FILTER: 28, TEXTURE_WRAP_S: 29, TEXTURE_WRAP_T: 30, CLAMP_TO_EDGE: 31, TEXTURE0: 100, READ_FRAMEBUFFER: 32, DRAW_FRAMEBUFFER: 33 };
+    const constants = { VERTEX_SHADER: 1, FRAGMENT_SHADER: 2, COMPILE_STATUS: 3, LINK_STATUS: 4, ACTIVE_UNIFORMS: 5, TEXTURE_2D: 6, RGBA16F: 7, RGBA32F: 8, FRAMEBUFFER: 9, COLOR_ATTACHMENT0: 10, FRAMEBUFFER_COMPLETE: 11, ARRAY_BUFFER: 12, STATIC_DRAW: 13, DYNAMIC_DRAW: 14, FLOAT: 15, TRIANGLES: 16, LINES: 17, POINTS: 18, COLOR_BUFFER_BIT: 19, BLEND: 20, DEPTH_TEST: 21, SRC_ALPHA: 22, ONE: 23, ONE_MINUS_SRC_ALPHA: 24, NEAREST: 25, LINEAR: 26, TEXTURE_MIN_FILTER: 27, TEXTURE_MAG_FILTER: 28, TEXTURE_WRAP_S: 29, TEXTURE_WRAP_T: 30, CLAMP_TO_EDGE: 31, TEXTURE0: 100, READ_FRAMEBUFFER: 32, DRAW_FRAMEBUFFER: 33, R16I: 40, RGBA32I: 41, RED_INTEGER: 42, RGBA_INTEGER: 43, SHORT: 44, INT: 45, RGBA: 46, SCISSOR_TEST: 47, UNPACK_ALIGNMENT: 48 };
     const requireLocation = (location, setter) =>
     {
         if (!location || location.program !== currentProgram) calls.uniformErrors.push(`${setter} on invalid location for program ${currentProgram && currentProgram.label}`);
@@ -143,6 +144,7 @@ function createMockGl()
         deleteFramebuffer: () => {}, deleteTexture: () => {},
         createVertexArray: () => ({}), bindVertexArray: () => {}, createBuffer: () => ({}), bindBuffer: () => {}, bufferData: () => {}, enableVertexAttribArray: () => {}, vertexAttribPointer: () => {},
         viewport: () => {}, clearColor: () => {}, clear: () => {}, disable: () => {}, enable: () => {}, blendFunc: () => {}, blitFramebuffer: () => {},
+        scissor: () => {}, pixelStorei: () => {}, texSubImage2D: () => { calls.uploads = (calls.uploads || 0) + 1; }, readPixels: (x, y, w, h, format, type, buffer) => { calls.readbacks = (calls.readbacks || 0) + 1; buffer.fill(0); if (calls.occupancyHook) calls.occupancyHook(buffer); },
         drawArrays: () => { calls.draws += 1; },
     };
     for (const setter of ['uniform1i', 'uniform1f', 'uniform2i', 'uniform2f', 'uniform3i', 'uniform3f', 'uniform3fv', 'uniform4fv', 'uniformMatrix4fv'])
@@ -319,6 +321,29 @@ check(Math.abs(app.solver.domainCentre[0] - grid.GridOrigin[0] * 4) < 1e-9 && ap
 app.recentreGrid();
 check(grid.GridOrigin.join() === '0,0,0' && app.solver.domainCentre[0] === 0, 'Recentre returns the window to tile 0');
 check(Shaders.ShiftFragment.includes('CellInside(source)'), 'Shift kernel zero-fills cells scrolling in from outside the old window');
+
+// Infinite grid: sparse tiles allocate around emitters, grow across faces the occupancy readback flags, and free when empty.
+app.loadPreset('preset-infinite-plume');
+const pool = app.solver.tilePool;
+check(app.solver.sparse && pool && pool.cells === 24 && pool.slots === 56 && app.solver.layout.textureWidth === pool.slotsX * pool.blockW, `Infinite grid allocates a ${pool.slotsX}×${pool.slotsY} slot atlas (${app.solver.layout.textureWidth}×${app.solver.layout.textureHeight}) for 56 tiles of 24³`);
+app.frame(1000);
+const pinned = app.solver.residentTiles.filter((entry) => entry.pinned).length;
+check(pinned >= 1 && app.solver.residentTiles.every((entry) => entry.tile[1] >= 0), `Emitter pins ${pinned} ground tile(s); nothing allocates below the floor`);
+const appGl = app.solver.gl;
+// Fake an occupancy readback that reports gas pressing on the +X and +Y faces of every resident slot.
+appGl.__calls.occupancyHook = (buffer) => { for (let slot = 0; slot < pool.slots; slot += 1) { if (!pool.entries[slot]) continue; buffer[slot * 12 + 0] = 500; buffer[slot * 12 + 1] = 1; buffer[slot * 12 + 5] = 400; buffer[slot * 12 + 7] = 400; } };
+const before = app.solver.residentTiles.length;
+app.frame(1016); app.frame(1032); app.frame(1048);
+const after = app.solver.residentTiles.length;
+check(after > before && pool.map.has('1,0,0') && pool.map.has('0,1,0'), `Occupancy drives growth: ${before} → ${after} resident tiles, +X and +Y neighbours allocated`);
+appGl.__calls.occupancyHook = (buffer) => { for (let slot = 0; slot < pool.slots; slot += 1) buffer[slot * 12 + 3] = 1; };
+for (let i = 0; i < 100; i += 1) app.frame(1100 + i * 16);
+check(app.solver.residentTiles.length === app.solver.residentTiles.filter((entry) => entry.pinned).length, `Empty tiles are freed after their grace period (${app.solver.residentTiles.length} pinned remain)`);
+appGl.__calls.occupancyHook = null;
+check(Shaders.sparse(Shaders.PressureFragment).includes('uTileLookup') && !Shaders.sparse(Shaders.PressureFragment).includes('PixelFromCell(ivec3 cell)\n{\n    int tileX'), 'Sparse rewrite swaps the addressing chunk in every kernel');
+check(appGl.__calls.uniformErrors.length === 0, `Sparse programs: every uniform written exists (${mockGl.__calls.uniformErrors.length} mismatches)`);
+app.loadPreset('preset-campfire');
+check(!app.solver.sparse && app.solver.layout.width === 29 || app.solver.layout.width > 0, 'Switching back to a fixed-box preset rebuilds the window solver');
 
 console.log(Failures === 0 ? '\n🟢 Fluid Studio validation passed' : `\n🔴 Fluid Studio validation failed (${Failures})`);
 process.exit(Failures === 0 ? 0 : 1);

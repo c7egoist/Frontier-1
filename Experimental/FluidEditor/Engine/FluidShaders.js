@@ -25,6 +25,7 @@ uniform ivec2 uTiles;
 uniform vec2  uTexSize;
 uniform float uCellSize;
 uniform vec3  uGridCentre;   // world-space centre of the simulated window (World Grid tile origin × tile pitch)
+uniform ivec3 uCellOrigin;   // world cell index of cell (0,0,0) — only consulted by the Infinite boundary mode
 
 vec3 GridHalf()
 {
@@ -83,6 +84,148 @@ vec3 CellFromWorld(vec3 world)
     return (world - uGridCentre) / uCellSize + vec3(uGrid) * 0.5;
 }
 `;
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                  SPARSE (INFINITE) TILE ADDRESSING
+//------------------------------------------------------------------------------------------------------------------------
+
+// Drop-in replacement for VolumeChunk: the world is an unbounded lattice of T³ tiles. Active tiles live in slots of a 2D
+// atlas; a lookup texture (64×16×64 tiles around a sliding focus) maps tile coordinates → slot. "Cells" keep the same
+// meaning for every kernel — integer coordinates relative to uCellOrigin, the min corner of the active tiles' bounding
+// box — so advection, projection, overlays and particles run unchanged. Fetches into tiles that are not resident read 0;
+// CellInside() is "tile resident", which the boundary code treats as an open face (gas flows out, the CPU scheduler then
+// allocates the neighbour and the gas carries on).
+export const SparseVolumeChunk = `
+uniform ivec3 uGrid;          // bounding box of resident tiles, in cells
+uniform ivec2 uTiles;         // unused in sparse mode (kept so shared uniform code is identical)
+uniform vec2  uTexSize;       // atlas size in texels
+uniform float uCellSize;
+uniform vec3  uGridCentre;    // world centre of the bounding box
+uniform ivec3 uCellOrigin;    // world cell index of bounding-box cell (0,0,0)
+uniform int   uTileCells;     // T: cells per tile edge
+uniform int   uSlotsX;        // atlas slots per row
+uniform int   uSliceCols;     // z-slices per row inside one slot block
+uniform int   uSliceRows;
+uniform ivec3 uLookupOrigin;  // tile coordinate of lookup texel (0,0,0)
+uniform highp isampler2D uTileLookup; // 64 × 1024 (x, z + 64·y) → slot index, −1 when not resident
+uniform highp isampler2D uSlotTable;  // slots × 1 → (tx, ty, tz, active)
+const ivec3 LookupSize = ivec3(64, 16, 64);
+const ivec3 OutsideCell = ivec3(-1000000);
+
+vec3 GridHalf()
+{
+    return vec3(uGrid) * uCellSize * 0.5;
+}
+
+ivec3 TileOfWorldCell(ivec3 worldCell)
+{
+    return ivec3(floor(vec3(worldCell) / float(uTileCells)));
+}
+
+int SlotOfTile(ivec3 tile)
+{
+    ivec3 r = tile - uLookupOrigin;
+    if (any(lessThan(r, ivec3(0))) || any(greaterThanEqual(r, LookupSize))) return -1;
+    return texelFetch(uTileLookup, ivec2(r.x, r.z + LookupSize.z * r.y), 0).x;
+}
+
+ivec2 SlotBlock(int slot)
+{
+    return ivec2(slot - (slot / uSlotsX) * uSlotsX, slot / uSlotsX) * ivec2(uTileCells * uSliceCols, uTileCells * uSliceRows);
+}
+
+ivec2 PixelFromWorldCell(ivec3 worldCell, ivec3 tile, int slot)
+{
+    ivec3 local = worldCell - tile * uTileCells;
+    int sx = local.z - (local.z / uSliceCols) * uSliceCols;
+    int sy = local.z / uSliceCols;
+    return SlotBlock(slot) + ivec2(sx * uTileCells + local.x, sy * uTileCells + local.y);
+}
+
+ivec3 CellFromFragment(vec2 fragment)
+{
+    ivec2 pixel = ivec2(fragment);
+    int blockW = uTileCells * uSliceCols, blockH = uTileCells * uSliceRows;
+    int slot = pixel.x / blockW + (pixel.y / blockH) * uSlotsX;
+    ivec4 entry = texelFetch(uSlotTable, ivec2(slot, 0), 0);
+    if (entry.w == 0) return OutsideCell;
+    int bx = pixel.x - (pixel.x / blockW) * blockW, by = pixel.y - (pixel.y / blockH) * blockH;
+    int slice = (by / uTileCells) * uSliceCols + bx / uTileCells;
+    if (slice >= uTileCells) return OutsideCell;
+    ivec3 local = ivec3(bx - (bx / uTileCells) * uTileCells, by - (by / uTileCells) * uTileCells, slice);
+    return entry.xyz * uTileCells + local - uCellOrigin;
+}
+
+bool CellInside(ivec3 cell)
+{
+    if (cell.x <= -1000000) return false;
+    return SlotOfTile(TileOfWorldCell(cell + uCellOrigin)) >= 0;
+}
+
+ivec2 PixelFromCell(ivec3 cell)
+{
+    ivec3 worldCell = cell + uCellOrigin;
+    ivec3 tile = TileOfWorldCell(worldCell);
+    int slot = SlotOfTile(tile);
+    return slot < 0 ? ivec2(-1) : PixelFromWorldCell(worldCell, tile, slot);
+}
+
+vec4 FetchCell(sampler2D field, ivec3 cell)
+{
+    ivec3 worldCell = cell + uCellOrigin;
+    ivec3 tile = TileOfWorldCell(worldCell);
+    int slot = SlotOfTile(tile);
+    if (slot < 0) return vec4(0.0);
+    return texelFetch(field, PixelFromWorldCell(worldCell, tile, slot), 0);
+}
+
+// Trilinear sample in cell units (centre of cell i at i + 0.5). Fast path: all eight corners in one resident tile → two
+// hardware-bilinear slice taps; otherwise eight tile-aware fetches (corners in non-resident tiles read as empty).
+vec4 SampleVolume(sampler2D field, vec3 coordinate)
+{
+    vec3 p = coordinate - 0.5;
+    vec3 base = floor(p);
+    vec3 f = p - base;
+    ivec3 c0 = ivec3(base) + uCellOrigin;
+    ivec3 t0 = TileOfWorldCell(c0), t1 = TileOfWorldCell(c0 + 1);
+    if (all(equal(t0, t1)))
+    {
+        int slot = SlotOfTile(t0);
+        if (slot < 0) return vec4(0.0);
+        ivec3 local = c0 - t0 * uTileCells;
+        ivec2 block = SlotBlock(slot);
+        int zA = local.z, zB = local.z + 1;
+        vec2 inner = vec2(local.xy) + f.xy + 0.5;
+        ivec2 sliceA = ivec2(zA - (zA / uSliceCols) * uSliceCols, zA / uSliceCols);
+        ivec2 sliceB = ivec2(zB - (zB / uSliceCols) * uSliceCols, zB / uSliceCols);
+        vec2 uvA = (vec2(block + sliceA * uTileCells) + inner) / uTexSize;
+        vec2 uvB = (vec2(block + sliceB * uTileCells) + inner) / uTexSize;
+        return mix(texture(field, uvA), texture(field, uvB), f.z);
+    }
+    ivec3 b = ivec3(base);
+    vec4 x00 = mix(FetchCell(field, b), FetchCell(field, b + ivec3(1, 0, 0)), f.x);
+    vec4 x10 = mix(FetchCell(field, b + ivec3(0, 1, 0)), FetchCell(field, b + ivec3(1, 1, 0)), f.x);
+    vec4 x01 = mix(FetchCell(field, b + ivec3(0, 0, 1)), FetchCell(field, b + ivec3(1, 0, 1)), f.x);
+    vec4 x11 = mix(FetchCell(field, b + ivec3(0, 1, 1)), FetchCell(field, b + ivec3(1, 1, 1)), f.x);
+    return mix(mix(x00, x10, f.y), mix(x01, x11, f.y), f.z);
+}
+
+vec3 WorldFromCell(vec3 cellCentre)
+{
+    return (cellCentre + vec3(uCellOrigin)) * uCellSize;
+}
+
+vec3 CellFromWorld(vec3 world)
+{
+    return world / uCellSize - vec3(uCellOrigin);
+}
+`;
+
+/** Rewrites any kernel built on VolumeChunk to the sparse tile addressing. */
+export function sparse(source)
+{
+    return source.split(VolumeChunk).join(SparseVolumeChunk);
+}
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                  NOISE + FORCE GENERATORS
@@ -375,6 +518,7 @@ uniform int uBoundaryMode; // 0 closed box, 1 open top, 2 open everywhere
 // Returns true when stepping across this face leaves through an open boundary.
 bool OpenFace(ivec3 neighbour)
 {
+    if (uBoundaryMode == 3) return neighbour.y + uCellOrigin.y >= 0;
     if (uBoundaryMode == 2) return true;
     if (uBoundaryMode == 1 && neighbour.y >= uGrid.y) return true;
     return false;
@@ -684,12 +828,12 @@ void main()
         Neighbour(cell + ivec3(0, 0, 1), centre) - Neighbour(cell - ivec3(0, 0, 1), centre)) * (0.5 / uCellSize);
     vec3 velocity = FetchCell(uVelocity, cell).xyz - gradient;
     // Enforce no-penetration on closed walls.
-    if (cell.x == 0 && !OpenFace(cell - ivec3(1, 0, 0))) velocity.x = max(velocity.x, 0.0);
-    if (cell.x == uGrid.x - 1 && !OpenFace(cell + ivec3(1, 0, 0))) velocity.x = min(velocity.x, 0.0);
-    if (cell.y == 0 && !OpenFace(cell - ivec3(0, 1, 0))) velocity.y = max(velocity.y, 0.0);
-    if (cell.y == uGrid.y - 1 && !OpenFace(cell + ivec3(0, 1, 0))) velocity.y = min(velocity.y, 0.0);
-    if (cell.z == 0 && !OpenFace(cell - ivec3(0, 0, 1))) velocity.z = max(velocity.z, 0.0);
-    if (cell.z == uGrid.z - 1 && !OpenFace(cell + ivec3(0, 0, 1))) velocity.z = min(velocity.z, 0.0);
+    if (!CellInside(cell - ivec3(1, 0, 0)) && !OpenFace(cell - ivec3(1, 0, 0))) velocity.x = max(velocity.x, 0.0);
+    if (!CellInside(cell + ivec3(1, 0, 0)) && !OpenFace(cell + ivec3(1, 0, 0))) velocity.x = min(velocity.x, 0.0);
+    if (!CellInside(cell - ivec3(0, 1, 0)) && !OpenFace(cell - ivec3(0, 1, 0))) velocity.y = max(velocity.y, 0.0);
+    if (!CellInside(cell + ivec3(0, 1, 0)) && !OpenFace(cell + ivec3(0, 1, 0))) velocity.y = min(velocity.y, 0.0);
+    if (!CellInside(cell - ivec3(0, 0, 1)) && !OpenFace(cell - ivec3(0, 0, 1))) velocity.z = max(velocity.z, 0.0);
+    if (!CellInside(cell + ivec3(0, 0, 1)) && !OpenFace(cell + ivec3(0, 0, 1))) velocity.z = min(velocity.z, 0.0);
     fragColour = vec4(velocity, 0.0);
 }
 `;
@@ -708,6 +852,7 @@ out vec4 fragColour;
 // domain instead of flattening against the lid.
 float OutflowSponge(ivec3 cell)
 {
+    if (uBoundaryMode == 3) return 1.0;
     float keep = 1.0;
     float band = max(3.0, float(max(uGrid.x, max(uGrid.y, uGrid.z))) * 0.07);
     if (OpenFace(ivec3(cell.x, uGrid.y, cell.z))) keep *= smoothstep(0.0, band, float(uGrid.y - 1 - cell.y));
@@ -807,6 +952,64 @@ void main()
     ivec3 cell = CellFromFragment(gl_FragCoord.xy);
     ivec3 source = cell + uShift;
     fragColour = CellInside(source) ? FetchCell(uSource, source) : vec4(0.0);
+}
+`;
+
+// Per-slot occupancy for the Infinite grid scheduler: one row per slot, three columns —
+//   0: (density sum, density max, speed max, resident flag)
+//   1: band density next to the −X, +X, −Y, +Y faces      2: band density next to −Z, +Z
+// Sampled with a stride so a 32³ tile costs ~4k taps; read back every few frames to allocate / free tiles.
+export const OccupancyFragment = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+${SparseVolumeChunk}
+uniform sampler2D uState;
+uniform sampler2D uVelocity;
+uniform int uStride;
+uniform int uBand;
+out vec4 fragColour;
+void main()
+{
+    int slot = int(gl_FragCoord.y);
+    int column = int(gl_FragCoord.x);
+    ivec4 entry = texelFetch(uSlotTable, ivec2(slot, 0), 0);
+    if (entry.w == 0) { fragColour = vec4(0.0); return; }
+    ivec2 block = SlotBlock(slot);
+    vec4 result = vec4(0.0);
+    for (int z = 0; z < 64; z += 1)
+    {
+        int lz = z * uStride; if (lz >= uTileCells) break;
+        ivec2 sliceOrigin = block + ivec2(lz - (lz / uSliceCols) * uSliceCols, lz / uSliceCols) * uTileCells;
+        for (int y = 0; y < 64; y += 1)
+        {
+            int ly = y * uStride; if (ly >= uTileCells) break;
+            for (int x = 0; x < 64; x += 1)
+            {
+                int lx = x * uStride; if (lx >= uTileCells) break;
+                ivec2 pixel = sliceOrigin + ivec2(lx, ly);
+                float density = texelFetch(uState, pixel, 0).x;
+                if (column == 0)
+                {
+                    result.x += density;
+                    result.y = max(result.y, density);
+                    result.z = max(result.z, length(texelFetch(uVelocity, pixel, 0).xyz));
+                }
+                else if (column == 1)
+                {
+                    if (lx < uBand) result.x += density;
+                    if (lx >= uTileCells - uBand) result.y += density;
+                    if (ly < uBand) result.z += density;
+                    if (ly >= uTileCells - uBand) result.w += density;
+                }
+                else
+                {
+                    if (lz < uBand) result.x += density;
+                    if (lz >= uTileCells - uBand) result.y += density;
+                }
+            }
+        }
+    }
+    if (column == 0) result.w = 1.0;
+    fragColour = result;
 }
 `;
 

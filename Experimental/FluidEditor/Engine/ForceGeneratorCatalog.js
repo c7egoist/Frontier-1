@@ -260,6 +260,32 @@ export const ScenePresets = Object.freeze([
         ],
     },
     {
+        Id: 'preset-infinite-drift', Name: 'Infinite Grid · Drift', Icon: 'infinite', Summary: 'No box at all: a car slaloms away for ever and 2 m tiles allocate themselves wherever the smoke goes — every wire cube is a live tile, amber ones hold the emitter, and they free themselves once the smoke has gone.',
+        Domain: { Resolution: [24, 24, 24], Size: [4, 4, 4], MaxCells: 24, Grid: 'Infinite', TileSize: 2, TileResolution: 24, TilePool: 56, Buoyancy: 0.12, AmbientTemperature: 0, Cooling: 0.4, Vorticity: 0.3, Dissipation: 0.994, Gravity: 0.3, VelocityDissipation: 0.998, PressureIterations: 18 },
+        Boundary: 'OpenAll',
+        Look: { Albedo: '#d2d2d6', Absorption: 3.0, Anisotropy: 0.55, Exposure: 1.1 },
+        Emitters: [
+            { Name: 'Rear Tyre', Shape: 'Disc', Position: [0, 0.22, 0], Radius: 0.24, Density: 2.4, Temperature: 0.4, Fuel: 0, Velocity: [-2.6, 0.6, 0], Jitter: 0.45, Orientation: [1, 0, 0], PathKind: 'Slalom', PathRadius: 1.6, PathSpeed: 2.4 },
+        ],
+        Forces: [
+            { Type: 'DirectionalWind', Name: 'Crosswind', Position: [0, 0, 0], Strength: 0.3, Direction: [0, 0, 1], Falloff: 'Constant', Frequency: 0.4, Secondary: 0.5 },
+            { Type: 'DragBaffle', Name: 'Ceiling Brake', Position: [0, 1.9, 0], Strength: 1.4, Radius: 40, Falloff: 'Plateau' },
+        ],
+    },
+    {
+        Id: 'preset-infinite-plume', Name: 'Infinite Grid · Plume', Icon: 'infinite', Summary: 'A hot plume rising in open sky with a steady wind: tiles stack upwards and downwind as the smoke climbs, nothing is ever clipped — watch the cubes appear ahead of the gas and vanish behind it.',
+        Domain: { Resolution: [24, 24, 24], Size: [4, 4, 4], MaxCells: 24, Grid: 'Infinite', TileSize: 2, TileResolution: 24, TilePool: 56, Buoyancy: 1.1, AmbientTemperature: 0, Cooling: 0.5, Vorticity: 0.4, Dissipation: 0.997, Gravity: 0.1, VelocityDissipation: 0.999, PressureIterations: 18 },
+        Boundary: 'OpenAll',
+        Look: { Albedo: '#9a9ca3', Absorption: 3.0, Anisotropy: 0.5, Exposure: 1.1 },
+        Emitters: [
+            { Name: 'Stack', Shape: 'Disc', Position: [0, 0.3, 0], Radius: 0.35, Density: 1.6, Temperature: 1.6, Fuel: 0, Velocity: [0, 2.0, 0], Jitter: 0.3, Orientation: [0, 1, 0] },
+        ],
+        Forces: [
+            { Type: 'DirectionalWind', Name: 'Prevailing Wind', Position: [0, 0, 0], Strength: 0.9, Direction: [1, 0, 0.15], Falloff: 'Constant', Frequency: 0.3, Secondary: 0.5 },
+            { Type: 'CurlNoiseTurbulence', Name: 'Gusts', Position: [0, 3, 0], Strength: 1.2, Radius: 30, Falloff: 'Constant', Frequency: 0.25, Secondary: 0.6 },
+        ],
+    },
+    {
         Id: 'preset-tile-crossing', Name: 'Tile Crossing · World Grid', Icon: 'grid', Summary: 'Static 4 × 1 × 2 tile grid: a smoke source in the first tile is blown clean across every seam by a steady wind, curls round a vortex two tiles downstream and leaves at the far end — the bright box is one tile, the dim outline the whole grid.',
         Domain: { Resolution: [144, 30, 72], Size: [3, 2.5, 3], MaxCells: 36, Tiles: [4, 1, 2], Follow: 'None', Buoyancy: 0.25, AmbientTemperature: 0, Cooling: 0.3, Vorticity: 0.4, Dissipation: 0.997, Gravity: 0.1, VelocityDissipation: 0.999, PressureIterations: 20 },
         Boundary: 'OpenAll',
@@ -474,6 +500,9 @@ export const DebrisKinds = Object.freeze(['Rubble', 'Ember', 'Paper']);
 export const EmitterPathKinds = Object.freeze(['None', 'Circle', 'Line', 'Figure8', 'Straight', 'Slalom']);
 export const GridFollowModes = Object.freeze(['None', 'Emitter', 'Particles', 'Camera']);
 export const MaximumGridTiles = 5;
+export const GridModes = Object.freeze(['Fixed', 'Infinite']);
+export const MaximumTilePool = 160;
+export const MaximumInfiniteCells = 1600000;
 
 /** Animated emitter transform: returns { Position, Velocity } for an emitter following its motion path at `time`. */
 export function emitterTransform(emitter, time)
@@ -578,6 +607,8 @@ export const ResolutionPresets = Object.freeze({ Draft: 32, Low: 48, Medium: 64,
 // longest axis, and `CellSize` + per-axis `Resolution` are derived so shrinking the voxel count makes the gas coarser.
 export function resolveDomainGrid(domain)
 {
+    if (domain.Grid === 'Infinite') return resolveInfiniteGrid(domain);
+    domain.Grid = 'Fixed';
     // World Grid: the domain `Size` is one tile; the simulated window spans `Tiles` adjacent tiles per axis as a single
     // seamless field. Cells per tile are integers so the window can slide by whole tiles with an exact texel copy.
     const tiles = (domain.Tiles || [1, 1, 1]).map((count) => Math.max(1, Math.min(MaximumGridTiles, Math.round(count || 1))));
@@ -592,6 +623,27 @@ export function resolveDomainGrid(domain)
     domain.TileCells = tileCells;
     domain.CellSize = cellSize;
     domain.Resolution = tileCells.map((cells, axis) => Math.max(8, Math.min(160, cells * tiles[axis])));
+    if (!domain.GridOrigin) domain.GridOrigin = [0, 0, 0];
+    if (!GridFollowModes.includes(domain.Follow)) domain.Follow = 'None';
+    return domain;
+}
+
+/**
+ * Infinite grid: an unbounded lattice of cubic tiles (`TileSize` m, `TileResolution` cells per edge) allocated on demand
+ * from a pool of `TilePool` atlas slots. There is no box at all — the pool size is the only budget, and it is capped so
+ * the atlas stays inside a sane GPU memory footprint.
+ */
+export function resolveInfiniteGrid(domain)
+{
+    domain.Grid = 'Infinite';
+    domain.TileSize = Math.max(0.5, Math.min(8, domain.TileSize || 2));
+    domain.TileResolution = Math.max(8, Math.min(48, Math.round(domain.TileResolution || 24)));
+    const perTile = domain.TileResolution ** 3;
+    domain.TilePool = Math.max(4, Math.min(MaximumTilePool, Math.floor(MaximumInfiniteCells / perTile), Math.round(domain.TilePool || 48)));
+    domain.CellSize = domain.TileSize / domain.TileResolution;
+    domain.Resolution = [domain.TileResolution, domain.TileResolution, domain.TileResolution];
+    domain.Tiles = [1, 1, 1];
+    domain.TileCells = [...domain.Resolution];
     if (!domain.GridOrigin) domain.GridOrigin = [0, 0, 0];
     if (!GridFollowModes.includes(domain.Follow)) domain.Follow = 'None';
     return domain;
@@ -637,6 +689,10 @@ export function createDomain(overrides = {})
         Follow: overrides.Follow || 'None',
         FollowHeight: overrides.FollowHeight ?? false,
         GridOrigin: overrides.GridOrigin ? [...overrides.GridOrigin] : [0, 0, 0],
+        Grid: overrides.Grid || 'Fixed',
+        TileSize: overrides.TileSize ?? 2,
+        TileResolution: overrides.TileResolution ?? 24,
+        TilePool: overrides.TilePool ?? 48,
     });
 }
 
