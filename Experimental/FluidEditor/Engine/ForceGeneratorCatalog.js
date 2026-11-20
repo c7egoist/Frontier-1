@@ -290,7 +290,7 @@ export function createDomain(overrides = {})
         Dissipation: overrides.Dissipation ?? 0.996,
         VelocityDissipation: overrides.VelocityDissipation ?? 0.999,
         Gravity: overrides.Gravity ?? 0.25,
-        PressureIterations: overrides.PressureIterations ?? 24,
+        PressureIterations: overrides.PressureIterations ?? 36,
         Advection: overrides.Advection || 'MacCormack',
         Boundary: overrides.Boundary || 'OpenTop',
         TimeScale: overrides.TimeScale ?? 1.0,

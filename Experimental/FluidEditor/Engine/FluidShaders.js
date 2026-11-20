@@ -90,35 +90,51 @@ float Hash31(vec3 p)
     return fract((p.x + p.y) * p.z);
 }
 
-float ValueNoise(vec3 p)
+vec3 Hash33(vec3 p)
+{
+    p = vec3(dot(p, vec3(127.1, 311.7, 74.7)), dot(p, vec3(269.5, 183.3, 246.1)), dot(p, vec3(113.5, 271.9, 124.6)));
+    return fract(sin(p) * 43758.5453123) * 2.0 - 1.0;
+}
+
+// Gradient (Perlin-style) noise with quintic fade: no lattice-aligned blobs, unlike value noise.
+float GradientNoise(vec3 p)
 {
     vec3 i = floor(p);
     vec3 f = fract(p);
-    vec3 u = f * f * (3.0 - 2.0 * f);
-    float n000 = Hash31(i + vec3(0.0, 0.0, 0.0));
-    float n100 = Hash31(i + vec3(1.0, 0.0, 0.0));
-    float n010 = Hash31(i + vec3(0.0, 1.0, 0.0));
-    float n110 = Hash31(i + vec3(1.0, 1.0, 0.0));
-    float n001 = Hash31(i + vec3(0.0, 0.0, 1.0));
-    float n101 = Hash31(i + vec3(1.0, 0.0, 1.0));
-    float n011 = Hash31(i + vec3(0.0, 1.0, 1.0));
-    float n111 = Hash31(i + vec3(1.0, 1.0, 1.0));
-    float x00 = mix(n000, n100, u.x);
-    float x10 = mix(n010, n110, u.x);
-    float x01 = mix(n001, n101, u.x);
-    float x11 = mix(n011, n111, u.x);
+    vec3 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    float n000 = dot(Hash33(i + vec3(0.0, 0.0, 0.0)), f - vec3(0.0, 0.0, 0.0));
+    float n100 = dot(Hash33(i + vec3(1.0, 0.0, 0.0)), f - vec3(1.0, 0.0, 0.0));
+    float n010 = dot(Hash33(i + vec3(0.0, 1.0, 0.0)), f - vec3(0.0, 1.0, 0.0));
+    float n110 = dot(Hash33(i + vec3(1.0, 1.0, 0.0)), f - vec3(1.0, 1.0, 0.0));
+    float n001 = dot(Hash33(i + vec3(0.0, 0.0, 1.0)), f - vec3(0.0, 0.0, 1.0));
+    float n101 = dot(Hash33(i + vec3(1.0, 0.0, 1.0)), f - vec3(1.0, 0.0, 1.0));
+    float n011 = dot(Hash33(i + vec3(0.0, 1.0, 1.0)), f - vec3(0.0, 1.0, 1.0));
+    float n111 = dot(Hash33(i + vec3(1.0, 1.0, 1.0)), f - vec3(1.0, 1.0, 1.0));
+    float x00 = mix(n000, n100, u.x), x10 = mix(n010, n110, u.x), x01 = mix(n001, n101, u.x), x11 = mix(n011, n111, u.x);
     return mix(mix(x00, x10, u.y), mix(x01, x11, u.y), u.z);
+}
+
+// Three-octave fractal gradient noise, remapped to 0..1.
+float ValueNoise(vec3 p)
+{
+    const mat3 rotate = mat3(0.00, 0.80, 0.60, -0.80, 0.36, -0.48, -0.60, -0.48, 0.64);
+    float sum = GradientNoise(p);
+    p = rotate * p * 2.02;
+    sum += 0.5 * GradientNoise(p);
+    p = rotate * p * 2.03;
+    sum += 0.25 * GradientNoise(p);
+    return clamp(sum / 1.75 * 0.75 + 0.5, 0.0, 1.0);
 }
 
 vec3 PotentialNoise(vec3 p)
 {
-    return vec3(ValueNoise(p), ValueNoise(p + vec3(31.7, 17.3, 9.1)), ValueNoise(p + vec3(-12.9, 44.2, 23.6))) * 2.0 - 1.0;
+    return vec3(GradientNoise(p), GradientNoise(p + vec3(31.7, 17.3, 9.1)), GradientNoise(p + vec3(-12.9, 44.2, 23.6)));
 }
 
 // Curl of a vector potential is divergence-free: ideal for turbulence injection.
 vec3 CurlNoise(vec3 p)
 {
-    const float e = 0.05;
+    const float e = 0.03;
     vec3 dx = PotentialNoise(p + vec3(e, 0.0, 0.0)) - PotentialNoise(p - vec3(e, 0.0, 0.0));
     vec3 dy = PotentialNoise(p + vec3(0.0, e, 0.0)) - PotentialNoise(p - vec3(0.0, e, 0.0));
     vec3 dz = PotentialNoise(p + vec3(0.0, 0.0, e)) - PotentialNoise(p - vec3(0.0, 0.0, e));
@@ -191,7 +207,7 @@ vec3 EvaluateForceGenerator(int index, vec3 position, vec3 velocity)
     if (type == 4)
     {
         float w = Falloff(falloffMode, distance / radius);
-        return CurlNoise(position * frequency + vec3(0.0, uTime * secondary, uTime * secondary * 0.31)) * strength * w * 0.25;
+        return CurlNoise(position * frequency + vec3(0.0, uTime * secondary, uTime * secondary * 0.31)) * strength * w * 0.35;
     }
     if (type == 5)
     {
@@ -385,8 +401,8 @@ float EmitterMask(int index, vec3 world)
     float jitter = c.z;
     if (jitter > 0.0)
     {
-        float n = ValueNoise(world * (6.0 / radius) + vec3(0.0, uTime * 2.5, uTime * 1.3));
-        mask *= mix(1.0, n * 1.6, clamp(jitter, 0.0, 1.0));
+        float n = ValueNoise(world * (2.2 / radius) + vec3(0.0, uTime * 1.6, uTime * 0.9));
+        mask *= mix(1.0, smoothstep(0.25, 0.8, n) * 1.4, clamp(jitter, 0.0, 1.0));
     }
     float pulse = d.w;
     if (pulse > 0.0)
