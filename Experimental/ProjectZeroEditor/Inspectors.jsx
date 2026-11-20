@@ -18,6 +18,7 @@ import { IsEditorCamera } from "./ScenePolicy.js";
 import { WindInspector, WindBinding } from "./WindPanel.jsx";
 import TransformPanel from "./TransformPanel.jsx";
 import MaterialPanel from "./MaterialPanel.jsx";
+import SunStudioPanel from "./SunStudioPanel.jsx";
 import { ColourSlotDropProps } from "./ColourCodex.js";
 import ActionIcon, { QuickSymbol } from "./ActionIcon.jsx";
 import React, { useState, useEffect, useRef } from "react";
@@ -494,6 +495,7 @@ export function Inspector({
   ReferenceCards = null,
   CloudCoverageCards = null,
   ReferenceDetailCards = null,
+  OnSelectEntity = null,
 }) {
   const Sheet = Panels[Subject.Panel] || Panels.geometry;
   const [MoonSlot, SelectMoon] = useState(0);
@@ -753,181 +755,22 @@ export function Inspector({
     );
   let Content;
   if (Subject.Panel === "sun") {
-    const Time = V("Local Hours");
-    const Solved = Solar({
-      LocalHours: Time,
-      Month: V("Month"),
-      Day: V("Day of Month"),
-      Latitude: V("Latitude"),
-      Longitude: V("Longitude"),
-    });
-    const { Elevation, Azimuth } = Solved;
     Content = (
-      <>
-        {Header("Environment")}
-        {ReferenceCards}
-        <div className="section-caption">
-          PROPERTIES <small>Light, direction & atmosphere</small>
-        </div>
-        <div className="tiles sun-tiles">
-          <Tile
-            Label="Enabled"
-            Context="sun"
-            On={!Hidden}
-            Action={ToggleHidden}
-            Large
+      <SunStudioPanel
+        Subject={Subject}
+        V={V}
+        AssignProperty={AssignProperty}
+        F={F}
+        Hidden={Hidden}
+        ToggleHidden={ToggleHidden}
+        OnSelectEntity={OnSelectEntity}
+        EntityNotesSlot={
+          <EntityNotes
+            Value={Values.Notes || ""}
+            Change={(Next) => Change("Notes", Next)}
           />
-          <button disabled>↺ Reset</button>
-          <Tile Label="Sunlight" Large Disabled IconName="sun" />
-          <Tile Label="Sun disc" Large Disabled IconName="sun" />
-          <Tile
-            Label="Day cycle"
-            Large
-            IconName="celestial-orbit"
-            On={V("Animate")}
-            Action={() => AssignProperty("Animate", !V("Animate"))}
-          />
-          <Tile
-            Label={V("Animate") ? "Dynamic" : "Static"}
-            Large
-            IconName="celestial-orbit"
-            On={V("Animate")}
-            Action={() => AssignProperty("Animate", !V("Animate"))}
-          />
-        </div>
-        <div className="subcomponent">
-          <Icon Name="lens-flare" />
-          <div>
-            Lens Flare<small>Optical effect subcomponent</small>
-          </div>
-          <Glyph Name="arrow" />
-        </div>
-        <div className="card-grid sun-properties">
-          <Card Title="Sun direction" Height={711} Class="direction-card">
-            <Metric
-              Value={Elevation.toFixed(1) + "°"}
-              Caption={
-                Elevation < 0 ? "Below the horizon" : "Above the horizon"
-              }
-            />
-            <div
-              className="graphic tall solved-gizmo"
-              title="Solved direction. Edit Local Hours to change it."
-            >
-              <SunGizmo
-                azimuth={Azimuth}
-                elevation={Elevation}
-                onChange={() => {}}
-              />
-            </div>
-            {F("Local Hours")}
-            <div className="solved-directions">
-              <div>
-                <small>Azimuth</small>
-                <Metric Value={Azimuth.toFixed(1) + "°"} />
-                <input
-                  type="range"
-                  disabled
-                  value={Azimuth}
-                  min="0"
-                  max="360"
-                />
-              </div>
-              <div>
-                <small>Elevation</small>
-                <Metric Value={Elevation.toFixed(1) + "°"} />
-                <input
-                  type="range"
-                  disabled
-                  value={Elevation}
-                  min="-90"
-                  max="90"
-                />
-              </div>
-            </div>
-            <p>Shared time above · angles solved by date / location</p>
-          </Card>
-          <Card Title="Sunlight intensity" Height={347} GraphHandled>
-            <Metric
-              Value={Number(V("Intensity")).toFixed(1)}
-              Unit="×"
-              Caption="Sunlight intensity multiplier"
-            />
-            <SunGraph V={V} Change={AssignProperty} Mode="gain" />
-            {F("Intensity")}
-            <div className="ends">
-              <span>0 ×</span>
-              <span>60 ×</span>
-            </div>
-          </Card>
-          <Card Title="Temperature" Height={347} GraphHandled>
-            <Metric
-              Value={V("Colour source") ? V("Temperature") : "RGB"}
-              Unit={V("Colour source") ? "K" : ""}
-            />
-            {F("Colour source")}
-            <div className="temperature-spectrum" />
-            <SunGraph V={V} Change={AssignProperty} Mode="temperature" />
-            <div className="ends">
-              <span>Warm</span>
-              <span>Cool</span>
-            </div>
-            {F("Temperature", !V("Colour source"))}
-            <p>Blackbody tint approximation · linear RGB</p>
-            {F("Sun Tint", !!V("Colour source"))}
-          </Card>
-          <Card Title="Daylight cycle" Height={329} GraphHandled>
-            <Metric
-              Value={`${String(Math.floor(Time)).padStart(2, "0")}:${String(Math.floor((Time % 1) * 60)).padStart(2, "0")}`}
-            />
-            <SunGraph V={V} Change={AssignProperty} Mode="day" />
-            {F("Local Hours")}
-          </Card>
-          <Card Title="Sun disc" Height={329}>
-            <Metric Value={Number(V("Angular Diameter")).toFixed(2) + "°"} />
-            <div
-              className="solar-disc"
-              style={{
-                "--diameter":
-                  Math.min(120, 20 + V("Angular Diameter") * 30) + "px",
-              }}
-            />
-            {F("Angular Diameter")}
-          </Card>
-        </div>
-        <Card Title="Dynamic settings" Wide GraphHandled>
-          <SunGraph V={V} Change={AssignProperty} Mode="year" />
-          {Fields(
-            "Animate",
-            "Day duration",
-            "Speed",
-            "Direct",
-            "Latitude",
-            "Longitude",
-            "Day of Month",
-            "Month",
-          )}
-          <div className="readout">
-            <span>Declination</span>
-            <output>{Solved.Declination.toFixed(2)}°</output>
-          </div>
-          <div className="readout">
-            <span>Equation of Time</span>
-            <output>{Solved.EquationOfTime.toFixed(2)} min</output>
-          </div>
-        </Card>
-        <p className="native-note">
-          Solar position uses the native NOAA calculation, translated to
-          JavaScript. No GPU lighting is running.
-        </p>
-        <div className="section-caption">
-          BAKING <small>Native target bindings pending</small>
-        </div>
-        <div className="card-grid">
-          <Bake Title="Sun lighting bake" Sun />
-          <Bake Title="Sun disk bake" Sun />
-        </div>
-      </>
+        }
+      />
     );
   } else if (Subject.Panel === "camera") {
     const Focal = V("Focal Length"),

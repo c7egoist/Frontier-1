@@ -1848,6 +1848,7 @@ function App() {
               WindFields={WindFields}
               AllValues={Values}
               AllHidden={Hidden}
+              OnSelectEntity={(Id) => Select(Id)}
               ReferenceDetailCards={
                 Subject.Panel === "light" && !Subject.ReferenceOnly
                   ? ReferenceCards("details")
@@ -1859,7 +1860,7 @@ function App() {
                   : null
               }
               ReferenceCards={
-                ["sun", "wind", "clouds", "local-cloud", "light"].includes(
+                ["wind", "clouds", "local-cloud", "light"].includes(
                   Subject.Panel,
                 )
                   ? ReferenceCards(

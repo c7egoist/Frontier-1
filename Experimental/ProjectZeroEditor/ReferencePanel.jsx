@@ -102,10 +102,11 @@ function TypeOf(Row) {
   );
 }
 export function HasReferencePanel(Row) {
-  if (Row.Panel === "group" || Row.Panel === "moon") return false;
+  if (Row.Panel === "group" || Row.Panel === "moon" || Row.Panel === "sun")
+    return false;
   return (
     !!Row.ReferenceType ||
-    ["wind", "clouds", "local-cloud", "height-fog", "sun", "light"].includes(
+    ["wind", "clouds", "local-cloud", "height-fog", "light"].includes(
       Row.Panel,
     )
   );

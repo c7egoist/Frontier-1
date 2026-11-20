@@ -1,6 +1,6 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {Upload,Download,X} from 'lucide-react';
-function BakeIcon({size=18}){return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5h7a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-6M2 9h11m-4-4 4 4-4 4M3 2v3M1.5 3.5h3"/><path d="M14 14h3v3h-3z"/></svg>}
+function BakeIcon({size=18}){return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m3.5 15.2 8.5-4.1 8.5 4.1-8.5 4.1-8.5-4.1Z"/><path d="m7.8 13.1 8.4 4.1m0-4.1-8.4 4.1" strokeOpacity=".4"/><path d="M12 3.2v8.1m-2.7-2.5L12 11.5l2.7-2.7"/></svg>}
 
 const targets={sun:[['sun','Sun lighting'],['sun-disk','Sun disk']],sky:[['atmosphere','Atmosphere']],rainbow:[['rainbow','Rainbow']],flare:[['lens-flare','Lens flare']],stars:[['stars','Stars']]};
 const maxImageBytes=256*1024;

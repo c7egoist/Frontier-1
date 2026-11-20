@@ -1,0 +1,1212 @@
+/* ════════════════════════════════════════════════════════════════════════════════════════════
+   SUN STUDIO — SHARED OBSIDIAN BENTO & CAROUSEL DESIGN SYSTEM
+   Shared across Frontier Editor & Project-Zero Editor
+   ════════════════════════════════════════════════════════════════════════════════════════════ */
+
+.cards.sun {
+  display: block;
+}
+
+.sun-studio-root {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  color: #e6e8ec;
+}
+
+/* Circular obsidian icon seat (Reference Image 4) */
+.sun-icon-badge {
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 25%, #23262c 0%, #17191d 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--sun-badge-accent, #eab965);
+  display: inline-grid;
+  place-items: center;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* ── 1. Interactive Sky Banner + Preset Pill Carousel (Reference Image 2) ── */
+.sun-sky-banner {
+  background: #121317;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 20px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.sun-sky-banner__stage {
+  position: relative;
+  border-radius: 14px;
+  overflow: hidden;
+  height: 124px;
+  cursor: ew-resize;
+  touch-action: none;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.sun-sky-banner__stage svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.sun-sky-banner__hud {
+  position: absolute;
+  inset: 0;
+  padding: 13px 15px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.sun-sky-banner__phase {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.25px;
+  color: #f6f7f9;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.55);
+}
+
+.sun-sky-banner__meta {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: rgba(242, 244, 248, 0.72);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
+}
+
+.sun-sky-banner__bearing {
+  background: rgba(12, 14, 18, 0.68);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 10.5px;
+  color: #ebedf2;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sun-preset-carousel {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 2px 1px;
+}
+
+.sun-preset-carousel::-webkit-scrollbar {
+  display: none;
+}
+
+.sun-preset-pill {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: #17191e;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: #989da8;
+  font-size: 11px;
+  transition: background 0.18s, border-color 0.18s, color 0.18s;
+}
+
+.sun-preset-pill:hover {
+  background: #1e2128;
+  color: #e6e9ef;
+}
+
+.sun-preset-pill.is-active {
+  background: #22252d;
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #f7f8fa;
+}
+
+.sun-preset-pill > i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sun-preset-pill > small {
+  font-size: 10px;
+  color: #6f7580;
+  font-variant-numeric: tabular-nums;
+}
+
+.sun-preset-pill.is-active > small {
+  color: #aeb4c0;
+}
+
+/* ── 2. Accent-Bar Bento KPI Strip (Reference Image 1) ────────────────────── */
+.sun-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.sun-kpi-card {
+  text-align: left;
+  background: #121317;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 16px;
+  padding: 13px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  transition: border-color 0.2s, background 0.2s, transform 0.18s;
+}
+
+.sun-kpi-card:hover {
+  background: #16181e;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.sun-kpi-card.is-selected {
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--kpi-accent, #eab965) 11%, #14151a),
+    #121317 72%
+  );
+  border-color: color-mix(in srgb, var(--kpi-accent, #eab965) 68%, transparent);
+}
+
+.sun-kpi-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: #a6abb6;
+  font-weight: 400;
+}
+
+.sun-kpi-card__bar {
+  width: 3.5px;
+  height: 14px;
+  border-radius: 4px;
+  background: #676c77;
+  transition: background 0.2s;
+}
+
+.sun-kpi-card.is-selected .sun-kpi-card__bar {
+  background: var(--kpi-accent, #eab965);
+}
+
+.sun-kpi-card__delta {
+  font-size: 10px;
+  color: var(--kpi-accent, #eab965);
+  letter-spacing: 0.1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sun-kpi-card__main {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.sun-kpi-card__main strong {
+  font-size: 26px;
+  font-weight: 300;
+  letter-spacing: -1px;
+  line-height: 1;
+  color: #f4f5f8;
+  font-variant-numeric: tabular-nums;
+}
+
+.sun-kpi-card__main strong em {
+  font-style: normal;
+  font-size: 12px;
+  color: #7d838f;
+  letter-spacing: 0;
+}
+
+.sun-kpi-card__main small {
+  font-size: 10.5px;
+  color: #777d89;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── 3. Category Tab Bar + Segmented Progress Rail (Images 4 & 5) ─────────── */
+.sun-carousel-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 4px 2px 0;
+}
+
+.sun-carousel-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  max-width: 100%;
+}
+
+.sun-carousel-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.sun-carousel-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #787e8a;
+  font-size: 12px;
+  font-weight: 400;
+  white-space: nowrap;
+  transition: color 0.18s, background 0.18s, border-color 0.18s;
+}
+
+.sun-carousel-tab:hover {
+  color: #cfd4de;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.sun-carousel-tab.is-active {
+  color: #f8f9fb;
+  background: #1a1c22;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.sun-carousel-tab svg {
+  color: #6f7580;
+  transition: color 0.18s;
+}
+
+.sun-carousel-tab.is-active svg {
+  color: var(--tab-accent, #eab965);
+}
+
+.sun-carousel-tab sup {
+  font-size: 9.5px;
+  line-height: 1;
+  color: #656b76;
+  top: -0.35em;
+  font-variant-numeric: tabular-nums;
+}
+
+.sun-carousel-tab.is-active sup {
+  color: var(--tab-accent, #eab965);
+}
+
+.sun-carousel-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.sun-mode-switch {
+  display: inline-flex;
+  background: #15171c;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 999px;
+  padding: 2px;
+}
+
+.sun-mode-switch button {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: #7c828e;
+}
+
+.sun-mode-switch button.is-active {
+  background: #252831;
+  color: #f2f4f8;
+}
+
+.sun-carousel-steppers {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sun-carousel-index {
+  font-size: 10.5px;
+  color: #767c88;
+  font-variant-numeric: tabular-nums;
+  margin-right: 3px;
+}
+
+.sun-carousel-steppers button,
+.sun-subcarousel__arrows button,
+.sun-circle-action {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #181a20;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #b8bec9;
+  display: inline-grid;
+  place-items: center;
+  transition: background 0.18s, border-color 0.18s, color 0.18s;
+}
+
+.sun-carousel-steppers button:hover,
+.sun-subcarousel__arrows button:hover,
+.sun-circle-action:hover {
+  background: #23262f;
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+/* Segmented progress rail (Reference Image 5) */
+.sun-segment-rail {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: -4px;
+}
+
+.sun-segment-rail > button {
+  height: 4px;
+  padding: 0;
+  border-radius: 999px;
+  background: #20232b;
+  transition: background 0.22s;
+}
+
+.sun-segment-rail > button.is-active {
+  background: var(--seg-accent, #eab965);
+}
+
+/* ── 4. Horizontal Category Carousel Viewport ─────────────────────────────── */
+.sun-carousel-viewport {
+  overflow: hidden;
+  width: 100%;
+  border-radius: 20px;
+}
+
+.sun-carousel-track {
+  display: flex;
+  width: 100%;
+  transition: transform 0.36s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.sun-carousel-slide {
+  flex: 0 0 100%;
+  width: 100%;
+  min-width: 0;
+}
+
+.sun-all-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sun-slide-grid--two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+/* ── 5. Inner Sub-Carousel for Multi-Card Categories ──────────────────────── */
+.sun-subcarousel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sun-subcarousel__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sun-subcarousel__pills {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.sun-subcarousel__pills::-webkit-scrollbar {
+  display: none;
+}
+
+.sun-subcarousel__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: #15171c;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: #888e9b;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.sun-subcarousel__pill > span {
+  font-size: 9.5px;
+  color: #5e6470;
+  font-variant-numeric: tabular-nums;
+}
+
+.sun-subcarousel__pill.is-active {
+  background: #21242c;
+  border-color: rgba(240, 202, 114, 0.38);
+  color: #f6f7f9;
+}
+
+.sun-subcarousel__pill.is-active > span {
+  color: #f0ca72;
+}
+
+.sun-subcarousel__arrows {
+  display: inline-flex;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.sun-subcarousel__viewport {
+  overflow: hidden;
+  border-radius: 20px;
+}
+
+.sun-subcarousel__track {
+  display: flex;
+  transition: transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+  transform: translate3d(calc(var(--sub-slide, 0) * -100%), 0, 0);
+}
+
+.sun-subcarousel__item {
+  flex: 0 0 100%;
+  width: 100%;
+  min-width: 0;
+}
+
+/* ── 6. Obsidian Bento Cards (Reference Images 2, 3, 4, 6) ────────────────── */
+.sun-bento-card {
+  background: linear-gradient(160deg, #16181d 0%, #111216 100%);
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 20px;
+  padding: 20px 21px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.sun-bento-card--glow {
+  background:
+    radial-gradient(120% 85% at 14% 0%, rgba(236, 185, 95, 0.085), transparent 58%),
+    linear-gradient(160deg, #16181d 0%, #111216 100%);
+}
+
+.sun-bento-card.is-disabled-card .sun-bento-fieldset {
+  opacity: 0.36;
+  pointer-events: none;
+}
+
+.sun-bento-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sun-bento-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sun-bento-card__title-group {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+
+.sun-bento-card__title-group h3 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 500;
+  letter-spacing: -0.2px;
+  color: #f1f3f7;
+}
+
+.sun-bento-card__sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: #777d89;
+}
+
+.sun-bento-card__kpi-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Split-tone hero numerals (Reference Images 2 & 3) */
+.sun-bento-metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.sun-bento-metric__int {
+  font-size: 40px;
+  font-weight: 300;
+  letter-spacing: -1.8px;
+  color: #f6f7fa;
+}
+
+.sun-bento-metric__frac {
+  font-size: 28px;
+  font-weight: 300;
+  letter-spacing: -1px;
+  color: #6f7582;
+}
+
+.sun-bento-metric__unit {
+  font-size: 14px;
+  font-weight: 400;
+  color: #848a96;
+  margin-left: 3px;
+}
+
+.sun-pill-tag,
+.sun-swatch-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #1c1f26;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 10.5px;
+  color: #b7bdc8;
+  white-space: nowrap;
+}
+
+.sun-swatch-pill > i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.sun-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  background: rgba(234, 185, 101, 0.12);
+  color: #efc576;
+  border: 1px solid rgba(234, 185, 101, 0.24);
+}
+
+.sun-status-chip.is-muted {
+  background: rgba(140, 154, 186, 0.12);
+  color: #9fb0d6;
+  border-color: rgba(140, 154, 186, 0.22);
+}
+
+/* Tactile capsule toggle switch (Reference Image 4 Smart TV) */
+.sun-capsule-toggle {
+  width: 50px;
+  height: 28px;
+  border-radius: 999px;
+  padding: 3px;
+  background: #1d2027;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.sun-capsule-toggle.is-on {
+  background: #232c29;
+  border-color: rgba(188, 224, 209, 0.35);
+}
+
+.sun-capsule-toggle__thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #676d79;
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), background 0.2s;
+}
+
+.sun-capsule-toggle.is-on .sun-capsule-toggle__thumb {
+  transform: translateX(22px);
+  background: #c8e7dc;
+}
+
+/* Gizmo & Charts */
+.sun-gizmo-well {
+  background: #0d0e12;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 15px;
+  padding: 4px 6px;
+}
+
+.sun-gizmo-well .gizmo {
+  margin: 0;
+}
+
+.sun-telemetry-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  background: #0e1014;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 14px;
+  padding: 6px 4px;
+}
+
+.sun-dual-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.sun-axis-box {
+  background: #171920;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 14px;
+  padding: 11px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sun-axis-box__top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #8c929f;
+}
+
+.sun-axis-box__top strong {
+  font-size: 16px;
+  font-weight: 400;
+  color: #eceef3;
+  font-variant-numeric: tabular-nums;
+}
+
+.sun-axis-box__top small {
+  font-size: 11px;
+  color: #7c828f;
+  margin-left: 1px;
+}
+
+.sun-stepper-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 10px;
+  color: #7b818e;
+}
+
+.sun-stepper-row button,
+.sun-round-steppers button {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #20232b;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  color: #d6dae2;
+  font-size: 14px;
+  line-height: 1;
+  display: inline-grid;
+  place-items: center;
+}
+
+.sun-stepper-row button:hover,
+.sun-round-steppers button:hover {
+  background: #2a2e38;
+  color: #ffffff;
+}
+
+.sun-card-bottom-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sun-round-steppers {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.sun-card-hint {
+  margin: 0;
+  font-size: 10.5px;
+  color: #777d89;
+}
+
+/* Blackbody Kelvin track & paired comparison blocks (Reference Image 3) */
+.sun-kelvin-bar {
+  height: 14px;
+  border-radius: 999px;
+  padding: 0 2px;
+  display: flex;
+  align-items: center;
+  background: linear-gradient(
+    90deg,
+    #ff8d3a 0%,
+    #ffc773 26%,
+    #fff1db 52%,
+    #dce8ff 78%,
+    #aac6ff 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.sun-kelvin-bar input[type='range'] {
+  background: transparent !important;
+  height: 14px;
+  margin: 0;
+}
+
+.sun-balance-blocks {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.sun-balance-block {
+  border-radius: 13px;
+  padding: 11px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sun-balance-block small {
+  font-size: 10px;
+  opacity: 0.75;
+}
+
+.sun-balance-block strong {
+  font-size: 16px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.sun-balance-block--hatched {
+  background:
+    repeating-linear-gradient(
+      -45deg,
+      rgba(255, 255, 255, 0.05) 0 5px,
+      rgba(255, 255, 255, 0.015) 5px 10px
+    ),
+    #15171d;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #c5cad4;
+}
+
+.sun-balance-block--solid {
+  background: var(--block-fill, #f2d5a0);
+  color: #141518;
+}
+
+/* Sun Disc Caliper Visual */
+.sun-disc-caliper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: #0e1014;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 15px;
+  padding: 14px 18px;
+}
+
+.sun-disc-caliper__stage {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.04), transparent 72%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.sun-disc-caliper__ref {
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px dashed rgba(255, 255, 255, 0.55);
+  pointer-events: none;
+}
+
+.sun-disc-caliper__orb {
+  display: block;
+  border-radius: 50%;
+  transition: width 0.14s, height 0.14s;
+}
+
+/* ── 7. Smart-Home Bento Control Grid (Reference Image 4) ─────────────────── */
+.sun-smart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.sun-smart-tile {
+  background: linear-gradient(160deg, #16181e 0%, #111216 100%);
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 22px;
+  padding: 18px 19px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 156px;
+  gap: 14px;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.sun-smart-tile.is-off {
+  opacity: 0.72;
+}
+
+.sun-smart-tile:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.sun-smart-tile__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sun-smart-tile__body h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 400;
+  letter-spacing: -0.25px;
+  color: #f3f5f8;
+}
+
+.sun-smart-tile__body p {
+  margin: 5px 0 0;
+  font-size: 11.5px;
+  color: #848a96;
+}
+
+.sun-smart-tile__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sun-smart-tile__state {
+  font-size: 9.5px;
+  letter-spacing: 1px;
+  color: #6d7380;
+}
+
+.sun-inspect-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #21242d;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 11px;
+  color: #eceef3;
+}
+
+.sun-inspect-pill:hover {
+  background: #2b2f3b;
+}
+
+/* ── 8. Baking Category Integration in Frontier Editor ────────────────────── */
+.inspector[data-sun-category='trajectory'] .bake-quick-area,
+.inspector[data-sun-category='photometry'] .bake-quick-area,
+.inspector[data-sun-category='subsystems'] .bake-quick-area {
+  display: none;
+}
+
+.inspector[data-sun-category] .bake-quick-area {
+  margin-top: 12px;
+}
+
+.inspector[data-sun-category] .bake-quick-tile {
+  background: linear-gradient(160deg, #16181d 0%, #111216 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+}
+
+/* ── 9. Project-Zero Integration & Container-Aware Docked Inspector ───────── */
+.sun-studio-shell {
+  container-type: inline-size;
+  width: 100%;
+  min-width: 0;
+}
+
+.pz-sun-header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.pz-sun-header__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pz-sun-header__crumb {
+  font-size: 10.5px;
+  color: #7c828f;
+  letter-spacing: 0.2px;
+}
+
+.pz-sun-header__main {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.pz-sun-header__main h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 300;
+  letter-spacing: -1px;
+  line-height: 1.05;
+  color: #f4f6fa;
+  position: static !important;
+}
+
+.pz-sun-header__main p {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: #7e8491;
+}
+
+.pz-only-compact {
+  display: none;
+}
+
+.pz-trajectory-deck {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pz-trajectory-deck__item {
+  min-width: 0;
+}
+
+.pz-solved-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: #222630;
+  overflow: hidden;
+}
+
+.pz-solved-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #c99748, #f2cf7d);
+}
+
+.pz-sun-graph-frame {
+  background: #0d0f13;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 15px;
+  padding: 10px 11px;
+}
+
+.pz-sun-field-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pz-sun-field-stack .field,
+.pz-sun-field-grid .field {
+  margin: 4px 0;
+}
+
+.pz-sun-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+
+.pz-ephemeris-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pz-bake-bento-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #151820;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+
+.pz-bake-bento-row__title {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: #eceff4;
+  margin-bottom: 3px;
+}
+
+.pz-bake-bento-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.pz-bake-bento-actions button {
+  flex: 1;
+  height: 34px;
+  border-radius: 999px;
+  background: #1b1e26;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #9ba1ae;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.pz-bake-bento-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Container queries for docked narrow Inspector (~330–580px) */
+@container (max-width: 620px) {
+  .pz-only-compact {
+    display: flex;
+  }
+
+  .pz-trajectory-deck {
+    display: flex;
+    gap: 0;
+    transition: transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+    transform: translate3d(calc(var(--traj-slide, 0) * -100%), 0, 0);
+  }
+
+  .pz-trajectory-deck__item {
+    flex: 0 0 100%;
+    width: 100%;
+  }
+
+  .sun-slide-grid--two,
+  .pz-sun-field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sun-kpi-card {
+    padding: 10px 11px;
+  }
+
+  .sun-kpi-card__main strong {
+    font-size: 20px;
+  }
+
+  .sun-smart-tile {
+    padding: 14px 15px;
+    min-height: 138px;
+  }
+
+  .sun-smart-tile__body h4 {
+    font-size: 14px;
+  }
+
+  .sun-bento-card {
+    padding: 16px 16px;
+  }
+
+  .sun-bento-metric__int {
+    font-size: 32px;
+  }
+}
+
+@container (max-width: 350px) {
+  .sun-kpi-strip,
+  .sun-smart-grid,
+  .sun-dual-controls {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── 10. Media Fallbacks ──────────────────────────────────────────────────── */
+@media (max-width: 920px) {
+  .sun-slide-grid--two {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .sun-kpi-strip {
+    grid-template-columns: 1fr;
+  }
+  .sun-smart-grid,
+  .sun-dual-controls {
+    grid-template-columns: 1fr;
+  }
+}
