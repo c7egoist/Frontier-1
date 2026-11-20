@@ -586,8 +586,8 @@ export function mountStudioUI({ app, refs })
         host.appendChild(card('Sprite', 'Footprint, size & depth of field', [
             choice(node, 'Sprite', 'Sprite', ParticleSprites),
             choice(node, 'SizeMode', 'Size units', ParticleSizeModes, { World: 'World (metres)', Pixels: 'Screen pixels' }),
-            slider(node, 'SizeStart', 'Size at birth', world ? 0.002 : 0.5, world ? 0.3 : 12, world ? 0.002 : 0.5, world ? 'm' : 'px', world ? 3 : 1),
-            slider(node, 'SizeEnd', 'Size at death', world ? 0.002 : 0.5, world ? 0.3 : 12, world ? 0.002 : 0.5, world ? 'm' : 'px', world ? 3 : 1),
+            slider(node, 'SizeStart', 'Size at birth', world ? 0.001 : 0.5, world ? 0.15 : 12, world ? 0.001 : 0.5, world ? 'm' : 'px', world ? 3 : 1),
+            slider(node, 'SizeEnd', 'Size at death', world ? 0.001 : 0.5, world ? 0.15 : 12, world ? 0.001 : 0.5, world ? 'm' : 'px', world ? 3 : 1),
             slider(node, 'SizeRandom', 'Size randomness (dust ↔ bokeh)', 0, 1, 0.02),
             slider(node, 'Glow', 'Glow halo', 0, 2, 0.05),
             slider(node, 'FocusDistance', 'Focus distance (0 = no DOF)', 0, 20, 0.1, 'm'),
