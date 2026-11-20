@@ -26,6 +26,7 @@ export class FluidSolver
             a: new Float32Array(MaximumForceGenerators * 4),
             b: new Float32Array(MaximumForceGenerators * 4),
             c: new Float32Array(MaximumForceGenerators * 4),
+            d: new Float32Array(MaximumForceGenerators * 4),
             count: 0,
         };
         this.emitterArrays = {
@@ -133,6 +134,7 @@ export class FluidSolver
             arrays.a.set([force.Position[0], force.Position[1], force.Position[2], force.Radius], offset);
             arrays.b.set([force.Direction[0], force.Direction[1], force.Direction[2], force.Strength], offset);
             arrays.c.set([type.Code, Math.max(0, FalloffCurves.indexOf(force.Falloff)), force.Frequency, force.Secondary], offset);
+            arrays.d.set([force.Tertiary || 0, 0, 0, 0], offset);
             count += 1;
         }
         arrays.count = count;
@@ -185,6 +187,7 @@ export class FluidSolver
         gl.uniform4fv(uniforms.uForceA, this.forceArrays.a);
         gl.uniform4fv(uniforms.uForceB, this.forceArrays.b);
         gl.uniform4fv(uniforms.uForceC, this.forceArrays.c);
+        gl.uniform4fv(uniforms.uForceD, this.forceArrays.d);
         gl.uniform1f(uniforms.uTime, this.time);
     }
 

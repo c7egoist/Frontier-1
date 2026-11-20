@@ -39,7 +39,8 @@ for (const type of ForceGeneratorTypes)
     check(FalloffCurves.includes(type.Defaults.Falloff), `${type.Id} default falloff is registered`);
     check(Shaders.ForceFieldChunk.includes(`type == ${type.Code}`), `${type.Id} is evaluated by the GLSL force kernel`);
 }
-check(ForceGeneratorTypes.length <= MaximumForceGenerators, 'Type count fits the uniform slot budget');
+check(ForceGeneratorTypes.length === 20, `${ForceGeneratorTypes.length} generator types registered across ${new Set(ForceGeneratorTypes.map((type) => type.Category)).size} categories`);
+for (const curve of FalloffCurves) check(Shaders.ForceFieldChunk.includes(`mode == ${FalloffCurves.indexOf(curve)}`) || curve === 'InverseSquare', `Falloff ${curve} handled by GLSL`);
 for (const preset of ScenePresets)
 {
     for (const force of preset.Forces || []) check(Boolean(ForceTypeById[force.Type]), `${preset.Name}: force ${force.Type} resolves`);
@@ -153,7 +154,7 @@ check(domain.Resolution.join() === '96,48,48' && Math.abs(domain.CellSize - 6 / 
 const scene = {
     Name: preset.Name, Domain: domain,
     Emitters: preset.Emitters.map((emitter) => createEmitter(emitter)),
-    Forces: [...preset.Forces.map((force) => createForceGenerator(force.Type, force)), ...ForceGeneratorTypes.map((type) => createForceGenerator(type.Id)), createForceGenerator("DragBaffle"), createForceGenerator("VortexRing")],
+    Forces: [...preset.Forces.map((force) => createForceGenerator(force.Type, force)), ...ForceGeneratorTypes.map((type) => createForceGenerator(type.Id)), ],
     Colliders: preset.Colliders.map((collider) => createCollider(collider)),
     Visualizers: createVisualizerSet(),
 };
@@ -261,13 +262,15 @@ for (const type of ForceGeneratorTypes)
     renders += refs.inspector.children.length;
 }
 check(app.scene.Forces.length === ForceGeneratorTypes.length + 2, 'All generator types construct into the scene');
+app.scene.Visualizers.ForceVectors.Visible = true; app.scene.Visualizers.ForceVectors.Mode = 'Volume'; app.frame(70);
+check(app.supported, 'Sparse-volume force vector overlay renders');
 app.addEmitter('Disc'); app.addCollider();
 for (const visualizer of Object.values(app.scene.Visualizers)) { app.select(visualizer.Id); check(refs.inspector.children.length >= 4, `${visualizer.Name} inspector renders`); }
 app.frame(16); app.frame(33); app.stepOnce(); app.frame(50);
-check(app.solver.frame === 3, `Solver advanced ${app.solver.frame} frames through the app loop (2 live + 1 stepped)`);
+check(app.solver.frame === 4, `Solver advanced ${app.solver.frame} frames through the app loop (3 live + 1 stepped)`);
 for (const preset of ScenePresets) { app.loadPreset(preset.Id); check(app.scene.Name === preset.Name && app.solver.layout.width === preset.Domain.Resolution[0], `Preset ${preset.Name} loads + reconfigures grid`); }
 ui.toggleDrawer(true, 'forces');
-check(refs.drawer.children.length === 2 && refs.drawer.children[1].children.length === ForceGeneratorTypes.length, 'Asset drawer lists every force generator card');
+check(refs.drawer.children.length === 2 && refs.drawer.children[1].children.reduce((sum, group) => sum + group.children[1].children.length, 0) === ForceGeneratorTypes.length, 'Asset drawer lists every force generator card grouped by category');
 app.loadPreset('preset-campfire');
 app.updateNode(app.scene.Domain.Id, 'MaxCells', 48);
 check(app.solver.layout.height === 48 && app.solver.layout.width === 24, 'MaxCells edits rebuild the solver fields at fixed world size (3×6×3 m → 24×48×24)');

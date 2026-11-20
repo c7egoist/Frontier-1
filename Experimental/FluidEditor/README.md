@@ -36,21 +36,18 @@ Fields are 3D grids stored as 2D tile atlases (`RGBA16F`, hardware bilinear + ma
 | 6 | Projection | `DivergenceFragment` → `PressureFragment` × N Jacobi → `GradientFragment` with closed / open-top / open boundaries and solid Neumann cells |
 | 7 | Tracers | `TracerUpdateFragment` — RK2 particle integration, lifetime respawn, previous-frame copy for trails |
 
-### Force generators (`Engine/ForceGeneratorCatalog.js` ↔ `ForceFieldChunk`)
+### Force generators (`Engine/ForceGeneratorCatalog.js` ↔ `ForceFieldChunk`) — the merged ForceField editor
 
-| Code | Type | Field |
-| :---: | :--- | :--- |
-| 0 | Directional Wind | `axis · strength · (1 + gustDepth · noise(t))`, infinite or spherical reach |
-| 1 / 2 | Point Attractor / Repulsor | radial pull / push with soft core |
-| 3 | Vortex Column | tangential swirl + inward pull + axial lift about an axis |
-| 4 | Curl Noise Turbulence | ∇ × ψ of animated value-noise potential (divergence-free) |
-| 5 | Drag Baffle | `−v · strength` inside reach |
-| 6 | Radial Burst | periodic outward impulse with pulse width |
-| 7 | Thermal Updraft | cylindrical axial lift |
-| 8 | Axis Attractor | pull toward an infinite line |
-| 9 | Vortex Ring | toroidal circulation around a ring core (launches smoke rings) |
+| Category | Types |
+| :--- | :--- |
+| **Directional** | Directional Wind (gusting) · Wind Shear (heading twists with height) · Flow Stream (steer to target velocity) |
+| **Attraction** | Point Attractor · Point Repulsor · Axis Attractor · Orbit (tangential + centripetal) · Containment (soft spring bottle) · Magnetic Dipole (flux-line field) |
+| **Rotational** | Vortex Column · Vortex Ring · Rigid Spin |
+| **Turbulence** | Curl Noise Turbulence (divergence-free gradient-noise curl) · Brownian Jitter (re-rolled per-cell kicks) |
+| **Burst** | Radial Burst · Directional Burst · Shockwave Shell (expanding thin front) · Implosion — all with period, width and start delay |
+| **Damping / Thermal** | Drag Baffle · Thermal Updraft |
 
-Falloff envelopes: `SmoothStep · Linear · InverseSquare · Infinite`. Up to **12** simultaneous generators, **6** emitters, **4** sphere colliders.
+Falloff envelopes: `Smooth · Linear · Inverse² · Infinite · Gaussian · Plateau · Interpolated (cosine)`. Up to **16** simultaneous generators, **6** emitters, **4** sphere colliders. Each generator exposes strength, reach, falloff, position, axis and up to three type-specific modulation parameters; negative strength inverts the field.
 
 ---
 
@@ -58,6 +55,7 @@ Falloff envelopes: `SmoothStep · Linear · InverseSquare · Infinite`. Up to **
 
 - **Volume Render** — single-pass ray-march with jittered steps, directional shadow march, Henyey-Greenstein forward scattering, editable **fire incandescence ramp** (ember → flame → core colours, ignition temperature, span, flame opacity, emission), soot lit by its own flame, editable smoke albedo / extinction / ambient / sun / exposure with `Wood · Gas · Fuel · Magic` fire and `Soot · Grey · Steam · Dust` smoke look chips, ACES tone map; analytic ground grid + sphere colliders share the same ray.
 - **Velocity Vectors** — GPU-generated arrow lines on an axis-aligned slice (stride, scale, Turbo / Engineering / Plasma / Diverging ramps).
+- **Force Vectors** — GPU-evaluated Σ-force arrows on a slice plane or as a sparse 3D lattice, coloured by |F|.
 - **Scalar Slice** — heat-map of `Speed · Pressure · Vorticity · Temperature · Density · Divergence · Force |F|` (force magnitude is evaluated live from the generator uniforms).
 - **Flow Tracers** — 8 192 GPU particles with speed-coloured points + trails.
 - **Force Gizmos** — per-type wireframes (wind arrows, attractor cages, vortex helix, ring tubes…); click to select, drag to move (`Shift` locks height). Gizmos never alter solver state.

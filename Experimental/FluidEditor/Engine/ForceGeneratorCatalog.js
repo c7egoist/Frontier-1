@@ -4,11 +4,13 @@
 //                                 Emitter Shapes, Colour Ramps, and Scene Presets
 //============================================================================================================================================
 
-export const MaximumForceGenerators = 12;
+export const MaximumForceGenerators = 16;
 export const MaximumEmitters = 6;
 export const MaximumColliders = 4;
 
-export const FalloffCurves = ['SmoothStep', 'Linear', 'InverseSquare', 'Constant'];
+export const FalloffCurves = ['SmoothStep', 'Linear', 'InverseSquare', 'Constant', 'Gaussian', 'Plateau', 'Cosine'];
+export const FalloffLabels = { SmoothStep: 'Smooth', Linear: 'Linear', InverseSquare: 'Inverse²', Constant: 'Infinite', Gaussian: 'Gaussian', Plateau: 'Plateau', Cosine: 'Interpolated' };
+export const ForceCategories = ['Directional', 'Attraction', 'Rotational', 'Turbulence', 'Burst', 'Damping', 'Thermal'];
 export const EmitterShapes = ['Sphere', 'Disc', 'Box'];
 export const ColourRamps = ['Turbo', 'Engineering', 'Plasma', 'Diverging'];
 export const SliceAxes = ['X', 'Y', 'Z'];
@@ -16,71 +18,138 @@ export const ScalarChannels = ['Speed', 'Pressure', 'Vorticity', 'Temperature', 
 export const AdvectionSchemes = ['SemiLagrangian', 'MacCormack'];
 export const BoundaryModes = ['ClosedBox', 'OpenTop', 'OpenAll'];
 export const VolumeFilters = ['Smooth', 'Voxel'];
+export const VectorModes = ['Slice', 'Volume'];
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                  FORCE GENERATOR TYPES
 //------------------------------------------------------------------------------------------------------------------------
 
 export const ForceGeneratorTypes = Object.freeze([
+    // ---------------------------------------------------------------- Directional
     {
-        Id: 'DirectionalWind', Code: 0, Name: 'Directional Wind', Icon: 'wind', Tint: '#38bdf8',
-        Summary: 'Uniform directional push across the whole domain or a spherical reach.',
-        Defaults: { Strength: 6, Radius: 2.0, Direction: [1, 0, 0], Falloff: 'Constant', Frequency: 0.6, Secondary: 0.35 },
-        Labels: { Secondary: 'Gust Depth', Frequency: 'Gust Rate' },
+        Id: 'DirectionalWind', Code: 0, Category: 'Directional', Name: 'Directional Wind', Icon: 'wind', Tint: '#38bdf8',
+        Summary: 'Uniform directional push across the whole domain or a bounded reach, with optional gusting.',
+        Defaults: { Strength: 6, Radius: 2.0, Direction: [1, 0, 0], Falloff: 'Constant', Frequency: 0.6, Secondary: 0.35, Tertiary: 0 },
+        Labels: { Frequency: 'Gust Rate', Secondary: 'Gust Depth' },
     },
     {
-        Id: 'PointAttractor', Code: 1, Name: 'Point Attractor', Icon: 'attractor', Tint: '#a78bfa',
+        Id: 'WindShear', Code: 17, Category: 'Directional', Name: 'Wind Shear', Icon: 'shear', Tint: '#60a5fa',
+        Summary: 'Crosswind whose heading rotates with height along the axis — layered, twisting flow.',
+        Defaults: { Strength: 5, Radius: 2.0, Direction: [0, 1, 0], Falloff: 'Constant', Frequency: 0, Secondary: 1.0, Tertiary: 0 },
+        Labels: { Secondary: 'Twist (half-turns)' },
+    },
+    {
+        Id: 'FlowStream', Code: 16, Category: 'Directional', Name: 'Flow Stream', Icon: 'stream', Tint: '#7dd3fc',
+        Summary: 'Steers gas toward a target velocity along the axis — a soft conveyor rather than a push.',
+        Defaults: { Strength: 3, Radius: 1.2, Direction: [1, 0, 0], Falloff: 'SmoothStep', Frequency: 2.5, Secondary: 0, Tertiary: 0 },
+        Labels: { Frequency: 'Target Speed' },
+    },
+    {
+        Id: 'DirectionalBurst', Code: 14, Category: 'Burst', Name: 'Directional Burst', Icon: 'dburst', Tint: '#fb923c',
+        Summary: 'Periodic impulse along one axis — cannon shots, piston puffs, muzzle blasts.',
+        Defaults: { Strength: 45, Radius: 0.9, Direction: [0, 1, 0], Falloff: 'SmoothStep', Frequency: 1.5, Secondary: 0.1, Tertiary: 0 },
+        Labels: { Frequency: 'Pulse Period', Secondary: 'Pulse Width', Tertiary: 'Start Delay' },
+    },
+    // ---------------------------------------------------------------- Attraction
+    {
+        Id: 'PointAttractor', Code: 1, Category: 'Attraction', Name: 'Point Attractor', Icon: 'attractor', Tint: '#a78bfa',
         Summary: 'Pulls fluid toward a centre; negative strength repels.',
-        Defaults: { Strength: 14, Radius: 1.4, Direction: [0, 1, 0], Falloff: 'SmoothStep', Frequency: 0, Secondary: 0 },
+        Defaults: { Strength: 14, Radius: 1.4, Direction: [0, 1, 0], Falloff: 'SmoothStep', Frequency: 0, Secondary: 0.1, Tertiary: 0 },
         Labels: { Secondary: 'Core Softness' },
     },
     {
-        Id: 'PointRepulsor', Code: 2, Name: 'Point Repulsor', Icon: 'repulsor', Tint: '#f472b6',
+        Id: 'PointRepulsor', Code: 2, Category: 'Attraction', Name: 'Point Repulsor', Icon: 'repulsor', Tint: '#f472b6',
         Summary: 'Pushes fluid away from a centre in all directions.',
-        Defaults: { Strength: 14, Radius: 1.2, Direction: [0, 1, 0], Falloff: 'SmoothStep', Frequency: 0, Secondary: 0 },
+        Defaults: { Strength: 14, Radius: 1.2, Direction: [0, 1, 0], Falloff: 'SmoothStep', Frequency: 0, Secondary: 0.1, Tertiary: 0 },
         Labels: { Secondary: 'Core Softness' },
     },
     {
-        Id: 'VortexColumn', Code: 3, Name: 'Vortex Column', Icon: 'vortex', Tint: '#34d399',
-        Summary: 'Swirls fluid around an axis with optional inward pull and axial lift.',
-        Defaults: { Strength: 12, Radius: 1.6, Direction: [0, 1, 0], Falloff: 'Linear', Frequency: 0.4, Secondary: 2.5 },
-        Labels: { Secondary: 'Axial Lift', Frequency: 'Inward Pull' },
-    },
-    {
-        Id: 'CurlNoiseTurbulence', Code: 4, Name: 'Curl Noise Turbulence', Icon: 'turbulence', Tint: '#fbbf24',
-        Summary: 'Divergence-free animated curl noise that breaks up laminar flow.',
-        Defaults: { Strength: 9, Radius: 2.4, Direction: [0, 1, 0], Falloff: 'SmoothStep', Frequency: 1.8, Secondary: 0.7 },
-        Labels: { Secondary: 'Evolution Speed', Frequency: 'Noise Scale' },
-    },
-    {
-        Id: 'DragBaffle', Code: 5, Name: 'Drag Baffle', Icon: 'drag', Tint: '#94a3b8',
-        Summary: 'Damps velocity inside its reach — a soft brake on the flow.',
-        Defaults: { Strength: 4, Radius: 1.0, Direction: [0, 1, 0], Falloff: 'SmoothStep', Frequency: 0, Secondary: 0 },
-        Labels: {},
-    },
-    {
-        Id: 'RadialBurst', Code: 6, Name: 'Radial Burst', Icon: 'burst', Tint: '#fb7185',
-        Summary: 'Pulsing outward shockwave with a tunable period.',
-        Defaults: { Strength: 40, Radius: 1.5, Direction: [0, 1, 0], Falloff: 'Linear', Frequency: 1.2, Secondary: 0.12 },
-        Labels: { Secondary: 'Pulse Width', Frequency: 'Pulse Period' },
-    },
-    {
-        Id: 'ThermalUpdraft', Code: 7, Name: 'Thermal Updraft', Icon: 'updraft', Tint: '#f97316',
-        Summary: 'Cylindrical column of lift along its axis.',
-        Defaults: { Strength: 8, Radius: 0.8, Direction: [0, 1, 0], Falloff: 'SmoothStep', Frequency: 0, Secondary: 0 },
-        Labels: {},
-    },
-    {
-        Id: 'AxisAttractor', Code: 8, Name: 'Axis Attractor', Icon: 'axis', Tint: '#22d3ee',
+        Id: 'AxisAttractor', Code: 8, Category: 'Attraction', Name: 'Axis Attractor', Icon: 'axis', Tint: '#22d3ee',
         Summary: 'Pulls fluid toward an infinite line through its centre.',
-        Defaults: { Strength: 10, Radius: 1.8, Direction: [0, 1, 0], Falloff: 'Linear', Frequency: 0, Secondary: 0 },
+        Defaults: { Strength: 10, Radius: 1.8, Direction: [0, 1, 0], Falloff: 'Linear', Frequency: 0, Secondary: 0, Tertiary: 0 },
         Labels: {},
     },
     {
-        Id: 'VortexRing', Code: 9, Name: 'Vortex Ring', Icon: 'ring', Tint: '#c084fc',
+        Id: 'Orbit', Code: 10, Category: 'Attraction', Name: 'Orbit', Icon: 'orbit', Tint: '#c4b5fd',
+        Summary: 'Tangential circulation about a point with centripetal pull — gas orbits the centre.',
+        Defaults: { Strength: 10, Radius: 1.6, Direction: [0, 1, 0], Falloff: 'Linear', Frequency: 0, Secondary: 0.5, Tertiary: 0 },
+        Labels: { Secondary: 'Centripetal Pull' },
+    },
+    {
+        Id: 'Containment', Code: 11, Category: 'Attraction', Name: 'Containment', Icon: 'containment', Tint: '#2dd4bf',
+        Summary: 'Spring that pushes gas back inside its radius — an invisible soft bottle.',
+        Defaults: { Strength: 20, Radius: 1.2, Direction: [0, 1, 0], Falloff: 'Linear', Frequency: 0, Secondary: 0.4, Tertiary: 0 },
+        Labels: { Secondary: 'Wall Softness' },
+    },
+    {
+        Id: 'MagneticDipole', Code: 19, Category: 'Attraction', Name: 'Magnetic Dipole', Icon: 'dipole', Tint: '#e879f9',
+        Summary: 'Dipole field lines looping pole to pole — gas follows the magnetic flux.',
+        Defaults: { Strength: 10, Radius: 1.8, Direction: [0, 1, 0], Falloff: 'SmoothStep', Frequency: 0, Secondary: 0.25, Tertiary: 0 },
+        Labels: { Secondary: 'Core Radius' },
+    },
+    // ---------------------------------------------------------------- Rotational
+    {
+        Id: 'VortexColumn', Code: 3, Category: 'Rotational', Name: 'Vortex Column', Icon: 'vortex', Tint: '#34d399',
+        Summary: 'Swirls fluid around an axis with optional inward pull and axial lift.',
+        Defaults: { Strength: 12, Radius: 1.6, Direction: [0, 1, 0], Falloff: 'Linear', Frequency: 0.4, Secondary: 2.5, Tertiary: 0 },
+        Labels: { Frequency: 'Inward Pull', Secondary: 'Axial Lift' },
+    },
+    {
+        Id: 'VortexRing', Code: 9, Category: 'Rotational', Name: 'Vortex Ring', Icon: 'ring', Tint: '#c084fc',
         Summary: 'Toroidal circulation around a ring — launches smoke rings.',
-        Defaults: { Strength: 16, Radius: 0.9, Direction: [0, 1, 0], Falloff: 'SmoothStep', Frequency: 0.35, Secondary: 0 },
+        Defaults: { Strength: 16, Radius: 0.9, Direction: [0, 1, 0], Falloff: 'SmoothStep', Frequency: 0.35, Secondary: 0, Tertiary: 0 },
         Labels: { Frequency: 'Tube Radius' },
+    },
+    {
+        Id: 'Spin', Code: 18, Category: 'Rotational', Name: 'Rigid Spin', Icon: 'spin', Tint: '#4ade80',
+        Summary: 'Solid-body rotation: tangential force grows with distance from the axis.',
+        Defaults: { Strength: 6, Radius: 1.5, Direction: [0, 1, 0], Falloff: 'Plateau', Frequency: 0, Secondary: 0, Tertiary: 0 },
+        Labels: {},
+    },
+    // ---------------------------------------------------------------- Turbulence
+    {
+        Id: 'CurlNoiseTurbulence', Code: 4, Category: 'Turbulence', Name: 'Curl Noise Turbulence', Icon: 'turbulence', Tint: '#fbbf24',
+        Summary: 'Divergence-free animated curl noise that breaks up laminar flow.',
+        Defaults: { Strength: 9, Radius: 2.4, Direction: [0, 1, 0], Falloff: 'SmoothStep', Frequency: 1.8, Secondary: 0.7, Tertiary: 0 },
+        Labels: { Frequency: 'Noise Scale', Secondary: 'Evolution Speed' },
+    },
+    {
+        Id: 'BrownianJitter', Code: 15, Category: 'Turbulence', Name: 'Brownian Jitter', Icon: 'brownian', Tint: '#facc15',
+        Summary: 'Per-cell random kicks re-rolled at a fixed rate — fine-grained, incoherent agitation.',
+        Defaults: { Strength: 6, Radius: 1.5, Direction: [0, 1, 0], Falloff: 'SmoothStep', Frequency: 6, Secondary: 12, Tertiary: 0 },
+        Labels: { Frequency: 'Cell Scale', Secondary: 'Re-roll Rate (Hz)' },
+    },
+    // ---------------------------------------------------------------- Burst
+    {
+        Id: 'RadialBurst', Code: 6, Category: 'Burst', Name: 'Radial Burst', Icon: 'burst', Tint: '#fb7185',
+        Summary: 'Pulsing outward blast filling the reach — detonation kick.',
+        Defaults: { Strength: 40, Radius: 1.5, Direction: [0, 1, 0], Falloff: 'Linear', Frequency: 1.2, Secondary: 0.12, Tertiary: 0 },
+        Labels: { Frequency: 'Pulse Period', Secondary: 'Pulse Width', Tertiary: 'Start Delay' },
+    },
+    {
+        Id: 'ShockwaveShell', Code: 12, Category: 'Burst', Name: 'Shockwave Shell', Icon: 'shockwave', Tint: '#f87171',
+        Summary: 'A thin spherical pressure front expanding from the centre to the reach radius each period.',
+        Defaults: { Strength: 60, Radius: 2.0, Direction: [0, 1, 0], Falloff: 'Constant', Frequency: 1.6, Secondary: 0.12, Tertiary: 0 },
+        Labels: { Frequency: 'Period', Secondary: 'Shell Thickness', Tertiary: 'Start Delay' },
+    },
+    {
+        Id: 'Implosion', Code: 13, Category: 'Burst', Name: 'Implosion', Icon: 'implosion', Tint: '#fda4af',
+        Summary: 'Periodic inward collapse toward the centre — the pre-blast suck of a fireball.',
+        Defaults: { Strength: 35, Radius: 1.5, Direction: [0, 1, 0], Falloff: 'Linear', Frequency: 1.5, Secondary: 0.15, Tertiary: 0 },
+        Labels: { Frequency: 'Pulse Period', Secondary: 'Pulse Width', Tertiary: 'Start Delay' },
+    },
+    // ---------------------------------------------------------------- Damping / Thermal
+    {
+        Id: 'DragBaffle', Code: 5, Category: 'Damping', Name: 'Drag Baffle', Icon: 'drag', Tint: '#94a3b8',
+        Summary: 'Damps velocity inside its reach — a soft brake on the flow.',
+        Defaults: { Strength: 4, Radius: 1.0, Direction: [0, 1, 0], Falloff: 'SmoothStep', Frequency: 0, Secondary: 0, Tertiary: 0 },
+        Labels: {},
+    },
+    {
+        Id: 'ThermalUpdraft', Code: 7, Category: 'Thermal', Name: 'Thermal Updraft', Icon: 'updraft', Tint: '#f97316',
+        Summary: 'Cylindrical column of lift along its axis.',
+        Defaults: { Strength: 8, Radius: 0.8, Direction: [0, 1, 0], Falloff: 'SmoothStep', Frequency: 0, Secondary: 0, Tertiary: 0 },
+        Labels: {},
     },
 ]);
 
@@ -222,6 +291,7 @@ export function createForceGenerator(typeId, overrides = {})
         Falloff: overrides.Falloff || type.Defaults.Falloff,
         Frequency: overrides.Frequency ?? type.Defaults.Frequency,
         Secondary: overrides.Secondary ?? type.Defaults.Secondary,
+        Tertiary: overrides.Tertiary ?? type.Defaults.Tertiary ?? 0,
     };
 }
 
@@ -310,6 +380,7 @@ export function createVisualizerSet()
         VelocityVectors: { Id: 'vis-vectors', Kind: 'Visualizer', Name: 'Velocity Vectors', Visible: true, Axis: 'Z', Offset: 0.5, Stride: 2, Scale: 0.35, Ramp: 'Turbo', MaxSpeed: 6 },
         ScalarSlice: { Id: 'vis-slice', Kind: 'Visualizer', Name: 'Scalar Slice', Visible: false, Axis: 'Y', Offset: 0.35, Channel: 'Speed', Ramp: 'Turbo', Range: 6, Opacity: 0.85 },
         Tracers: { Id: 'vis-tracers', Kind: 'Visualizer', Name: 'Flow Tracers', Visible: true, Count: 8192, Lifetime: 4.0, Ramp: 'Turbo', MaxSpeed: 6, Size: 2.0 },
+        ForceVectors: { Id: 'vis-forces', Kind: 'Visualizer', Name: 'Force Vectors', Visible: false, Mode: 'Slice', Axis: 'Z', Offset: 0.5, Stride: 3, Scale: 0.04, Ramp: 'Plasma', MaxForce: 20 },
         ForceGizmos: { Id: 'vis-gizmos', Kind: 'Visualizer', Name: 'Force Gizmos', Visible: true, Opacity: 0.9 },
     };
 }

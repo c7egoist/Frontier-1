@@ -6,7 +6,7 @@
 
 import * as Shaders from './FluidShaders.js';
 import { Vec3 } from './OrbitCamera.js';
-import { ForceTypeById, ColourRamps, ScalarChannels, SliceAxes, VolumeFilters } from './ForceGeneratorCatalog.js';
+import { ForceTypeById, ColourRamps, ScalarChannels, SliceAxes, VolumeFilters, VectorModes } from './ForceGeneratorCatalog.js';
 
 function hexToRgb(hex)
 {
@@ -25,6 +25,7 @@ export class VolumeRenderer
         this.programs = {
             scene: context.createProgram('Scene', Shaders.FullscreenVertex, Shaders.SceneFragment),
             vectors: context.createProgram('Vectors', Shaders.VectorVertex, Shaders.ColourFragment),
+            forceVectors: context.createProgram('ForceVectors', Shaders.ForceVectorVertex, Shaders.ColourFragment),
             slice: context.createProgram('Slice', Shaders.SliceVertex, Shaders.SliceFragment),
             tracers: context.createProgram('Tracers', Shaders.TracerRenderVertex, Shaders.ColourFragment),
             lines: context.createProgram('Lines', Shaders.LineVertex, Shaders.ColourFragment),
@@ -68,6 +69,7 @@ export class VolumeRenderer
         if (visualizers.ScalarSlice.Visible) this.renderSlice(visualizers.ScalarSlice, matrices);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
         if (visualizers.VelocityVectors.Visible) this.renderVectors(visualizers.VelocityVectors, matrices);
+        if (visualizers.ForceVectors && visualizers.ForceVectors.Visible) this.renderForceVectors(visualizers.ForceVectors, matrices);
         if (visualizers.Tracers.Visible) this.renderTracers(visualizers.Tracers, matrices, deltaTime);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
         this.renderGizmos(scene, matrices, selection);
@@ -133,6 +135,41 @@ export class VolumeRenderer
         gl.uniform1i(uniforms.uStride, stride);
         gl.uniform1f(uniforms.uScale, settings.Scale);
         gl.uniform1f(uniforms.uMaxSpeed, settings.MaxSpeed);
+        gl.uniform1i(uniforms.uRampMode, Math.max(0, ColourRamps.indexOf(settings.Ramp)));
+        gl.bindVertexArray(this.emptyVao);
+        gl.uniform1i(uniforms.uHeads, 0);
+        gl.drawArrays(gl.LINES, 0, arrows * 2);
+        gl.uniform1i(uniforms.uHeads, 1);
+        gl.drawArrays(gl.POINTS, 0, arrows);
+        gl.bindVertexArray(null);
+    }
+
+    renderForceVectors(settings, matrices)
+    {
+        const gl = this.gl, context = this.context, solver = this.solver, layout = solver.layout;
+        const stride = Math.max(1, Math.round(settings.Stride));
+        const mode = Math.max(0, VectorModes.indexOf(settings.Mode));
+        const axis = Math.max(0, SliceAxes.indexOf(settings.Axis));
+        const axisCells = [layout.width, layout.height, layout.depth][axis];
+        const slice = Math.min(axisCells - 1, Math.max(0, Math.floor(settings.Offset * axisCells)));
+        let arrows;
+        if (mode === 0)
+        {
+            const plane = axis === 0 ? [layout.height, layout.depth] : axis === 1 ? [layout.width, layout.depth] : [layout.width, layout.height];
+            arrows = Math.ceil(plane[0] / stride) * Math.ceil(plane[1] / stride);
+        }
+        else arrows = Math.ceil(layout.width / stride) * Math.ceil(layout.height / stride) * Math.ceil(layout.depth / stride);
+        const uniforms = context.use(this.programs.forceVectors);
+        solver.applyVolumeUniforms(uniforms);
+        solver.applyForceUniforms(uniforms);
+        context.bindTexture('uVelocity', solver.fields.velocity.read.texture);
+        gl.uniformMatrix4fv(uniforms.uViewProjection, false, matrices.viewProjection);
+        gl.uniform1i(uniforms.uMode, mode);
+        gl.uniform1i(uniforms.uAxis, axis);
+        gl.uniform1i(uniforms.uSlice, slice);
+        gl.uniform1i(uniforms.uStride, stride);
+        gl.uniform1f(uniforms.uScale, settings.Scale);
+        gl.uniform1f(uniforms.uMaxForce, settings.MaxForce);
         gl.uniform1i(uniforms.uRampMode, Math.max(0, ColourRamps.indexOf(settings.Ramp)));
         gl.bindVertexArray(this.emptyVao);
         gl.uniform1i(uniforms.uHeads, 0);
@@ -558,6 +595,189 @@ export class VolumeRenderer
                     this.rotationMarks(ringPoint, ringTangent, tube, colour, 2, sign);
                 }
                 this.arrow(c, Vec3.scale(axis, sign), r * 1.1, colour);
+                break;
+            }
+            case 'Orbit':
+            {
+                this.circle(c, axis, r, colour, 56);
+                this.circle(c, axis, r * 0.6, faint, 40);
+                this.rotationMarks(c, axis, r, colour, 6, sign);
+                this.rotationMarks(c, axis, r * 0.6, faint, 3, sign);
+                this.sphereWire(c, r * 0.08, colour);
+                const orbitPhase = time * 1.4 * sign;
+                const satellite = Vec3.add(c, Vec3.add(Vec3.scale(u, Math.cos(orbitPhase) * r * 0.8), Vec3.scale(v, Math.sin(orbitPhase) * r * 0.8)));
+                this.sphereWire(satellite, r * 0.05, colour);
+                if (force.Secondary > 0.01) this.arrow(satellite, Vec3.sub(c, satellite), r * 0.3, faint);
+                break;
+            }
+            case 'Containment':
+            {
+                this.sphereWire(c, r, colour);
+                this.dashedCircle(c, [0, 1, 0], r * (1 - force.Secondary), faint, 36);
+                const breath = r * (1.08 + 0.06 * Math.sin(time * 2.5));
+                for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1])
+                {
+                    const d = Vec3.normalize([sx, sy, sz]);
+                    this.line(Vec3.add(c, Vec3.scale(d, breath + r * 0.25)), Vec3.add(c, Vec3.scale(d, breath)), faint);
+                    this.chevron(Vec3.add(c, Vec3.scale(d, breath)), Vec3.scale(d, -1), r * 0.09, colour);
+                }
+                break;
+            }
+            case 'ShockwaveShell':
+            {
+                const period = Math.max(force.Frequency, 0.05);
+                const phase = (((time - force.Tertiary) / period) % 1 + 1) % 1;
+                this.dashedCircle(c, [0, 1, 0], r, faint, 48);
+                this.dashedCircle(c, [1, 0, 0], r, faint, 48);
+                const shell = r * Math.max(0.03, phase);
+                const thick = Math.max(0.02, force.Secondary) * r;
+                for (const k of [-1, 0, 1])
+                {
+                    const radius = Math.max(0.01, shell + k * thick * 0.5);
+                    const fade = [colour[0], colour[1], colour[2], alpha * (k === 0 ? 0.95 : 0.35) * (1 - phase * 0.6)];
+                    this.circle(c, [0, 1, 0], radius, fade, 56);
+                    this.circle(c, [1, 0, 0], radius, fade, 56);
+                    this.circle(c, [0, 0, 1], radius, fade, 56);
+                }
+                this.sphereWire(c, r * 0.05, colour);
+                break;
+            }
+            case 'Implosion':
+            {
+                const period = Math.max(force.Frequency, 0.05);
+                const phase = (((time - force.Tertiary) / period) % 1 + 1) % 1;
+                this.dashedCircle(c, [0, 1, 0], r, faint, 40);
+                this.dashedCircle(c, [1, 0, 0], r, faint, 40);
+                for (let k = 0; k < 3; k += 1)
+                {
+                    const t = (phase + k / 3) % 1;
+                    const radius = r * (1 - t) + r * 0.05;
+                    const fade = [colour[0], colour[1], colour[2], alpha * (0.2 + 0.7 * t)];
+                    this.circle(c, [0, 1, 0], radius, fade, 48);
+                    this.circle(c, [0, 0, 1], radius, fade, 48);
+                }
+                for (const d of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]])
+                {
+                    this.line(Vec3.add(c, Vec3.scale(d, r)), Vec3.add(c, Vec3.scale(d, r * 0.15)), faint);
+                    this.chevron(Vec3.add(c, Vec3.scale(d, r * 0.15)), Vec3.scale(d, -1), r * 0.09, colour);
+                }
+                break;
+            }
+            case 'DirectionalBurst':
+            {
+                const period = Math.max(force.Frequency, 0.05);
+                const phase = (((time - force.Tertiary) / period) % 1 + 1) % 1;
+                const pulse = Math.exp(-phase / Math.max(force.Secondary, 0.01));
+                this.dashedCircle(c, axis, r, faint, 36);
+                this.circle(c, axis, r * 0.35, faint, 24);
+                this.line(Vec3.sub(c, Vec3.scale(axis, r * 0.6)), Vec3.add(c, Vec3.scale(axis, r * 0.6)), faint);
+                const reach = r * (0.5 + 1.1 * (1 - Math.exp(-phase * 4)));
+                for (let i = 0; i < 5; i += 1)
+                {
+                    const theta = (i / 5) * Math.PI * 2;
+                    const offset = i === 0 ? [0, 0, 0] : Vec3.add(Vec3.scale(u, Math.cos(theta) * r * 0.3), Vec3.scale(v, Math.sin(theta) * r * 0.3));
+                    const start = Vec3.add(c, offset);
+                    this.arrow(start, Vec3.scale(axis, sign), reach, [colour[0], colour[1], colour[2], alpha * (0.25 + 0.75 * pulse)]);
+                }
+                break;
+            }
+            case 'BrownianJitter':
+            {
+                this.dashedCircle(c, [0, 1, 0], r, faint, 36);
+                this.dashedCircle(c, [1, 0, 0], r, faint, 36);
+                const roll = Math.floor(time * Math.max(force.Secondary, 0.1));
+                for (let k = 0; k < 10; k += 1)
+                {
+                    let point = Vec3.add(c, [Math.sin(k * 2.1) * r * 0.5, Math.cos(k * 1.3) * r * 0.5, Math.sin(k * 0.7 + 2.0) * r * 0.5]);
+                    const points = [point];
+                    for (let step = 0; step < 5; step += 1)
+                    {
+                        const seed = k * 31 + step * 7 + roll * 13;
+                        const kick = [Math.sin(seed * 12.9898) , Math.sin(seed * 78.233), Math.sin(seed * 37.719)];
+                        point = Vec3.add(point, Vec3.scale(kick, r * 0.08));
+                        points.push(point);
+                    }
+                    this.polyline(points, colour);
+                }
+                break;
+            }
+            case 'FlowStream':
+            {
+                const length = r * 1.8;
+                this.circle(Vec3.sub(c, Vec3.scale(axis, length * 0.5)), axis, r, faint, 36);
+                this.circle(Vec3.add(c, Vec3.scale(axis, length * 0.5)), axis, r, colour, 36);
+                const slide = ((time * Math.max(force.Frequency, 0.3) * 0.3) % 1 + 1) % 1;
+                for (let i = 0; i < 7; i += 1)
+                {
+                    const theta = (i / 7) * Math.PI * 2;
+                    const radial = i === 6 ? 0 : r * 0.65;
+                    const start = Vec3.add(Vec3.sub(c, Vec3.scale(axis, length * 0.5)), Vec3.add(Vec3.scale(u, Math.cos(theta) * radial), Vec3.scale(v, Math.sin(theta) * radial)));
+                    this.line(start, Vec3.add(start, Vec3.scale(axis, length)), i === 6 ? colour : faint);
+                    for (let k = 0; k < 4; k += 1) this.chevron(Vec3.add(start, Vec3.scale(axis, length * ((k + slide) / 4))), axis, r * 0.09, i === 6 ? colour : faint);
+                }
+                break;
+            }
+            case 'WindShear':
+            {
+                const height = r * 2.0;
+                const bottom = Vec3.sub(c, Vec3.scale(axis, height * 0.5));
+                this.line(bottom, Vec3.add(bottom, Vec3.scale(axis, height)), faint);
+                const layers = 7;
+                for (let i = 0; i < layers; i += 1)
+                {
+                    const h = i / (layers - 1) * 2 - 1;
+                    const angle = h * force.Secondary * Math.PI;
+                    const heading = Vec3.add(Vec3.scale(u, Math.cos(angle)), Vec3.scale(v, Math.sin(angle)));
+                    const centre = Vec3.add(bottom, Vec3.scale(axis, (h * 0.5 + 0.5) * height));
+                    this.arrow(Vec3.sub(centre, Vec3.scale(heading, r * 0.6)), Vec3.scale(heading, sign), r * 1.2, i === Math.floor(layers / 2) ? colour : faint);
+                    this.dashedCircle(centre, axis, r * 0.25, faint, 12);
+                }
+                if (!infinite) this.dashedCircle(c, axis, r, faint, 40);
+                break;
+            }
+            case 'Spin':
+            {
+                const spinPhase = time * 1.0 * sign;
+                for (const k of [0.3, 0.65, 1.0])
+                {
+                    this.circle(c, axis, r * k, k === 1 ? colour : faint, 48);
+                    this.rotationMarks(c, axis, r * k, colour, Math.round(2 + 4 * k), sign);
+                }
+                for (let i = 0; i < 4; i += 1)
+                {
+                    const theta = (i / 4) * Math.PI * 2 + spinPhase;
+                    const d = Vec3.add(Vec3.scale(u, Math.cos(theta)), Vec3.scale(v, Math.sin(theta)));
+                    this.line(c, Vec3.add(c, Vec3.scale(d, r)), faint);
+                }
+                this.line(Vec3.sub(c, Vec3.scale(axis, r * 0.5)), Vec3.add(c, Vec3.scale(axis, r * 0.5)), colour);
+                break;
+            }
+            case 'MagneticDipole':
+            {
+                this.arrow(Vec3.sub(c, Vec3.scale(axis, r * 0.35)), axis, r * 0.7, colour);
+                this.dashedCircle(c, [0, 1, 0], r, faint, 40);
+                // Dipole field lines: r = L sin²θ in the planes containing the axis.
+                for (let plane = 0; plane < 3; plane += 1)
+                {
+                    const theta0 = (plane / 3) * Math.PI;
+                    const w = Vec3.add(Vec3.scale(u, Math.cos(theta0)), Vec3.scale(v, Math.sin(theta0)));
+                    for (const L of [r * 0.45, r * 0.8, r * 1.15])
+                    {
+                        for (const flip of [1, -1])
+                        {
+                            const points = [];
+                            for (let k = 0; k <= 36; k += 1)
+                            {
+                                const th = 0.12 + (k / 36) * (Math.PI - 0.24);
+                                const rad = L * Math.sin(th) * Math.sin(th);
+                                if (rad > r) continue;
+                                points.push(Vec3.add(c, Vec3.add(Vec3.scale(axis, rad * Math.cos(th)), Vec3.scale(w, rad * Math.sin(th) * flip))));
+                            }
+                            this.polyline(points, L === r * 0.8 ? colour : faint);
+                            if (points.length > 2) this.chevron(points[Math.floor(points.length / 2)], Vec3.scale(Vec3.sub(points[Math.floor(points.length / 2) - 1], points[Math.floor(points.length / 2)]), sign), r * 0.07, colour);
+                        }
+                    }
+                }
                 break;
             }
             default:

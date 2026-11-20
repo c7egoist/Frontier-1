@@ -7,10 +7,8 @@
 import { icon } from './StudioIcons.js';
 import {
     ForceGeneratorTypes, ForceTypeById, FalloffCurves, EmitterShapes, ColourRamps, SliceAxes, ScalarChannels, AdvectionSchemes, BoundaryModes,
-    ScenePresets, RampStops, MaximumForceGenerators, SmokeLooks, FireLooks, ResolutionPresets, VolumeFilters,
+    ScenePresets, RampStops, MaximumForceGenerators, SmokeLooks, FireLooks, ResolutionPresets, VolumeFilters, FalloffLabels, ForceCategories, VectorModes,
 } from '../Engine/ForceGeneratorCatalog.js';
-
-const FalloffLabels = { SmoothStep: 'Smooth', Linear: 'Linear', InverseSquare: 'Inverse²', Constant: 'Infinite' };
 const BoundaryLabels = { ClosedBox: 'Closed Box', OpenTop: 'Open Top', OpenAll: 'Open All' };
 
 function element(tag, className, html)
@@ -42,7 +40,7 @@ function nodeIcon(node)
     if (node.Kind === 'Emitter') return node.Fuel > 0 ? 'flame' : 'smoke';
     if (node.Kind === 'Collider') return 'collider';
     if (node.Kind === 'Domain') return 'domain';
-    return { 'vis-volume': 'volume', 'vis-vectors': 'vectors', 'vis-slice': 'slice', 'vis-tracers': 'tracers', 'vis-gizmos': 'gizmo' }[node.Id] || 'cube';
+    return { 'vis-volume': 'volume', 'vis-vectors': 'vectors', 'vis-slice': 'slice', 'vis-tracers': 'tracers', 'vis-gizmos': 'gizmo', 'vis-forces': 'dburst' }[node.Id] || 'cube';
 }
 
 function nodeTint(node)
@@ -150,6 +148,7 @@ export function mountStudioUI({ app, refs })
                 if (node.Id === 'vis-slice') return `${node.Channel} · ${node.Axis} ${Math.round(node.Offset * 100)}%`;
                 if (node.Id === 'vis-tracers') return `${node.Count} tracers · ${formatNumber(node.Lifetime, 1)} s`;
                 if (node.Id === 'vis-volume') return `${node.Steps} steps · ${node.ShadowSteps} shadow`;
+                if (node.Id === 'vis-forces') return `${node.Mode} · stride ${node.Stride}`;
                 return 'Force + emitter overlays';
         }
     }
@@ -404,11 +403,17 @@ export function mountStudioUI({ app, refs })
         const typeControl = element('div', 'control');
         typeControl.appendChild(element('div', 'control-head', '<span>Generator type</span>'));
         const typeSelect = document.createElement('select');
-        for (const candidate of ForceGeneratorTypes)
+        for (const category of ForceCategories)
         {
-            const option = document.createElement('option');
-            option.value = candidate.Id; option.textContent = candidate.Name; option.selected = candidate.Id === force.Type;
-            typeSelect.appendChild(option);
+            const group = document.createElement('optgroup');
+            group.label = category;
+            for (const candidate of ForceGeneratorTypes.filter((entry) => entry.Category === category))
+            {
+                const option = document.createElement('option');
+                option.value = candidate.Id; option.textContent = candidate.Name; option.selected = candidate.Id === force.Type;
+                group.appendChild(option);
+            }
+            typeSelect.appendChild(group);
         }
         typeSelect.addEventListener('change', () =>
         {
@@ -418,16 +423,18 @@ export function mountStudioUI({ app, refs })
         });
         typeControl.appendChild(typeSelect);
 
-        host.appendChild(card('Force', type.Id, [
+        host.appendChild(card('Force', type.Category, [
             typeControl,
             slider(force, 'Strength', 'Strength', -60, 60, 0.5, 'm/s²', 1),
             slider(force, 'Radius', 'Reach radius', 0.1, 4, 0.05, 'm'),
             choice(force, 'Falloff', 'Falloff envelope', FalloffCurves, FalloffLabels),
         ]));
         const extras = [];
-        if (type.Labels.Frequency) extras.push(slider(force, 'Frequency', type.Labels.Frequency, 0, type.Id === 'RadialBurst' ? 6 : 4, 0.05));
-        if (type.Labels.Secondary) extras.push(slider(force, 'Secondary', type.Labels.Secondary, 0, type.Id === 'VortexColumn' ? 8 : 2, 0.05));
+        if (type.Labels.Frequency) extras.push(slider(force, 'Frequency', type.Labels.Frequency, 0, type.Category === 'Burst' ? 6 : (type.Id === 'BrownianJitter' ? 20 : (type.Id === 'FlowStream' ? 10 : 4)), 0.05));
+        if (type.Labels.Secondary) extras.push(slider(force, 'Secondary', type.Labels.Secondary, 0, type.Id === 'VortexColumn' ? 8 : (type.Id === 'BrownianJitter' ? 30 : 2), 0.05));
+        if (type.Labels.Tertiary) extras.push(slider(force, 'Tertiary', type.Labels.Tertiary, 0, 10, 0.1, 's'));
         if (extras.length) host.appendChild(card('Modulation', 'Type-specific', extras));
+        if (type.Category === 'Burst') host.appendChild(element('p', 'note', 'Bursts repeat every period after the start delay. Tip: stack an Implosion with a Shockwave Shell, delaying the shell by half a period, for a suck-then-blast fireball.'));
         host.appendChild(card('Placement', 'Drag gizmo in viewport', [
             vector(force, 'Position', 'Position (m)'),
             vector(force, 'Direction', 'Direction / axis', 0.1),
@@ -536,6 +543,19 @@ export function mountStudioUI({ app, refs })
                 choice(visualizer, 'Ramp', 'Colour ramp', ColourRamps),
             ]));
         }
+        else if (visualizer.Id === 'vis-forces')
+        {
+            host.appendChild(card('Force Field Vectors', 'Σ generators', [
+                choice(visualizer, 'Mode', 'Sampling', VectorModes, { Slice: 'Slice plane', Volume: 'Sparse 3D' }),
+                visualizer.Mode === 'Slice' ? choice(visualizer, 'Axis', 'Slice axis', SliceAxes) : null,
+                visualizer.Mode === 'Slice' ? slider(visualizer, 'Offset', 'Slice position', 0, 1, 0.01) : null,
+                slider(visualizer, 'Stride', 'Cell stride', 1, 12, 1, '', 0),
+                slider(visualizer, 'Scale', 'Arrow scale', 0.005, 0.3, 0.005, 's²'),
+                slider(visualizer, 'MaxForce', 'Ramp max |F|', 1, 100, 1, 'm/s²'),
+                choice(visualizer, 'Ramp', 'Colour ramp', ColourRamps),
+            ]));
+            host.appendChild(element('p', 'note', 'Shows the summed acceleration of every enabled force generator at each sample point (evaluated live on the GPU), independent of the current gas velocity except for velocity-dependent types (Drag, Flow Stream).'));
+        }
         else if (visualizer.Id === 'vis-slice')
         {
             host.appendChild(card('Scalar Slice', 'Heat-map', [
@@ -614,7 +634,7 @@ export function mountStudioUI({ app, refs })
         cameraSelect.appendChild(select);
         rowB.appendChild(cameraSelect);
         rowB.appendChild(element('div', 'toolbar-spacer'));
-        for (const [id, glyph, title] of [['vis-volume', 'volume', 'Volume render'], ['vis-vectors', 'vectors', 'Velocity vectors'], ['vis-slice', 'slice', 'Scalar slice'], ['vis-tracers', 'tracers', 'Flow tracers'], ['vis-gizmos', 'gizmo', 'Force gizmos']])
+        for (const [id, glyph, title] of [['vis-volume', 'volume', 'Volume render'], ['vis-vectors', 'vectors', 'Velocity vectors'], ['vis-slice', 'slice', 'Scalar slice'], ['vis-tracers', 'tracers', 'Flow tracers'], ['vis-forces', 'dburst', 'Force field vectors'], ['vis-gizmos', 'gizmo', 'Force gizmos']])
         {
             const visualizer = Object.values(scene.Visualizers).find((candidate) => candidate.Id === id);
             const button = element('button', 'view-toggle' + (visualizer.Visible ? ' active' : ''), icon(glyph, 14));
@@ -659,6 +679,7 @@ export function mountStudioUI({ app, refs })
         const entries = [];
         if (visualizers.VelocityVectors.Visible) entries.push({ title: 'Velocity', ramp: visualizers.VelocityVectors.Ramp, min: '0', max: `${formatNumber(visualizers.VelocityVectors.MaxSpeed, 1)} m/s` });
         if (visualizers.Tracers.Visible && !(visualizers.VelocityVectors.Visible && visualizers.Tracers.Ramp === visualizers.VelocityVectors.Ramp)) entries.push({ title: 'Tracer speed', ramp: visualizers.Tracers.Ramp, min: '0', max: `${formatNumber(visualizers.Tracers.MaxSpeed, 1)} m/s` });
+        if (visualizers.ForceVectors && visualizers.ForceVectors.Visible) entries.push({ title: 'Force |F|', ramp: visualizers.ForceVectors.Ramp, min: '0', max: `${formatNumber(visualizers.ForceVectors.MaxForce, 0)} m/s²` });
         if (visualizers.ScalarSlice.Visible)
         {
             const signed = visualizers.ScalarSlice.Channel === 'Pressure' || visualizers.ScalarSlice.Channel === 'Divergence';
@@ -759,11 +780,20 @@ export function mountStudioUI({ app, refs })
         }
         else if (state.drawerTab === 'forces')
         {
-            for (const type of ForceGeneratorTypes)
+            body.classList.add('categorised');
+            for (const category of ForceCategories)
             {
-                const cardNode = element('button', 'asset-card', `<div class="thumb" style="background:linear-gradient(140deg,${type.Tint}55,#141414)">${icon(type.Icon, 34, 1)}</div><strong>${type.Name}</strong><span>${type.Summary}</span><span class="badge">${type.Defaults.Falloff === 'Constant' ? 'Infinite' : FalloffLabels[type.Defaults.Falloff]} falloff</span>`);
-                cardNode.addEventListener('click', () => { app.addForce(type.Id); });
-                body.appendChild(cardNode);
+                const group = element('div', 'asset-group');
+                group.appendChild(element('h4', '', `${category} <span>${ForceGeneratorTypes.filter((type) => type.Category === category).length}</span>`));
+                const row = element('div', 'asset-row');
+                for (const type of ForceGeneratorTypes.filter((entry) => entry.Category === category))
+                {
+                    const cardNode = element('button', 'asset-card', `<div class="thumb" style="background:linear-gradient(140deg,${type.Tint}55,#141414)">${icon(type.Icon, 34, 1)}</div><strong>${type.Name}</strong><span>${type.Summary}</span><span class="badge">${FalloffLabels[type.Defaults.Falloff]} falloff</span>`);
+                    cardNode.addEventListener('click', () => { app.addForce(type.Id); });
+                    row.appendChild(cardNode);
+                }
+                group.appendChild(row);
+                body.appendChild(group);
             }
         }
         else

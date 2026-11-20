@@ -143,20 +143,33 @@ vec3 CurlNoise(vec3 p)
 `;
 
 export const ForceFieldChunk = `
-#define MAX_FORCES 12
+#define MAX_FORCES 16
 uniform int   uForceCount;
 uniform vec4  uForceA[MAX_FORCES];   // position.xyz, radius
 uniform vec4  uForceB[MAX_FORCES];   // direction.xyz, strength
 uniform vec4  uForceC[MAX_FORCES];   // type, falloff, frequency, secondary
+uniform vec4  uForceD[MAX_FORCES];   // tertiary, reserved
 uniform float uTime;
 
-float Falloff(int mode, float normalisedDistance)
+// 0 SmoothStep · 1 Linear · 2 InverseSquare · 3 Infinite · 4 Gaussian · 5 Plateau · 6 Cosine (interpolated)
+float Falloff(int mode, float d)
 {
     if (mode == 3) return 1.0;
-    if (normalisedDistance >= 1.0) return 0.0;
-    if (mode == 0) return 1.0 - smoothstep(0.0, 1.0, normalisedDistance);
-    if (mode == 1) return 1.0 - normalisedDistance;
-    return (1.0 / (1.0 + 16.0 * normalisedDistance * normalisedDistance)) * (1.0 - smoothstep(0.85, 1.0, normalisedDistance));
+    if (d >= 1.0) return 0.0;
+    if (mode == 0) return 1.0 - smoothstep(0.0, 1.0, d);
+    if (mode == 1) return 1.0 - d;
+    if (mode == 4) return exp(-d * d * 5.0) * (1.0 - smoothstep(0.9, 1.0, d));
+    if (mode == 5) return 1.0 - smoothstep(0.55, 1.0, d);
+    if (mode == 6) return 0.5 + 0.5 * cos(d * 3.14159265);
+    return (1.0 / (1.0 + 16.0 * d * d)) * (1.0 - smoothstep(0.85, 1.0, d));
+}
+
+float PulseEnvelope(float period, float width, float delay)
+{
+    float local = uTime - delay;
+    if (local < 0.0) return 0.0;
+    float phase = fract(local / max(period, 0.05));
+    return exp(-phase / max(width, 0.01)) * (1.0 - smoothstep(0.8, 1.0, phase));
 }
 
 vec3 SafeNormalise(vec3 v)
@@ -170,6 +183,7 @@ vec3 EvaluateForceGenerator(int index, vec3 position, vec3 velocity)
     vec4 a = uForceA[index];
     vec4 b = uForceB[index];
     vec4 c = uForceC[index];
+    float tertiary = uForceD[index].x;
     int type = int(c.x + 0.5);
     int falloffMode = int(c.y + 0.5);
     float frequency = c.z;
@@ -214,14 +228,81 @@ vec3 EvaluateForceGenerator(int index, vec3 position, vec3 velocity)
         float w = Falloff(falloffMode, distance / radius);
         return -velocity * strength * w;
     }
-    if (type == 6)
+    if (type == 6 || type == 13)
     {
-        float period = max(frequency, 0.05);
-        float phase = fract(uTime / period);
-        float pulse = exp(-phase / max(secondary, 0.01)) * (1.0 - smoothstep(0.8, 1.0, phase));
+        float pulse = PulseEnvelope(frequency, secondary, tertiary);
         float w = Falloff(falloffMode, distance / radius);
         vec3 direction = distance > 1e-4 ? r / distance : vec3(0.0);
-        return direction * strength * pulse * w;
+        return direction * strength * pulse * w * (type == 13 ? -1.0 : 1.0);
+    }
+    if (type == 14)
+    {
+        float pulse = PulseEnvelope(frequency, secondary, tertiary);
+        float w = Falloff(falloffMode, distance / radius);
+        return axis * strength * pulse * w;
+    }
+    if (type == 12)
+    {
+        float local = uTime - tertiary;
+        if (local < 0.0) return vec3(0.0);
+        float phase = fract(local / max(frequency, 0.05));
+        float shellRadius = phase * radius;
+        float thickness = max(secondary, 0.02) * radius;
+        float shell = exp(-pow((distance - shellRadius) / thickness, 2.0));
+        vec3 direction = distance > 1e-4 ? r / distance : vec3(0.0);
+        return direction * strength * shell * (1.0 - phase * 0.7);
+    }
+    if (type == 10)
+    {
+        float w = Falloff(falloffMode, distance / radius);
+        vec3 radialDirection = radialDistance > 1e-4 ? radial / radialDistance : vec3(0.0);
+        vec3 tangent = cross(axis, radialDirection);
+        vec3 toCentre = distance > 1e-4 ? -r / distance : vec3(0.0);
+        float core = radialDistance / (radialDistance + 0.1 * radius);
+        return (tangent * core + toCentre * secondary) * strength * w;
+    }
+    if (type == 11)
+    {
+        float overshoot = distance - radius * (1.0 - max(secondary, 0.02));
+        if (overshoot <= 0.0) return vec3(0.0);
+        float wall = clamp(overshoot / (max(secondary, 0.02) * radius), 0.0, 1.0);
+        vec3 direction = distance > 1e-4 ? -r / distance : vec3(0.0);
+        return direction * strength * wall * wall;
+    }
+    if (type == 15)
+    {
+        float w = Falloff(falloffMode, distance / radius);
+        vec3 kick = Hash33(floor(position * frequency) + floor(uTime * max(secondary, 0.1)) * 17.0);
+        return kick * strength * w;
+    }
+    if (type == 16)
+    {
+        float w = Falloff(falloffMode, distance / radius);
+        return (axis * frequency - velocity) * strength * w;
+    }
+    if (type == 17)
+    {
+        float w = Falloff(falloffMode, distance / radius);
+        float height = clamp(dot(r, axis) / radius, -1.0, 1.0);
+        vec3 u = SafeNormalise(cross(axis, abs(axis.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+        vec3 v = cross(axis, u);
+        float angle = height * secondary * 3.14159265;
+        return (u * cos(angle) + v * sin(angle)) * strength * w;
+    }
+    if (type == 18)
+    {
+        float w = Falloff(falloffMode, radialDistance / radius);
+        return cross(axis, radial) / radius * strength * w;
+    }
+    if (type == 19)
+    {
+        float w = Falloff(falloffMode, distance / radius);
+        float core = max(secondary, 0.05) * radius;
+        float d = max(distance, core);
+        vec3 n = r / max(distance, 1e-4);
+        vec3 field = 3.0 * n * dot(axis, n) - axis;
+        float scale = (core * core * core) / (d * d * d);
+        return SafeNormalise(field) * strength * w * mix(scale, 1.0, 0.35);
     }
     if (type == 7)
     {
@@ -987,6 +1068,64 @@ void main()
     float alpha = smoothstep(0.0, 0.05, t) * (0.35 + 0.65 * t);
     vColour = vec4(Ramp(uRampMode, t), alpha);
     if (!CellInside(cell) || v >= planeSize.y) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vColour.a = 0.0; }
+    else gl_Position = uViewProjection * vec4(position, 1.0);
+    gl_PointSize = 3.0;
+}
+`;
+
+export const ForceVectorVertex = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+${VolumeChunk}
+${NoiseChunk}
+${ForceFieldChunk}
+${RampChunk}
+uniform sampler2D uVelocity;
+uniform mat4  uViewProjection;
+uniform int   uMode;     // 0 slice, 1 sparse volume
+uniform int   uAxis;
+uniform int   uSlice;
+uniform int   uStride;
+uniform float uScale;
+uniform float uMaxForce;
+uniform int   uRampMode;
+uniform int   uHeads;
+out vec4 vColour;
+void main()
+{
+    int vertexInArrow = uHeads == 1 ? 0 : gl_VertexID - (gl_VertexID / 2) * 2;
+    int arrow = uHeads == 1 ? gl_VertexID : gl_VertexID / 2;
+    ivec3 cell;
+    bool valid = true;
+    if (uMode == 0)
+    {
+        ivec2 planeSize = uAxis == 0 ? uGrid.yz : (uAxis == 1 ? uGrid.xz : uGrid.xy);
+        int columns = (planeSize.x + uStride - 1) / uStride;
+        int u = (arrow - (arrow / columns) * columns) * uStride + uStride / 2;
+        int v = (arrow / columns) * uStride + uStride / 2;
+        cell = uAxis == 0 ? ivec3(uSlice, u, v) : (uAxis == 1 ? ivec3(u, uSlice, v) : ivec3(u, v, uSlice));
+        valid = v < planeSize.y;
+    }
+    else
+    {
+        ivec3 counts = (uGrid + uStride - 1) / uStride;
+        int x = arrow - (arrow / counts.x) * counts.x;
+        int rest = arrow / counts.x;
+        int y = rest - (rest / counts.y) * counts.y;
+        int z = rest / counts.y;
+        cell = ivec3(x, y, z) * uStride + uStride / 2;
+        valid = z < counts.z;
+    }
+    vec3 origin = WorldFromCell(vec3(cell) + 0.5);
+    vec3 velocity = FetchCell(uVelocity, cell).xyz;
+    vec3 force = EvaluateForceField(origin, velocity);
+    float magnitude = length(force);
+    float cap = float(uStride) * uCellSize * 1.5;
+    vec3 tip = origin + force * uScale * min(1.0, cap / max(magnitude * uScale, 1e-4));
+    vec3 position = (vertexInArrow == 1 || uHeads == 1) ? tip : origin;
+    float t = clamp(magnitude / max(uMaxForce, 1e-3), 0.0, 1.0);
+    float alpha = smoothstep(0.0, 0.04, t) * (0.3 + 0.7 * t);
+    vColour = vec4(Ramp(uRampMode, t), alpha);
+    if (!valid || !CellInside(cell)) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vColour.a = 0.0; }
     else gl_Position = uViewProjection * vec4(position, 1.0);
     gl_PointSize = 3.0;
 }
