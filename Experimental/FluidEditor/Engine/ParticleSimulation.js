@@ -10,7 +10,7 @@
 
 import * as ParticleShaders from './ParticleShaders.js';
 import { FullscreenVertex } from './FluidShaders.js';
-import { ParticleShapes, ParticleModes, ParticleColourModes, ParticleBlendModes, ParticleRenderStyles, ParticleRampSources, ParticleSprites, ParticleSizeModes, MaximumPaletteStops, particleTextureSide } from './ParticleCatalog.js';
+import { ParticleShapes, ParticleModes, ParticleColourModes, ParticleBlendModes, ParticleRenderStyles, ParticleRampSources, ParticleSprites, ParticleSizeModes, ParticleTrailModes, ParticleTrailColours, MaximumPaletteStops, particleTextureSide } from './ParticleCatalog.js';
 import { ColourRamps, timingEnvelope } from './ForceGeneratorCatalog.js';
 
 function hexToRgb(hex)
@@ -36,6 +36,8 @@ export class ParticleSimulation
         this.programs = {
             update: context.createProgram('ParticleUpdate', FullscreenVertex, ParticleShaders.ParticleUpdateFragment),
             render: context.createProgram('ParticleRender', ParticleShaders.ParticleRenderVertex, ParticleShaders.ParticleFragment),
+            trailUpdate: context.createProgram('TrailUpdate', FullscreenVertex, ParticleShaders.TrailUpdateFragment),
+            trails: context.createProgram('Trails', ParticleShaders.TrailVertex, ParticleShaders.ParticleFragment),
         };
         this.emptyVao = this.gl.createVertexArray();
         this.statistics = { systems: 0, particles: 0 };
@@ -67,6 +69,18 @@ export class ParticleSimulation
         // Formation-defining parameters rebuild the cloner homes; emitters simply keep flowing.
         const signature = `${node.Mode}|${node.Shape}|${node.Count}`;
         if (record.signature !== signature) { record.needsReset = true; record.signature = signature; }
+        // Trail history is allocated on demand and rebuilt when its length changes.
+        const wantsTrail = node.Trail && node.Trail !== 'Off';
+        if (wantsTrail && (!record.trails || record.trailLength !== node.TrailLength))
+        {
+            if (record.trails) this.context.destroyPingPong(record.trails);
+            record.trails = this.context.createPingPong(side, side * node.TrailLength, { rgba32f: true, nearest: true });
+            record.trailLength = node.TrailLength;
+            record.trailHead = 0;
+            record.trailClock = 0;
+            record.trailNeedsReset = true;
+        }
+        else if (!wantsTrail && record.trails) { this.context.destroyPingPong(record.trails); record.trails = null; }
         return record;
     }
 
@@ -75,6 +89,30 @@ export class ParticleSimulation
         this.context.destroyPingPong(record.positions);
         this.context.destroyPingPong(record.velocities);
         this.context.destroyTarget(record.previous);
+        if (record.trails) this.context.destroyPingPong(record.trails);
+    }
+
+    updateTrails(node, record, deltaTime)
+    {
+        const gl = this.gl, context = this.context;
+        record.trailClock += deltaTime;
+        const advance = record.trailClock >= node.TrailInterval || record.trailNeedsReset;
+        if (advance)
+        {
+            record.trailClock = 0;
+            record.trailHead = (record.trailHead + 1) % record.trailLength;
+        }
+        const uniforms = context.use(this.programs.trailUpdate);
+        context.bindTexture('uTrails', record.trails.read.texture);
+        context.bindTexture('uPositions', record.positions.read.texture);
+        context.bindTexture('uPrevious', record.previous.texture);
+        gl.uniform1i(uniforms.uTrailLength, record.trailLength);
+        gl.uniform1i(uniforms.uHead, record.trailHead);
+        gl.uniform1i(uniforms.uAdvance, advance ? 1 : 0);
+        gl.uniform1i(uniforms.uReset, record.trailNeedsReset ? 1 : 0);
+        context.dispatch(record.trails.write);
+        record.trails.swap();
+        record.trailNeedsReset = false;
     }
 
     prune(scene)
@@ -174,8 +212,86 @@ export class ParticleSimulation
             }
             record.positions.swap();
             record.velocities.swap();
-            if (record.needsReset) { record.needsReset = false; copyPrevious(); }
+            if (record.needsReset) { record.needsReset = false; record.trailNeedsReset = true; copyPrevious(); }
+            if (record.trails) this.updateTrails(node, record, deltaTime);
         }
+    }
+
+    applyShadeUniforms(uniforms, node)
+    {
+        const gl = this.gl;
+        const palette = node.Palette && node.Palette.length ? node.Palette.slice(0, MaximumPaletteStops) : ['#ffffff'];
+        this.paletteScratch.fill(0);
+        palette.forEach((hex, index) => this.paletteScratch.set(hexToRgb(hex), index * 3));
+        gl.uniform3fv(uniforms.uPalette, this.paletteScratch);
+        gl.uniform1i(uniforms.uPaletteCount, palette.length);
+        gl.uniform1i(uniforms.uColourMode, Math.max(0, ParticleColourModes.indexOf(node.ColourMode)));
+        gl.uniform1i(uniforms.uRampMode, Math.max(0, ColourRamps.indexOf(node.Ramp)));
+        gl.uniform1i(uniforms.uRampSource, Math.max(0, ParticleRampSources.indexOf(node.RampSource)));
+        gl.uniform1f(uniforms.uHueJitter, node.HueJitter);
+        gl.uniform1f(uniforms.uBrightnessJitter, node.BrightnessJitter);
+        gl.uniform1f(uniforms.uCycleSpeed, node.CycleSpeed);
+        gl.uniform1f(uniforms.uBrightness, node.Brightness);
+        gl.uniform1f(uniforms.uLifetime, Math.max(0.05, node.Lifetime));
+        gl.uniform1f(uniforms.uMaxSpeed, node.MaxSpeed);
+        gl.uniform1f(uniforms.uDisplacementRange, node.DisplacementRange);
+        gl.uniform1f(uniforms.uFlicker, node.Flicker);
+        gl.uniform1f(uniforms.uTime, this.solver.time);
+        gl.uniform1f(uniforms.uDomainHeight, this.solver.domainHalfExtent[1] * 2);
+    }
+
+    applyCameraUniforms(uniforms, node, camera, pixelRatio)
+    {
+        const gl = this.gl;
+        const viewportHeight = camera ? camera.viewport[1] * pixelRatio : 720;
+        const fovY = camera ? camera.fovY : 0.733;
+        gl.uniform1f(uniforms.uFocalPixels, viewportHeight / (2 * Math.tan(fovY / 2)));
+        const cameraPosition = camera ? camera.position : [0, 0, 10];
+        const cameraForward = camera ? camera.forward : [0, 0, -1];
+        gl.uniform3f(uniforms.uCameraPosition, cameraPosition[0], cameraPosition[1], cameraPosition[2]);
+        gl.uniform3f(uniforms.uCameraForward, cameraForward[0], cameraForward[1], cameraForward[2]);
+        gl.uniform1i(uniforms.uSizeMode, Math.max(0, ParticleSizeModes.indexOf(node.SizeMode)));
+    }
+
+    renderTrails(node, record, matrices, camera, pixelRatio)
+    {
+        const gl = this.gl, context = this.context;
+        const uniforms = context.use(this.programs.trails);
+        context.bindTexture('uPositions', record.positions.read.texture);
+        context.bindTexture('uVelocities', record.velocities.read.texture);
+        context.bindTexture('uTrails', record.trails.read.texture);
+        this.applyShapeUniforms(uniforms, node, record);
+        this.applyShadeUniforms(uniforms, node);
+        this.applyCameraUniforms(uniforms, node, camera, pixelRatio);
+        gl.uniformMatrix4fv(uniforms.uViewProjection, false, matrices.viewProjection);
+        gl.uniform1i(uniforms.uTrailLength, record.trailLength);
+        gl.uniform1i(uniforms.uHead, record.trailHead);
+        gl.uniform1i(uniforms.uSubdivisions, node.TrailSubdivisions);
+        const stride = Math.max(1, Math.round(1 / Math.max(0.01, node.TrailRatio)));
+        gl.uniform1i(uniforms.uStride, stride);
+        const viewport = camera ? [camera.viewport[0] * pixelRatio, camera.viewport[1] * pixelRatio] : [1280, 720];
+        gl.uniform2f(uniforms.uViewport, viewport[0], viewport[1]);
+        gl.uniform1f(uniforms.uWidth, node.TrailWidth * (ParticleSizeModes.indexOf(node.SizeMode) === 1 ? pixelRatio : 1));
+        gl.uniform1f(uniforms.uTaper, node.TrailTaper);
+        gl.uniform1f(uniforms.uTrailFade, node.TrailFade);
+        gl.uniform1i(uniforms.uTrailColour, Math.max(0, ParticleTrailColours.indexOf(node.TrailColour)));
+        gl.uniform1i(uniforms.uSprite, 4);
+        const count = Math.min(node.Count, record.side * record.side);
+        const trailed = Math.ceil(count / stride);
+        const vertices = trailed * record.trailLength * node.TrailSubdivisions * 6;
+        gl.bindVertexArray(this.emptyVao);
+        if (node.Glow > 0)
+        {
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+            gl.uniform1f(uniforms.uHaloScale, 3.0);
+            gl.uniform1f(uniforms.uHaloAlpha, 0.12 * node.Glow);
+            gl.drawArrays(gl.TRIANGLES, 0, vertices);
+            gl.blendFunc(gl.SRC_ALPHA, ParticleBlendModes.indexOf(node.Blend) === 1 ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA);
+        }
+        gl.uniform1f(uniforms.uHaloScale, 1);
+        gl.uniform1f(uniforms.uHaloAlpha, 1);
+        gl.drawArrays(gl.TRIANGLES, 0, vertices);
+        gl.bindVertexArray(null);
     }
 
     //------------------------------------------------------------------------------------------------------------------------
@@ -194,42 +310,21 @@ export class ParticleSimulation
             if (!record) continue;
             const additive = ParticleBlendModes.indexOf(node.Blend) === 1;
             gl.blendFunc(gl.SRC_ALPHA, additive ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA);
+            const trailMode = ParticleTrailModes.indexOf(node.Trail);
+            if (record.trails && trailMode > 0) this.renderTrails(node, record, matrices, camera, pixelRatio);
+            if (trailMode === 2) continue;
             const uniforms = context.use(this.programs.render);
             context.bindTexture('uPositions', record.positions.read.texture);
             context.bindTexture('uVelocities', record.velocities.read.texture);
             context.bindTexture('uPrevious', record.previous.texture);
             this.applyShapeUniforms(uniforms, node, record);
+            this.applyShadeUniforms(uniforms, node);
+            this.applyCameraUniforms(uniforms, node, camera, pixelRatio);
             gl.uniformMatrix4fv(uniforms.uViewProjection, false, matrices.viewProjection);
-            gl.uniform1i(uniforms.uColourMode, Math.max(0, ParticleColourModes.indexOf(node.ColourMode)));
-            gl.uniform1i(uniforms.uRampMode, Math.max(0, ColourRamps.indexOf(node.Ramp)));
-            const palette = node.Palette && node.Palette.length ? node.Palette.slice(0, MaximumPaletteStops) : ['#ffffff'];
-            this.paletteScratch.fill(0);
-            palette.forEach((hex, index) => this.paletteScratch.set(hexToRgb(hex), index * 3));
-            gl.uniform3fv(uniforms.uPalette, this.paletteScratch);
-            gl.uniform1i(uniforms.uPaletteCount, palette.length);
-            gl.uniform1i(uniforms.uRampSource, Math.max(0, ParticleRampSources.indexOf(node.RampSource)));
-            gl.uniform1f(uniforms.uHueJitter, node.HueJitter);
-            gl.uniform1f(uniforms.uBrightnessJitter, node.BrightnessJitter);
-            gl.uniform1f(uniforms.uCycleSpeed, node.CycleSpeed);
-            gl.uniform1f(uniforms.uBrightness, node.Brightness);
-            gl.uniform1f(uniforms.uLifetime, Math.max(0.05, node.Lifetime));
             gl.uniform1f(uniforms.uSizeStart, node.SizeStart);
             gl.uniform1f(uniforms.uSizeEnd, node.SizeEnd);
-            gl.uniform1f(uniforms.uMaxSpeed, node.MaxSpeed);
-            gl.uniform1f(uniforms.uDisplacementRange, node.DisplacementRange);
-            gl.uniform1f(uniforms.uFlicker, node.Flicker);
-            gl.uniform1f(uniforms.uTime, solver.time);
-            gl.uniform1f(uniforms.uDomainHeight, solver.domainHalfExtent[1] * 2);
             gl.uniform1f(uniforms.uPixelRatio, pixelRatio);
             gl.uniform1f(uniforms.uSizeRandom, node.SizeRandom);
-            gl.uniform1i(uniforms.uSizeMode, Math.max(0, ParticleSizeModes.indexOf(node.SizeMode)));
-            const viewportHeight = camera ? camera.viewport[1] * pixelRatio : 720;
-            const fovY = camera ? camera.fovY : 0.733;
-            gl.uniform1f(uniforms.uFocalPixels, viewportHeight / (2 * Math.tan(fovY / 2)));
-            const cameraPosition = camera ? camera.position : [0, 0, 10];
-            const cameraForward = camera ? camera.forward : [0, 0, -1];
-            gl.uniform3f(uniforms.uCameraPosition, cameraPosition[0], cameraPosition[1], cameraPosition[2]);
-            gl.uniform3f(uniforms.uCameraForward, cameraForward[0], cameraForward[1], cameraForward[2]);
             gl.uniform1f(uniforms.uFocusDistance, node.FocusDistance);
             gl.uniform1f(uniforms.uAperture, node.Aperture);
             gl.uniform1i(uniforms.uSprite, Math.max(0, ParticleSprites.indexOf(node.Sprite)));

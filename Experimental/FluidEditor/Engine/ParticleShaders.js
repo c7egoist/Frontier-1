@@ -178,18 +178,9 @@ void main()
 }
 `;
 
-export const ParticleRenderVertex = `#version 300 es
-precision highp float; precision highp int; precision highp sampler2D;
-${NoiseChunk}
-${RampChunk}
-${ParticleShapeChunk}
-uniform sampler2D uPositions;
-uniform sampler2D uVelocities;
-uniform sampler2D uPrevious;
-uniform mat4  uViewProjection;
-uniform ivec2 uParticleSize;
-uniform int   uMode;
-uniform int   uTrail;
+/** Shared per-particle shading (colour rules, palette, jitter, flicker, life fade). Used by sprites and trails. */
+export const ParticleShadeChunk = `
+uniform int   uMode;          // 0 emit, 1 cloner
 uniform int   uColourMode;    // 0 life, 1 speed, 2 displacement, 3 height, 4 random hue, 5 swatch, 6 cycle
 uniform int   uRampMode;
 uniform int   uRampSource;    // 0 palette gradient, 1 analytic ramp
@@ -200,25 +191,11 @@ uniform float uBrightnessJitter;
 uniform float uCycleSpeed;
 uniform float uBrightness;
 uniform float uLifetime;
-uniform float uSizeStart;
-uniform float uSizeEnd;
 uniform float uMaxSpeed;
 uniform float uDisplacementRange;
 uniform float uFlicker;
 uniform float uTime;
 uniform float uDomainHeight;
-uniform float uPixelRatio;
-uniform float uSizeRandom;
-uniform int   uSizeMode;      // 0 world metres, 1 pixels
-uniform float uFocalPixels;   // viewport height / (2 tan(fov/2))
-uniform vec3  uCameraPosition;
-uniform vec3  uCameraForward;
-uniform float uFocusDistance; // 0 = DOF off
-uniform float uAperture;
-uniform float uHaloScale;     // 1 = main pass, >1 = glow halo pass
-uniform float uHaloAlpha;
-out vec4 vColour;
-out float vSoft;
 vec3 HueToRgb(float h)
 {
     vec3 k = mod(vec3(5.0, 3.0, 1.0) + h * 6.0, 6.0);
@@ -243,18 +220,11 @@ vec3 HueRotate(vec3 colour, float angle)
     float c = cos(angle), s = sin(angle);
     return colour * c + cross(k, colour) * s + k * dot(k, colour) * (1.0 - c);
 }
-void main()
+// Returns rgb; writes life (0..1), alpha (alive × life fade × flicker) and flicker.
+vec3 ParticleShade(int particle, vec4 current, vec4 velocity, out float life, out float alpha, out float flicker)
 {
-    int particle = uTrail == 1 ? gl_VertexID / 2 : gl_VertexID;
-    int end = uTrail == 1 ? gl_VertexID - particle * 2 : 0;
-    ivec2 pixel = ivec2(particle - (particle / uParticleSize.x) * uParticleSize.x, particle / uParticleSize.x);
-    vec4 current = texelFetch(uPositions, pixel, 0);
-    vec4 previous = texelFetch(uPrevious, pixel, 0);
-    vec4 velocity = texelFetch(uVelocities, pixel, 0);
-    bool respawned = current.w < previous.w || distance(current.xyz, previous.xyz) > 1.0;
-    vec3 position = (end == 1 && !respawned) ? previous.xyz : current.xyz;
     float alive = (uMode == 1 || current.w < uLifetime) && particle < uCount ? 1.0 : 0.0;
-    float life = uMode == 1 ? 0.5 : clamp(current.w / max(uLifetime, 1e-3), 0.0, 1.0);
+    life = uMode == 1 ? 0.5 : clamp(current.w / max(uLifetime, 1e-3), 0.0, 1.0);
     float speed = length(velocity.xyz);
     float t;
     vec3 colour;
@@ -268,9 +238,56 @@ void main()
     if (uHueJitter > 0.0) colour = HueRotate(colour, (fract(velocity.w * 13.7) - 0.5) * uHueJitter * 6.2831853);
     if (uBrightnessJitter > 0.0) colour *= 1.0 + (fract(velocity.w * 29.3) - 0.5) * 2.0 * uBrightnessJitter;
     colour = max(colour, 0.0) * uBrightness;
-    float flicker = uFlicker > 0.0 ? mix(1.0, 0.35 + 0.65 * (0.5 + 0.5 * sin(uTime * (3.0 + 5.0 * velocity.w) + velocity.w * 50.0)), uFlicker) : 1.0;
+    flicker = uFlicker > 0.0 ? mix(1.0, 0.35 + 0.65 * (0.5 + 0.5 * sin(uTime * (3.0 + 5.0 * velocity.w) + velocity.w * 50.0)), uFlicker) : 1.0;
     float fade = uMode == 1 ? 1.0 : smoothstep(0.0, 0.05, life) * (1.0 - smoothstep(0.75, 1.0, life));
-    float alpha = alive * fade * flicker * (end == 1 ? 0.3 * smoothstep(0.2, 2.5, speed) : 1.0);
+    alpha = alive * fade * flicker;
+    if (uColourMode != 4) colour *= 0.85 + 0.3 * flicker;
+    return colour;
+}
+`;
+
+export const ParticleRenderVertex = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+${NoiseChunk}
+${RampChunk}
+${ParticleShapeChunk}
+${ParticleShadeChunk}
+uniform sampler2D uPositions;
+uniform sampler2D uVelocities;
+uniform sampler2D uPrevious;
+uniform mat4  uViewProjection;
+uniform ivec2 uParticleSize;
+uniform int   uTrail;
+uniform float uSizeStart;
+uniform float uSizeEnd;
+uniform float uPixelRatio;
+uniform float uSizeRandom;
+uniform int   uSizeMode;      // 0 world metres, 1 pixels
+uniform float uFocalPixels;   // viewport height / (2 tan(fov/2))
+uniform vec3  uCameraPosition;
+uniform vec3  uCameraForward;
+uniform float uFocusDistance; // 0 = DOF off
+uniform float uAperture;
+uniform float uHaloScale;     // 1 = main pass, >1 = glow halo pass
+uniform float uHaloAlpha;
+out vec4 vColour;
+out float vSoft;
+out float vAcross;
+void main()
+{
+    vAcross = 0.0;
+    int particle = uTrail == 1 ? gl_VertexID / 2 : gl_VertexID;
+    int end = uTrail == 1 ? gl_VertexID - particle * 2 : 0;
+    ivec2 pixel = ivec2(particle - (particle / uParticleSize.x) * uParticleSize.x, particle / uParticleSize.x);
+    vec4 current = texelFetch(uPositions, pixel, 0);
+    vec4 previous = texelFetch(uPrevious, pixel, 0);
+    vec4 velocity = texelFetch(uVelocities, pixel, 0);
+    bool respawned = current.w < previous.w || distance(current.xyz, previous.xyz) > 1.0;
+    vec3 position = (end == 1 && !respawned) ? previous.xyz : current.xyz;
+    float life, alpha, flicker;
+    vec3 colour = ParticleShade(particle, current, velocity, life, alpha, flicker);
+    float speed = length(velocity.xyz);
+    if (end == 1) alpha *= 0.3 * smoothstep(0.2, 2.5, speed);
     // Size: log-spread randomness gives the Particular "dust + bokeh" mix; world mode shrinks with distance.
     float sizeSeed = fract(velocity.w * 41.7);
     float sizeRandom = exp2((sizeSeed - 0.5) * 3.0 * uSizeRandom);
@@ -283,10 +300,131 @@ void main()
     pixels *= blurGrow * uHaloScale;
     alpha *= uHaloAlpha / (blurGrow * blurGrow * 0.6 + 0.4);
     if (depth <= 0.05) alpha = 0.0;
-    vColour = vec4(colour * (uColourMode == 4 ? 1.0 : (0.85 + 0.3 * flicker)), alpha);
+    vColour = vec4(colour, alpha);
     vSoft = uTrail == 1 ? 0.0 : 1.0;
     gl_Position = uViewProjection * vec4(position, 1.0);
     gl_PointSize = clamp(pixels, 1.0, 256.0);
+}
+`;
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                  TRAILS (X-Particles-style spline ribbons)
+//------------------------------------------------------------------------------------------------------------------------
+
+/** History ring buffer: texture (side × side·L). Texel (x, y) = particle (x, y / L), slot y % L. */
+export const TrailUpdateFragment = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+uniform sampler2D uTrails;
+uniform sampler2D uPositions;
+uniform sampler2D uPrevious;
+uniform int   uTrailLength;
+uniform int   uHead;
+uniform int   uAdvance;
+uniform int   uReset;
+out vec4 fragColour;
+void main()
+{
+    ivec2 texel = ivec2(floor(gl_FragCoord.xy));
+    ivec2 pixel = ivec2(texel.x, texel.y / uTrailLength);
+    int slot = texel.y - pixel.y * uTrailLength;
+    vec4 current = texelFetch(uPositions, pixel, 0);
+    vec4 previous = texelFetch(uPrevious, pixel, 0);
+    vec4 old = texelFetch(uTrails, texel, 0);
+    bool respawned = uReset == 1 || current.w < previous.w || old.w < 0.5 || distance(current.xyz, previous.xyz) > 2.0;
+    if (respawned) { fragColour = vec4(current.xyz, 1.0); return; }
+    fragColour = (uAdvance == 1 && slot == uHead) ? vec4(current.xyz, 1.0) : old;
+}
+`;
+
+/** Screen-space extruded Catmull-Rom ribbons. 6 vertices per sub-segment; spans = TrailLength, each split into uSubdivisions. */
+export const TrailVertex = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+${NoiseChunk}
+${RampChunk}
+${ParticleShapeChunk}
+${ParticleShadeChunk}
+uniform sampler2D uPositions;
+uniform sampler2D uVelocities;
+uniform sampler2D uTrails;
+uniform mat4  uViewProjection;
+uniform ivec2 uParticleSize;
+uniform int   uTrailLength;
+uniform int   uHead;
+uniform int   uSubdivisions;
+uniform int   uStride;         // render every Nth particle
+uniform vec2  uViewport;       // pixels
+uniform float uWidth;          // pixels (or metres in world mode)
+uniform int   uSizeMode;
+uniform float uFocalPixels;
+uniform vec3  uCameraPosition;
+uniform vec3  uCameraForward;
+uniform float uTaper;
+uniform float uTrailFade;
+uniform int   uTrailColour;    // 0 particle colour, 1 palette along trail
+uniform float uHaloScale;
+uniform float uHaloAlpha;
+out vec4 vColour;
+out float vSoft;
+out float vAcross;
+
+vec3 TrailPoint(ivec2 pixel, int k)
+{
+    if (k <= 0) return texelFetch(uPositions, pixel, 0).xyz;
+    int slot = ((uHead - (k - 1)) % uTrailLength + uTrailLength) % uTrailLength;
+    return texelFetch(uTrails, ivec2(pixel.x, pixel.y * uTrailLength + slot), 0).xyz;
+}
+vec3 CatmullRom(vec3 p0, vec3 p1, vec3 p2, vec3 p3, float u)
+{
+    float u2 = u * u, u3 = u2 * u;
+    return 0.5 * ((2.0 * p1) + (-p0 + p2) * u + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * u2 + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * u3);
+}
+void main()
+{
+    int segments = uTrailLength * uSubdivisions;
+    int perParticle = segments * 6;
+    int slotIndex = gl_VertexID / perParticle;
+    int particle = slotIndex * uStride;
+    int rest = gl_VertexID - slotIndex * perParticle;
+    int segment = rest / 6;
+    int corner = rest - segment * 6;
+    ivec2 pixel = ivec2(particle - (particle / uParticleSize.x) * uParticleSize.x, particle / uParticleSize.x);
+    vec4 current = texelFetch(uPositions, pixel, 0);
+    vec4 velocity = texelFetch(uVelocities, pixel, 0);
+    float life, alpha, flicker;
+    vec3 colour = ParticleShade(particle, current, velocity, life, alpha, flicker);
+
+    int span = segment / uSubdivisions;
+    int sub = segment - span * uSubdivisions;
+    float uA = float(sub) / float(uSubdivisions);
+    float uB = float(sub + 1) / float(uSubdivisions);
+    int kPrev = max(span - 1, 0), kNext = min(span + 2, uTrailLength);
+    vec3 p0 = TrailPoint(pixel, kPrev), p1 = TrailPoint(pixel, span), p2 = TrailPoint(pixel, span + 1), p3 = TrailPoint(pixel, kNext);
+    vec3 a = CatmullRom(p0, p1, p2, p3, uA);
+    vec3 b = CatmullRom(p0, p1, p2, p3, uB);
+    bool endVertex = corner == 2 || corner == 4 || corner == 5;
+    float side = (corner == 0 || corner == 3 || corner == 5) ? -1.0 : 1.0;
+    float along = (float(span) + (endVertex ? uB : uA)) / float(uTrailLength);  // 0 head → 1 tail
+    vec3 world = endVertex ? b : a;
+
+    vec4 clipA = uViewProjection * vec4(a, 1.0);
+    vec4 clipB = uViewProjection * vec4(b, 1.0);
+    vec4 clip = endVertex ? clipB : clipA;
+    vec2 ndcA = clipA.xy / max(clipA.w, 1e-4), ndcB = clipB.xy / max(clipB.w, 1e-4);
+    vec2 screenDirection = (ndcB - ndcA) * uViewport;
+    float directionLength = length(screenDirection);
+    vec2 normal = directionLength > 1e-4 ? vec2(-screenDirection.y, screenDirection.x) / directionLength : vec2(0.0, 1.0);
+    float depth = dot(world - uCameraPosition, uCameraForward);
+    float widthPixels = uSizeMode == 0 ? uWidth * uFocalPixels / max(depth, 0.05) : uWidth;
+    widthPixels = max(widthPixels * mix(1.0, 1.0 - along, uTaper) * uHaloScale, 0.75);
+    clip.xy += normal * side * widthPixels * 0.5 / uViewport * 2.0 * clip.w;
+
+    if (uTrailColour == 1) colour = PaletteGradient(along) * uBrightness * (0.85 + 0.3 * flicker);
+    alpha *= pow(1.0 - along, max(uTrailFade, 0.05)) * uHaloAlpha;
+    if (depth <= 0.05 || distance(p1, p2) > 2.0) alpha = 0.0;
+    vColour = vec4(colour, alpha);
+    vSoft = -1.0;
+    vAcross = side;
+    gl_Position = clip;
 }
 `;
 
@@ -294,6 +432,7 @@ export const ParticleFragment = `#version 300 es
 precision highp float;
 in vec4 vColour;
 in float vSoft;
+in float vAcross;
 uniform int uSprite;   // 0 glow, 1 disc, 2 bokeh ring, 3 star, 4 square
 out vec4 fragColour;
 void main()
@@ -310,6 +449,7 @@ void main()
         else if (uSprite == 3) { float arms = max(exp(-abs(q.x) * 14.0), exp(-abs(q.y) * 14.0)); alpha *= max(arms * (1.0 - d * 0.9), exp(-d * d * 10.0)); if (alpha < 0.01) discard; }
         // 4: square — full footprint.
     }
+    else if (vSoft < -0.5) alpha *= 1.0 - vAcross * vAcross;
     fragColour = vec4(vColour.rgb, alpha);
 }
 `;
