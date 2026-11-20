@@ -74,7 +74,7 @@ export class VolumeRenderer
         if (visualizers.Tracers.Visible) this.renderTracers(visualizers.Tracers, matrices, deltaTime);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
         if (visualizers.Debris && visualizers.Debris.Visible) this.renderDebris(visualizers.Debris, matrices);
-        if (this.particles && scene.Particles) this.particles.render(scene, matrices, typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 1.5) : 1);
+        if (this.particles && scene.Particles) this.particles.render(scene, matrices, typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 1.5) : 1, camera);
         this.renderGizmos(scene, matrices, selection);
         gl.disable(gl.BLEND);
         return matrices;

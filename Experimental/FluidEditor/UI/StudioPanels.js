@@ -9,7 +9,7 @@ import {
     ForceGeneratorTypes, ForceTypeById, FalloffCurves, EmitterShapes, ColourRamps, SliceAxes, ScalarChannels, AdvectionSchemes, BoundaryModes,
     ScenePresets, RampStops, MaximumForceGenerators, SmokeLooks, FireLooks, ResolutionPresets, VolumeFilters, FalloffLabels, ForceCategories, VectorModes, timingEnvelope, isKeyed, DebrisKinds, EmitterPathKinds,
 } from '../Engine/ForceGeneratorCatalog.js';
-import { ParticleTemplates, ParticleTemplateById, ParticleCategories, ParticleShapes, ParticleModes, ParticleColourModes, ParticleColourLabels, ParticleBlendModes, ParticleRenderStyles, ParticleRampSources, PalettePresets, MaximumPaletteStops, MaximumParticleSystems } from '../Engine/ParticleCatalog.js';
+import { ParticleTemplates, ParticleTemplateById, ParticleCategories, ParticleShapes, ParticleModes, ParticleColourModes, ParticleColourLabels, ParticleBlendModes, ParticleRenderStyles, ParticleRampSources, PalettePresets, MaximumPaletteStops, MaximumParticleSystems, ParticleSprites, ParticleSizeModes } from '../Engine/ParticleCatalog.js';
 const BoundaryLabels = { ClosedBox: 'Closed Box', OpenTop: 'Open Top', OpenAll: 'Open All' };
 
 function element(tag, className, html)
@@ -541,6 +541,7 @@ export function mountStudioUI({ app, refs })
         host.appendChild(card('Shape', 'Spawn region / formation', [
             choice(node, 'Shape', 'Shape', ParticleShapes),
             slider(node, 'Radius', 'Radius / half-size', 0.05, 4, 0.05, 'm'),
+            ['Sphere'].includes(node.Shape) && cloner ? slider(node, 'Fill', 'Fill (shell → solid)', 0, 1, 0.02) : null,
             slider(node, 'Count', 'Particle count', 16, 16384, 16, '', 0),
             vector(node, 'Position', 'Position (m)'),
             vector(node, 'Direction', 'Axis / launch direction', 0.1),
@@ -548,6 +549,7 @@ export function mountStudioUI({ app, refs })
         host.appendChild(card(cloner ? 'Formation' : 'Emission', cloner ? 'Spring return' : 'Per second', cloner ? [
             slider(node, 'Spring', 'Spring stiffness', 0, 30, 0.5),
             slider(node, 'Damping', 'Damping', 0, 10, 0.1),
+            slider(node, 'Dissolve', 'Dissolve (homes drift on noise)', 0, 2, 0.02, 'm'),
             element('p', 'note', 'Every clone is tethered to its lattice home. Drag any force gizmo through the formation to displace it; the spring pulls it back.'),
         ] : [
             slider(node, 'Rate', 'Spawn rate', 0, 40, 0.5, '/s', 1),
@@ -560,7 +562,9 @@ export function mountStudioUI({ app, refs })
             slider(node, 'GasInfluence', 'Gas coupling', 0, 6, 0.1),
             slider(node, 'Gravity', 'Gravity', 0, 20, 0.1, 'm/s²'),
             slider(node, 'Drag', 'Air drag', 0, 6, 0.05),
-            slider(node, 'Noise', 'Curl-noise wander', 0, 4, 0.05),
+            slider(node, 'Noise', 'Turbulence field strength', 0, 4, 0.05),
+            slider(node, 'NoiseScale', 'Turbulence scale (1/m)', 0.1, 4, 0.05),
+            slider(node, 'NoiseSpeed', 'Turbulence evolution', 0, 2, 0.02, '/s'),
             slider(node, 'Bounce', 'Floor restitution (−0.05 = pass through)', -0.05, 0.95, 0.05),
         ]));
         const scalar = ['Speed', 'Displacement', 'Height'].includes(node.ColourMode);
@@ -577,9 +581,16 @@ export function mountStudioUI({ app, refs })
             slider(node, 'BrightnessJitter', 'Per-particle brightness randomness', 0, 1, 0.02),
             slider(node, 'Brightness', 'Brightness', 0.1, 4, 0.05, '×'),
         ]));
-        host.appendChild(card('Sprite', 'Size & blending', [
-            slider(node, 'SizeStart', 'Size at birth', 0.5, 12, 0.5, 'px'),
-            slider(node, 'SizeEnd', 'Size at death', 0.5, 12, 0.5, 'px'),
+        const world = node.SizeMode !== 'Pixels';
+        host.appendChild(card('Sprite', 'Footprint, size & depth of field', [
+            choice(node, 'Sprite', 'Sprite', ParticleSprites),
+            choice(node, 'SizeMode', 'Size units', ParticleSizeModes, { World: 'World (metres)', Pixels: 'Screen pixels' }),
+            slider(node, 'SizeStart', 'Size at birth', world ? 0.002 : 0.5, world ? 0.3 : 12, world ? 0.002 : 0.5, world ? 'm' : 'px', world ? 3 : 1),
+            slider(node, 'SizeEnd', 'Size at death', world ? 0.002 : 0.5, world ? 0.3 : 12, world ? 0.002 : 0.5, world ? 'm' : 'px', world ? 3 : 1),
+            slider(node, 'SizeRandom', 'Size randomness (dust ↔ bokeh)', 0, 1, 0.02),
+            slider(node, 'Glow', 'Glow halo', 0, 2, 0.05),
+            slider(node, 'FocusDistance', 'Focus distance (0 = no DOF)', 0, 20, 0.1, 'm'),
+            node.FocusDistance > 0 ? slider(node, 'Aperture', 'Aperture (blur amount)', 0, 2, 0.02) : null,
             slider(node, 'Flicker', 'Flicker', 0, 1, 0.05),
             choice(node, 'Blend', 'Blend', ParticleBlendModes),
             choice(node, 'Style', 'Render style', ParticleRenderStyles),

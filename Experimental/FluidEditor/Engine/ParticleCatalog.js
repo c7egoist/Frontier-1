@@ -36,11 +36,34 @@ export const PalettePresets = Object.freeze({
 
 export const ParticleBlendModes = Object.freeze(['Alpha', 'Additive']);
 export const ParticleRenderStyles = Object.freeze(['Point', 'Streak']);
+/** Sprite footprint. Code = index. */
+export const ParticleSprites = Object.freeze(['Glow', 'Disc', 'Bokeh', 'Star', 'Square']);
+export const ParticleSizeModes = Object.freeze(['World', 'Pixels']);
 
-export const ParticleCategories = Object.freeze(['Emitters', 'Cloners', 'Environment']);
+export const ParticleCategories = Object.freeze(['Cinematic', 'Emitters', 'Cloners', 'Environment']);
 
 /** Asset-browser templates. Each is a full set of overrides for createParticleSystem. */
 export const ParticleTemplates = Object.freeze([
+    {
+        Id: 'stardust', Name: 'Stardust Ribbon', Category: 'Cinematic', Icon: 'stardust', Tint: '#c8b8ff',
+        Summary: 'Sixteen thousand micro-motes swept into ribbons by a large-scale turbulence field, gold and ice-blue with soft bokeh.',
+        Defaults: { Mode: 'Emit', Shape: 'Box', Radius: 2.2, Count: 16384, Rate: 3, Lifetime: 14, Speed: 0.15, Spread: 1.0, Gravity: 0, Drag: 0.9, Noise: 1.4, NoiseScale: 0.35, NoiseSpeed: 0.12, FieldInfluence: 1, GasInfluence: 0, Bounce: -0.05, SizeStart: 0.022, SizeEnd: 0.016, SizeRandom: 0.9, SizeMode: 'World', Sprite: 'Glow', Glow: 0.6, FocusDistance: 6, Aperture: 0.5, ColourMode: 'Swatch', Palette: ['#fff1c9', '#ffd27a', '#bfe9ff', '#8ea8ff', '#ffffff'], BrightnessJitter: 0.6, Flicker: 0.5, Blend: 'Additive', Style: 'Point', Brightness: 1.4 },
+    },
+    {
+        Id: 'nebula', Name: 'Nebula Burst', Category: 'Cinematic', Icon: 'nebula', Tint: '#7dd3fc',
+        Summary: 'A slow-blooming cloud: warm core, cold blue filaments, curl-noise tendrils and sparse large bokeh.',
+        Defaults: { Mode: 'Emit', Shape: 'Sphere', Radius: 0.5, Count: 16384, Rate: 2.5, Lifetime: 12, Speed: 0.9, Spread: 1.0, Gravity: 0, Drag: 0.7, Noise: 1.8, NoiseScale: 0.6, NoiseSpeed: 0.2, Bounce: -0.05, SizeStart: 0.03, SizeEnd: 0.012, SizeRandom: 0.95, SizeMode: 'World', Sprite: 'Glow', Glow: 0.8, FocusDistance: 6, Aperture: 0.7, ColourMode: 'Height', RampSource: 'Palette', Palette: ['#7dd3fc', '#bfe9ff', '#ffd9a8', '#ff9f5a'], HueJitter: 0.05, BrightnessJitter: 0.5, Flicker: 0.25, Blend: 'Additive', Style: 'Point', Brightness: 1.2 },
+    },
+    {
+        Id: 'dissolving-sphere', Name: 'Dissolving Sphere', Category: 'Cinematic', Icon: 'swarm', Tint: '#fbcfe8',
+        Summary: 'A solid particle sphere whose surface peels into flowing noise — the Trapcode Form look, soft peach on alpha blend.',
+        Defaults: { Mode: 'Cloner', Shape: 'Sphere', Radius: 1.3, Fill: 0.7, Count: 16384, Spring: 4, Damping: 2.0, Dissolve: 0.5, NoiseScale: 0.8, NoiseSpeed: 0.15, FieldInfluence: 1, Gravity: 0, Drag: 0, Noise: 0, SizeStart: 0.028, SizeEnd: 0.028, SizeRandom: 0.6, SizeMode: 'World', Sprite: 'Disc', Glow: 0.15, FocusDistance: 6, Aperture: 0.35, ColourMode: 'Displacement', RampSource: 'Palette', Palette: ['#fde7d9', '#f9c6b0', '#f5a98a', '#ffffff'], DisplacementRange: 0.9, BrightnessJitter: 0.25, Blend: 'Alpha', Style: 'Point' },
+    },
+    {
+        Id: 'bioluminescent', Name: 'Bioluminescent Bloom', Category: 'Cinematic', Icon: 'bloom', Tint: '#6ee7b7',
+        Summary: 'Green spores lifting off a disc with bokeh rings, sparkle and lazy turbulence.',
+        Defaults: { Mode: 'Emit', Shape: 'Disc', Radius: 1.8, Count: 12288, Rate: 4, Lifetime: 9, Speed: 0.45, Spread: 0.5, Direction: [0, 1, 0], Gravity: 0, Drag: 1.1, Noise: 1.0, NoiseScale: 0.7, NoiseSpeed: 0.25, Bounce: -0.05, SizeStart: 0.02, SizeEnd: 0.045, SizeRandom: 0.95, SizeMode: 'World', Sprite: 'Bokeh', Glow: 0.5, FocusDistance: 5.5, Aperture: 0.9, ColourMode: 'Life', Palette: ['#d9fff0', '#6ee7b7', '#10b981', '#064e3b'], HueJitter: 0.06, BrightnessJitter: 0.5, Flicker: 0.7, Blend: 'Additive', Style: 'Point', Brightness: 1.3 },
+    },
     {
         Id: 'sparks', Name: 'Sparks', Category: 'Emitters', Icon: 'sparks', Tint: '#ffb454',
         Summary: 'Hot ballistic sparks that streak, cool and fall.',
@@ -119,6 +142,10 @@ export function createParticleSystem(templateId, overrides = {})
         Count: Math.min(MaximumParticlesPerSystem, Math.max(16, Math.round(base.Count ?? 2048))),
         Rate: base.Rate ?? 8,                      // respawn probability per second for dead particles
         Lifetime: base.Lifetime ?? 3,
+        Fill: base.Fill ?? 0,                      // sphere / disc formations: 0 = shell, 1 = solid volume
+        Dissolve: base.Dissolve ?? 0,              // cloner homes drift on curl noise (Form-style dissolve)
+        NoiseScale: base.NoiseScale ?? 1.3,        // spatial frequency of the turbulence field
+        NoiseSpeed: base.NoiseSpeed ?? 0.5,        // evolution speed of the turbulence field
         Speed: base.Speed ?? 2,
         Spread: base.Spread ?? 0.5,                // 0 = all along Direction, 1 = fully random
         Gravity: base.Gravity ?? 0,
@@ -131,6 +158,12 @@ export function createParticleSystem(templateId, overrides = {})
         Bounce: base.Bounce ?? 0.2,
         SizeStart: base.SizeStart ?? 3,
         SizeEnd: base.SizeEnd ?? 1,
+        SizeRandom: base.SizeRandom ?? 0.3,        // 0 = uniform, 1 = log-spread from micro dust to big bokeh
+        SizeMode: base.SizeMode || 'Pixels',
+        Sprite: base.Sprite || 'Disc',
+        Glow: base.Glow ?? 0,                      // additive halo pass strength
+        FocusDistance: base.FocusDistance ?? 0,    // 0 = depth of field off
+        Aperture: base.Aperture ?? 0.5,
         ColourMode: base.ColourMode || 'Life',
         Palette: [...(base.Palette && base.Palette.length ? base.Palette : [base.ColourStart || '#ffffff', base.ColourEnd || '#808080'])].slice(0, MaximumPaletteStops),
         RampSource: base.RampSource || 'Palette',

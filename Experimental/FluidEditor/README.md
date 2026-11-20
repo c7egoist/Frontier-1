@@ -43,6 +43,7 @@ A self-contained GPU particle module that shares the force-generator gizmos with
 | Layer | Contents |
 | :--- | :--- |
 | **Catalog** (portable, no WebGL) | Shapes `Point · Sphere · Box · Disc · Ring · Line · Grid`, modes `Emit · Cloner`, colour rules `Life · Speed · Displacement · Height · Seed`, blend/style, 11 templates (Sparks, Confetti Cannon, Fireflies, Fountain, Grid/Ring/Line Cloner, Sphere Swarm, Snowfall, Ground Dust, Rain) |
+| **Cinematic look** | World-space sprite sizing with log-spread size randomness (dust ↔ bokeh), sprite footprints `Glow · Disc · Bokeh · Star · Square`, fake depth of field (focus distance + aperture → circle of confusion grows/fades), additive glow halo pass, turbulence field (scale + evolution), Form-style cloner **Dissolve**, sphere **Fill**. Templates *Stardust Ribbon, Nebula Burst, Dissolving Sphere, Bioluminescent Bloom*; presets *Stardust* and *Dissolving Form* |
 | **Shaders** | `ParticleShapeChunk` (lattice + random sampling per shape), update kernel (spawn, force field × influence, gas coupling, gravity, drag, curl wander, cloner spring, floor bounce, timing envelope), soft-sprite + streak render |
 | **Simulation** | One ping-pong record per scene node, lazily created and pruned; borrows solver force uniforms + velocity volume |
 

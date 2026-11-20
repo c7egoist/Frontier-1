@@ -12,6 +12,7 @@ uniform vec3  uOrigin;
 uniform vec3  uAxis;
 uniform float uRadius;
 uniform int   uCount;
+uniform float uFill;
 
 void ShapeBasis(out vec3 t, out vec3 b)
 {
@@ -35,7 +36,8 @@ vec3 ShapePoint(int index, vec3 rnd, bool lattice)
             float y = 1.0 - (i + 0.5) / count * 2.0;
             float r = sqrt(max(0.0, 1.0 - y * y));
             float a = golden * i;
-            return uOrigin + vec3(cos(a) * r, y, sin(a) * r) * uRadius;
+            float shell = mix(1.0, pow(Hash31(vec3(i, 3.1, 7.7)), 1.0 / 3.0), uFill);
+            return uOrigin + vec3(cos(a) * r, y, sin(a) * r) * uRadius * shell;
         }
         vec3 d = normalize(rnd * 2.0 - 1.0 + 1e-4);
         return uOrigin + d * uRadius * pow(Hash31(rnd.zxy + 2.7), 1.0 / 3.0);
@@ -100,6 +102,9 @@ uniform float uGasInfluence;
 uniform float uSpring;
 uniform float uDamping;
 uniform float uBounce;
+uniform float uNoiseScale;
+uniform float uNoiseSpeed;
+uniform float uDissolve;
 out vec4 fragColour;
 
 vec3 RandomDirection(vec3 seed)
@@ -118,6 +123,7 @@ void main()
     vec4 v = texelFetch(uVelocities, ivec2(pixel), 0);
     float seed = Hash31(vec3(pixel, 4.2));
     vec3 home = ShapePoint(index, vec3(0.0), true);
+    if (uDissolve > 0.0) home += CurlNoise(home * uNoiseScale + vec3(uTime * uNoiseSpeed, 2.7, -uTime * uNoiseSpeed * 0.6)) * uDissolve;
     if (uReset == 1)
     {
         if (uMode == 1) fragColour = uOutput == 0 ? vec4(home, seed * uLifetime) : vec4(0.0, 0.0, 0.0, seed);
@@ -149,7 +155,7 @@ void main()
         age += uDeltaTime;
         vec3 acceleration = vec3(0.0, -uGravity, 0.0);
         if (uFieldInfluence != 0.0) acceleration += EvaluateForceField(position, velocity) * uFieldInfluence;
-        if (uNoise != 0.0) acceleration += CurlNoise(position * 1.3 + vec3(uTime * 0.5, v.w * 7.0, uTime * 0.2)) * uNoise * 3.0;
+        if (uNoise != 0.0) acceleration += CurlNoise(position * uNoiseScale + vec3(uTime * uNoiseSpeed, v.w * 0.7, -uTime * uNoiseSpeed * 0.4)) * uNoise * 3.0;
         if (uGasInfluence != 0.0)
         {
             vec3 gas = SampleVolume(uVelocity, CellFromWorld(position)).xyz;
@@ -202,6 +208,15 @@ uniform float uFlicker;
 uniform float uTime;
 uniform float uDomainHeight;
 uniform float uPixelRatio;
+uniform float uSizeRandom;
+uniform int   uSizeMode;      // 0 world metres, 1 pixels
+uniform float uFocalPixels;   // viewport height / (2 tan(fov/2))
+uniform vec3  uCameraPosition;
+uniform vec3  uCameraForward;
+uniform float uFocusDistance; // 0 = DOF off
+uniform float uAperture;
+uniform float uHaloScale;     // 1 = main pass, >1 = glow halo pass
+uniform float uHaloAlpha;
 out vec4 vColour;
 out float vSoft;
 vec3 HueToRgb(float h)
@@ -256,10 +271,22 @@ void main()
     float flicker = uFlicker > 0.0 ? mix(1.0, 0.35 + 0.65 * (0.5 + 0.5 * sin(uTime * (3.0 + 5.0 * velocity.w) + velocity.w * 50.0)), uFlicker) : 1.0;
     float fade = uMode == 1 ? 1.0 : smoothstep(0.0, 0.05, life) * (1.0 - smoothstep(0.75, 1.0, life));
     float alpha = alive * fade * flicker * (end == 1 ? 0.3 * smoothstep(0.2, 2.5, speed) : 1.0);
+    // Size: log-spread randomness gives the Particular "dust + bokeh" mix; world mode shrinks with distance.
+    float sizeSeed = fract(velocity.w * 41.7);
+    float sizeRandom = exp2((sizeSeed - 0.5) * 3.0 * uSizeRandom);
+    float size = mix(uSizeStart, uSizeEnd, life) * sizeRandom;
+    float depth = dot(position - uCameraPosition, uCameraForward);
+    float pixels = uSizeMode == 0 ? size * uFocalPixels / max(depth, 0.05) : size * uPixelRatio;
+    // Depth of field: out-of-focus sprites grow and fade (energy conserving-ish).
+    float coc = uFocusDistance > 0.0 ? clamp(abs(depth - uFocusDistance) / max(uFocusDistance, 0.1) * uAperture * 3.0, 0.0, 1.0) : 0.0;
+    float blurGrow = 1.0 + coc * 6.0;
+    pixels *= blurGrow * uHaloScale;
+    alpha *= uHaloAlpha / (blurGrow * blurGrow * 0.6 + 0.4);
+    if (depth <= 0.05) alpha = 0.0;
     vColour = vec4(colour * (uColourMode == 4 ? 1.0 : (0.85 + 0.3 * flicker)), alpha);
     vSoft = uTrail == 1 ? 0.0 : 1.0;
     gl_Position = uViewProjection * vec4(position, 1.0);
-    gl_PointSize = mix(uSizeStart, uSizeEnd, life) * (0.8 + 0.4 * velocity.w) * uPixelRatio;
+    gl_PointSize = clamp(pixels, 1.0, 256.0);
 }
 `;
 
@@ -267,6 +294,7 @@ export const ParticleFragment = `#version 300 es
 precision highp float;
 in vec4 vColour;
 in float vSoft;
+uniform int uSprite;   // 0 glow, 1 disc, 2 bokeh ring, 3 star, 4 square
 out vec4 fragColour;
 void main()
 {
@@ -274,9 +302,13 @@ void main()
     float alpha = vColour.a;
     if (vSoft > 0.5)
     {
-        float d = length(gl_PointCoord - 0.5) * 2.0;
-        if (d > 1.0) discard;
-        alpha *= 1.0 - smoothstep(0.55, 1.0, d);
+        vec2 q = gl_PointCoord - 0.5;
+        float d = length(q) * 2.0;
+        if (uSprite == 0) { if (d > 1.0) discard; alpha *= exp(-d * d * 4.5) * (1.0 - smoothstep(0.8, 1.0, d)); }
+        else if (uSprite == 1) { if (d > 1.0) discard; alpha *= 1.0 - smoothstep(0.6, 1.0, d); }
+        else if (uSprite == 2) { if (d > 1.0) discard; alpha *= 0.22 + 0.78 * smoothstep(0.5, 0.78, d) * (1.0 - smoothstep(0.86, 1.0, d)); }
+        else if (uSprite == 3) { float arms = max(exp(-abs(q.x) * 14.0), exp(-abs(q.y) * 14.0)); alpha *= max(arms * (1.0 - d * 0.9), exp(-d * d * 10.0)); if (alpha < 0.01) discard; }
+        // 4: square — full footprint.
     }
     fragColour = vec4(vColour.rgb, alpha);
 }

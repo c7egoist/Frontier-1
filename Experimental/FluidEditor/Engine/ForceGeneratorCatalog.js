@@ -283,6 +283,33 @@ export const ScenePresets = Object.freeze([
         ],
     },
     {
+        Id: 'preset-stardust', Name: 'Stardust', Icon: 'stardust', Summary: 'No smoke — Particular-style micro-motes in a slow turbulence field with an orbit and a vortex sweeping them into ribbons; bokeh depth of field.',
+        Domain: { Resolution: [48, 32, 48], Size: [9, 6, 9], Buoyancy: 0, AmbientTemperature: 0, Cooling: 0, Vorticity: 0, Dissipation: 0.99, PressureIterations: 8 },
+        Look: { Visible: false },
+        Particles: [
+            { Template: 'stardust', Name: 'Stardust', Position: [0, 0, 0], Radius: 3.6 },
+            { Template: 'nebula', Name: 'Nebula Core', Position: [0.6, 0.2, -0.4], Radius: 0.4, Count: 8192, Rate: 1.5 },
+        ],
+        Forces: [
+            { Type: 'VortexColumn', Name: 'Sweep', Position: [0, 0, 0], Strength: 1.6, Radius: 4.2, Falloff: 'Plateau', Direction: [0.3, 1, 0.2], Frequency: 0.25, Secondary: 0.0 },
+            { Type: 'WindShear', Name: 'Layered Drift', Position: [0, 0, 0], Strength: 0.35, Radius: 4.5, Falloff: 'Constant', Direction: [1, 0, 0.2], Frequency: 0.3, Secondary: 1.2 },
+            { Type: 'PointAttractor', Name: 'Gravity Well', Position: [-1.5, -0.3, 0.8], Strength: 2.5, Radius: 2.6, Falloff: 'Gaussian', Secondary: 0.3 },
+        ],
+    },
+    {
+        Id: 'preset-form', Name: 'Dissolving Form', Icon: 'swarm', Summary: 'No smoke — a solid particle sphere peeling into noise, with a bioluminescent bloom rising beneath it.',
+        Domain: { Resolution: [48, 48, 48], Size: [6, 6, 6], Buoyancy: 0, AmbientTemperature: 0, Cooling: 0, Vorticity: 0, Dissipation: 0.99, PressureIterations: 8 },
+        Look: { Visible: false },
+        Particles: [
+            { Template: 'dissolving-sphere', Name: 'Form Sphere', Position: [0, 0.4, 0], Radius: 1.4 },
+            { Template: 'bioluminescent', Name: 'Bloom', Position: [0, -2.9, 0], Radius: 2.2, Count: 8192 },
+        ],
+        Forces: [
+            { Type: 'CurlNoiseTurbulence', Name: 'Peel', Position: [0, 0.4, 0], Strength: 1.2, Radius: 2.2, Falloff: 'Gaussian', Frequency: 0.8, Secondary: 0.35 },
+            { Type: 'ThermalUpdraft', Name: 'Lift', Position: [0, -1.5, 0], Strength: 0.5, Radius: 2.4, Falloff: 'Plateau' },
+        ],
+    },
+    {
         Id: 'preset-celebration', Name: 'Celebration', Icon: 'confetti', Summary: 'No smoke — two confetti cannons, a sparks fountain and fireflies, all pushed around by a gusting wind gizmo.',
         Domain: { Resolution: [40, 48, 40], Size: [5, 6, 5], Buoyancy: 0, AmbientTemperature: 0, Cooling: 0, Vorticity: 0, Dissipation: 0.99, PressureIterations: 8 },
         Look: { Visible: false },

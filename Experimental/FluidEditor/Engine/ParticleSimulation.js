@@ -10,7 +10,7 @@
 
 import * as ParticleShaders from './ParticleShaders.js';
 import { FullscreenVertex } from './FluidShaders.js';
-import { ParticleShapes, ParticleModes, ParticleColourModes, ParticleBlendModes, ParticleRenderStyles, ParticleRampSources, MaximumPaletteStops, particleTextureSide } from './ParticleCatalog.js';
+import { ParticleShapes, ParticleModes, ParticleColourModes, ParticleBlendModes, ParticleRenderStyles, ParticleRampSources, ParticleSprites, ParticleSizeModes, MaximumPaletteStops, particleTextureSide } from './ParticleCatalog.js';
 import { ColourRamps, timingEnvelope } from './ForceGeneratorCatalog.js';
 
 function hexToRgb(hex)
@@ -106,6 +106,7 @@ export class ParticleSimulation
         gl.uniform3f(uniforms.uOrigin, node.Position[0], node.Position[1], node.Position[2]);
         gl.uniform3f(uniforms.uAxis, axis[0], axis[1], axis[2]);
         gl.uniform1f(uniforms.uRadius, Math.max(0.01, node.Radius));
+        gl.uniform1f(uniforms.uFill, node.Fill);
         gl.uniform1i(uniforms.uCount, Math.min(node.Count, record.side * record.side));
         gl.uniform2i(uniforms.uParticleSize, record.side, record.side);
         gl.uniform1i(uniforms.uMode, Math.max(0, ParticleModes.indexOf(node.Mode)));
@@ -158,6 +159,9 @@ export class ParticleSimulation
             gl.uniform1f(uniforms.uSpring, node.Spring);
             gl.uniform1f(uniforms.uDamping, node.Damping);
             gl.uniform1f(uniforms.uBounce, node.Bounce);
+            gl.uniform1f(uniforms.uNoiseScale, node.NoiseScale);
+            gl.uniform1f(uniforms.uNoiseSpeed, node.NoiseSpeed);
+            gl.uniform1f(uniforms.uDissolve, node.Dissolve);
             for (const output of [0, 1])
             {
                 context.textureUnit = 0;
@@ -178,7 +182,7 @@ export class ParticleSimulation
     //                                                  RENDER
     //------------------------------------------------------------------------------------------------------------------------
 
-    render(scene, matrices, pixelRatio = 1)
+    render(scene, matrices, pixelRatio = 1, camera = null)
     {
         const gl = this.gl, context = this.context, solver = this.solver;
         if (!solver.fields) return;
@@ -217,8 +221,22 @@ export class ParticleSimulation
             gl.uniform1f(uniforms.uTime, solver.time);
             gl.uniform1f(uniforms.uDomainHeight, solver.domainHalfExtent[1] * 2);
             gl.uniform1f(uniforms.uPixelRatio, pixelRatio);
+            gl.uniform1f(uniforms.uSizeRandom, node.SizeRandom);
+            gl.uniform1i(uniforms.uSizeMode, Math.max(0, ParticleSizeModes.indexOf(node.SizeMode)));
+            const viewportHeight = camera ? camera.viewport[1] * pixelRatio : 720;
+            const fovY = camera ? camera.fovY : 0.733;
+            gl.uniform1f(uniforms.uFocalPixels, viewportHeight / (2 * Math.tan(fovY / 2)));
+            const cameraPosition = camera ? camera.position : [0, 0, 10];
+            const cameraForward = camera ? camera.forward : [0, 0, -1];
+            gl.uniform3f(uniforms.uCameraPosition, cameraPosition[0], cameraPosition[1], cameraPosition[2]);
+            gl.uniform3f(uniforms.uCameraForward, cameraForward[0], cameraForward[1], cameraForward[2]);
+            gl.uniform1f(uniforms.uFocusDistance, node.FocusDistance);
+            gl.uniform1f(uniforms.uAperture, node.Aperture);
+            gl.uniform1i(uniforms.uSprite, Math.max(0, ParticleSprites.indexOf(node.Sprite)));
             const count = Math.min(node.Count, record.side * record.side);
             gl.bindVertexArray(this.emptyVao);
+            gl.uniform1f(uniforms.uHaloScale, 1);
+            gl.uniform1f(uniforms.uHaloAlpha, 1);
             if (ParticleRenderStyles.indexOf(node.Style) === 1)
             {
                 gl.uniform1i(uniforms.uTrail, 1);
@@ -226,6 +244,15 @@ export class ParticleSimulation
             }
             gl.uniform1i(uniforms.uTrail, 0);
             gl.drawArrays(gl.POINTS, 0, count);
+            if (node.Glow > 0)
+            {
+                // Cheap bloom: a second, larger, fainter additive halo pass with the soft glow sprite.
+                gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+                gl.uniform1i(uniforms.uSprite, 0);
+                gl.uniform1f(uniforms.uHaloScale, 3.2);
+                gl.uniform1f(uniforms.uHaloAlpha, 0.16 * node.Glow);
+                gl.drawArrays(gl.POINTS, 0, count);
+            }
             gl.bindVertexArray(null);
         }
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
