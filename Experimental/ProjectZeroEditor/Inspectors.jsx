@@ -1,3 +1,4 @@
+import SunCarousel, { SolarIcons } from "../FrontierEditor/sun-carousel.jsx";
 import { CloudEdit, CloudValue } from "./CloudSpecification.js";
 import CloudDeckPanel from "./CloudDeckPanel.jsx";
 import { FogBeamChamber } from "./FogPanel.jsx";
@@ -338,6 +339,7 @@ export function Card({
   Accent,
   Class = "",
   GraphHandled = false,
+  Symbol,
 }) {
   const Mark = {
     "Sun direction": "celestial-orbit",
@@ -356,7 +358,7 @@ export function Card({
       data-card={Title}
     >
       <h3>
-        {Mark && <Glyph Name={Mark} Size={16} />}
+        {Symbol ? <Symbol size={16} /> : Mark && <Glyph Name={Mark} Size={16} />}
         <span>{Title}</span>
       </h3>
       {children || Children}
@@ -802,131 +804,120 @@ export function Inspector({
           </div>
           <Glyph Name="arrow" />
         </div>
-        <div className="card-grid sun-properties">
-          <Card Title="Sun direction" Height={711} Class="direction-card">
-            <Metric
-              Value={Elevation.toFixed(1) + "°"}
-              Caption={
-                Elevation < 0 ? "Below the horizon" : "Above the horizon"
-              }
-            />
-            <div
-              className="graphic tall solved-gizmo"
-              title="Solved direction. Edit Local Hours to change it."
-            >
-              <SunGizmo
-                azimuth={Azimuth}
-                elevation={Elevation}
-                onChange={() => {}}
+        <SunCarousel key={Subject.Id} pages={[
+          { label: "Position", icon: "direction", description: "Inspect the solved direction and adjust local time.", content: <>
+            <Card Title="Sun direction" Symbol={SolarIcons.direction} Class="direction-card">
+              <Metric
+                Value={Elevation.toFixed(1) + "°"}
+                Caption={
+                  Elevation < 0 ? "Below the horizon" : "Above the horizon"
+                }
               />
-            </div>
-            {F("Local Hours")}
-            <div className="solved-directions">
-              <div>
-                <small>Azimuth</small>
-                <Metric Value={Azimuth.toFixed(1) + "°"} />
-                <input
-                  type="range"
-                  disabled
-                  value={Azimuth}
-                  min="0"
-                  max="360"
+              <div
+                className="graphic tall solved-gizmo"
+                title="Solved direction. Edit Local Hours to change it."
+              >
+                <SunGizmo
+                  azimuth={Azimuth}
+                  elevation={Elevation}
+                  onChange={() => {}}
                 />
               </div>
-              <div>
-                <small>Elevation</small>
-                <Metric Value={Elevation.toFixed(1) + "°"} />
-                <input
-                  type="range"
-                  disabled
-                  value={Elevation}
-                  min="-90"
-                  max="90"
-                />
+              {F("Local Hours")}
+              <div className="solved-directions">
+                <div>
+                  <small>Azimuth</small>
+                  <Metric Value={Azimuth.toFixed(1) + "°"} />
+                </div>
+                <div>
+                  <small>Elevation</small>
+                  <Metric Value={Elevation.toFixed(1) + "°"} />
+                </div>
               </div>
-            </div>
-            <p>Shared time above · angles solved by date / location</p>
-          </Card>
-          <Card Title="Sunlight intensity" Height={347} GraphHandled>
-            <Metric
-              Value={Number(V("Intensity")).toFixed(1)}
-              Unit="×"
-              Caption="Sunlight intensity multiplier"
-            />
-            <SunGraph V={V} Change={AssignProperty} Mode="gain" />
-            {F("Intensity")}
-            <div className="ends">
-              <span>0 ×</span>
-              <span>60 ×</span>
-            </div>
-          </Card>
-          <Card Title="Temperature" Height={347} GraphHandled>
-            <Metric
-              Value={V("Colour source") ? V("Temperature") : "RGB"}
-              Unit={V("Colour source") ? "K" : ""}
-            />
-            {F("Colour source")}
-            <div className="temperature-spectrum" />
-            <SunGraph V={V} Change={AssignProperty} Mode="temperature" />
-            <div className="ends">
-              <span>Warm</span>
-              <span>Cool</span>
-            </div>
-            {F("Temperature", !V("Colour source"))}
-            <p>Blackbody tint approximation · linear RGB</p>
-            {F("Sun Tint", !!V("Colour source"))}
-          </Card>
-          <Card Title="Daylight cycle" Height={329} GraphHandled>
-            <Metric
-              Value={`${String(Math.floor(Time)).padStart(2, "0")}:${String(Math.floor((Time % 1) * 60)).padStart(2, "0")}`}
-            />
-            <SunGraph V={V} Change={AssignProperty} Mode="day" />
-            {F("Local Hours")}
-          </Card>
-          <Card Title="Sun disc" Height={329}>
-            <Metric Value={Number(V("Angular Diameter")).toFixed(2) + "°"} />
-            <div
-              className="solar-disc"
-              style={{
-                "--diameter":
-                  Math.min(120, 20 + V("Angular Diameter") * 30) + "px",
-              }}
-            />
-            {F("Angular Diameter")}
-          </Card>
-        </div>
-        <Card Title="Dynamic settings" Wide GraphHandled>
-          <SunGraph V={V} Change={AssignProperty} Mode="year" />
-          {Fields(
-            "Animate",
-            "Day duration",
-            "Speed",
-            "Direct",
-            "Latitude",
-            "Longitude",
-            "Day of Month",
-            "Month",
-          )}
-          <div className="readout">
-            <span>Declination</span>
-            <output>{Solved.Declination.toFixed(2)}°</output>
-          </div>
-          <div className="readout">
-            <span>Equation of Time</span>
-            <output>{Solved.EquationOfTime.toFixed(2)} min</output>
-          </div>
-        </Card>
+              <p>Shared time above · angles solved by date / location</p>
+            </Card>
+          </> },
+          { label: "Light", icon: "intensity", description: "Tune sunlight, colour and the apparent disc.", content: <>
+            <Card Title="Sunlight intensity" Symbol={SolarIcons.intensity} GraphHandled>
+              <Metric
+                Value={Number(V("Intensity")).toFixed(1)}
+                Unit="×"
+                Caption="Sunlight intensity multiplier"
+              />
+              <SunGraph V={V} Change={AssignProperty} Mode="gain" />
+              {F("Intensity")}
+              <div className="ends">
+                <span>0 ×</span>
+                <span>60 ×</span>
+              </div>
+            </Card>
+            <Card Title="Temperature" Symbol={SolarIcons.temperature} GraphHandled>
+              <Metric
+                Value={V("Colour source") ? V("Temperature") : "RGB"}
+                Unit={V("Colour source") ? "K" : ""}
+              />
+              {F("Colour source")}
+              <div className="temperature-spectrum" />
+              <SunGraph V={V} Change={AssignProperty} Mode="temperature" />
+              <div className="ends">
+                <span>Warm</span>
+                <span>Cool</span>
+              </div>
+              {F("Temperature", !V("Colour source"))}
+              <p>Blackbody tint approximation · linear RGB</p>
+              {F("Sun Tint", !!V("Colour source"))}
+            </Card>
+            <Card Title="Sun disc" Symbol={SolarIcons.disc}>
+              <Metric Value={Number(V("Angular Diameter")).toFixed(2) + "°"} />
+              <div
+                className="solar-disc"
+                style={{
+                  "--diameter":
+                    Math.min(120, 20 + V("Angular Diameter") * 30) + "px",
+                }}
+              />
+              {F("Angular Diameter")}
+            </Card>
+          </> },
+          { label: "Cycle", icon: "cycle", description: "Set the clock, date and geographic location.", content: <>
+            <Card Title="Daylight cycle" Symbol={SolarIcons.cycle} GraphHandled>
+              <Metric
+                Value={`${String(Math.floor(Time)).padStart(2, "0")}:${String(Math.floor((Time % 1) * 60)).padStart(2, "0")}`}
+              />
+              <SunGraph V={V} Change={AssignProperty} Mode="day" />
+              {F("Local Hours")}
+            </Card>
+            <Card Title="Dynamic settings" Symbol={SolarIcons.settings} GraphHandled>
+              <SunGraph V={V} Change={AssignProperty} Mode="year" />
+              {Fields(
+                "Animate",
+                "Day duration",
+                "Speed",
+                "Direct",
+                "Latitude",
+                "Longitude",
+                "Day of Month",
+                "Month",
+              )}
+              <div className="readout">
+                <span>Declination</span>
+                <output>{Solved.Declination.toFixed(2)}°</output>
+              </div>
+              <div className="readout">
+                <span>Equation of Time</span>
+                <output>{Solved.EquationOfTime.toFixed(2)} min</output>
+              </div>
+            </Card>
+          </> },
+          { label: "Bake", icon: "settings", description: "Native output bindings are not available in this preview.", content: <>
+            <Bake Title="Sun lighting bake" Sun />
+            <Bake Title="Sun disk bake" Sun />
+          </> },
+        ]} />
         <p className="native-note">
           Solar position uses the native NOAA calculation, translated to
           JavaScript. No GPU lighting is running.
         </p>
-        <div className="section-caption">
-          BAKING <small>Native target bindings pending</small>
-        </div>
-        <div className="card-grid">
-          <Bake Title="Sun lighting bake" Sun />
-          <Bake Title="Sun disk bake" Sun />
-        </div>
       </>
     );
   } else if (Subject.Panel === "camera") {

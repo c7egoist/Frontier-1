@@ -1,0 +1,31 @@
+.sun-carousel {
+  grid-column: 1 / -1;
+  min-width: 0;
+  container-type: inline-size;
+  color: #f0f0ed;
+  background: radial-gradient(ellipse at 85% 0%, #1a211b, transparent 55%), #101110;
+  border: 1px solid #303330;
+  border-radius: 18px;
+  padding: 14px;
+}
+.solar-dashboard-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+.solar-kicker { display: flex; align-items: center; gap: 6px; font-size: 10px; letter-spacing: .12em; color: #b5d6a6; }
+.solar-dashboard-header h2 { margin: 5px 0 3px; font-size: 22px; font-weight: 500; letter-spacing: -.04em; }
+.solar-dashboard-header p { margin: 0; color: #b5b8b2; font-size: 12px; }
+.solar-pagination { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #b5b8b2; font-variant-numeric: tabular-nums; }
+.solar-pagination button, .solar-tabs button { display: inline-flex; align-items: center; justify-content: center; border: 1px solid #363a36; background: #1a1c1a; color: #e1e4dd; cursor: pointer; }
+.solar-pagination button { width: 30px; height: 30px; padding: 0; border-radius: 50%; }
+.solar-tabs { display: flex; flex-wrap: wrap; gap: 5px; margin: 15px 0 12px; }
+.solar-tabs button { gap: 5px; min-height: 32px; padding: 4px 8px; border-radius: 99px; font-size: 11px; white-space: nowrap; }
+.solar-tabs button[aria-selected="true"] { background: #c9e9b8; border-color: #c9e9b8; color: #172015; }
+.solar-tabs button:hover:not([aria-selected="true"]), .solar-pagination button:hover { background: #303630; }
+.sun-carousel :focus-visible { outline: 2px solid #c9e9b8; outline-offset: 2px; }
+.solar-page:not([hidden]) { display: grid; gap: 9px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+.solar-page > :is(.card, .property-card) { grid-area: auto; min-width: 0; min-height: 0 !important; padding: 12px; border-radius: 14px; background: #191b19; border: 1px solid #313530; }
+.solar-page :is(.card-heading > span:first-child, h3) { display: flex; align-items: center; gap: 8px; }
+.solar-page :is(.card-heading, h3) svg { box-sizing: content-box; flex: none; width: 16px; height: 16px; padding: 5px; border-radius: 50%; background: #282e27; color: #c9e9b8; }
+.solar-page .metric { font-variant-numeric: tabular-nums; letter-spacing: -.045em; }
+@container (min-width: 560px) {
+  .solar-page:not([hidden]) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .solar-page > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
