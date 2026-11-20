@@ -1333,6 +1333,7 @@ if(BUILD_TESTING)
         frontier_register_exhibit(FluidWorkspaceUIValidation        Exhibits/FluidWorkspaceUIValidation.cpp)
         frontier_register_exhibit(BakingWorkspaceUIValidation       Exhibits/BakingWorkspaceUIValidation.cpp)
         frontier_register_exhibit(SketcherWorkspaceValidation       Exhibits/ParametricSketcher/SketcherWorkspaceValidation.cpp)
+        frontier_register_exhibit(VehicleRenderTiersShowcase        Exhibits/VehicleRenderTiersShowcase.cpp)
     endif()
 
     if(NOT ANDROID AND FRONTIER_PROFILE STREQUAL "Editor")

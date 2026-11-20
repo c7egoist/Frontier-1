@@ -2829,8 +2829,9 @@ bool VulkanWorldRenderSequence::ExecuteWorldRenderDispatch(
     }
     WriteStamp(9u, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
-    const uint64_t SyncPoint = BoundDevice->DispatchCommandBufferAsync(Cmd);
-    if (!BoundDevice->AwaitTimelineTick(SyncPoint, 60000000000ull))
+    const uint64_t SyncPoint    = BoundDevice->DispatchCommandBufferAsync(Cmd);
+    const uint64_t WaitBudgetNs = QueryHardwareGpuActive() ? 60000000000ull : 240000000000ull;
+    if (!BoundDevice->AwaitTimelineTick(SyncPoint, WaitBudgetNs))
     {
         std::fprintf(stderr, "[VulkanWorldRenderSequence] AwaitTimelineTick timed out (Engine=%u, %ux%u)\n",
                      static_cast<unsigned>(Config.Engine), WidthPx, HeightPx);
