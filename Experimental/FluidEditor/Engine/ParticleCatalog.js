@@ -42,7 +42,13 @@ export const ParticleSizeModes = Object.freeze(['World', 'Pixels']);
 /** Trail rendering. Off = sprites only. Ribbon = spline ribbons behind each particle. Only = ribbons without head sprites. */
 export const ParticleTrailModes = Object.freeze(['Off', 'Ribbon', 'Only']);
 export const ParticleTrailColours = Object.freeze(['Particle', 'Along']);
-export const MaximumTrailLength = 64;
+export const MaximumTrailLength = 96;
+export const MaximumTrailTexels = 8192;
+/** History samples actually allocated: capped so the trail texture height stays within GPU limits. */
+export function effectiveTrailLength(count, requested)
+{
+    return Math.max(2, Math.min(requested, Math.floor(MaximumTrailTexels / particleTextureSide(count))));
+}
 
 export const ParticleCategories = Object.freeze(['Cinematic', 'Trails', 'Emitters', 'Cloners', 'Environment']);
 
@@ -51,17 +57,17 @@ export const ParticleTemplates = Object.freeze([
     {
         Id: 'light-strands', Name: 'Light Strands', Category: 'Trails', Icon: 'strands', Tint: '#7dd3fc',
         Summary: 'Aerodynamic streamlines: long thin blue ribbons riding the wind with sparkling heads.',
-        Defaults: { Mode: 'Emit', Shape: 'Disc', Radius: 1.4, Direction: [1, 0, 0], Count: 1024, Rate: 1.2, Lifetime: 9, Speed: 2.2, Spread: 0.06, Gravity: 0, Drag: 0.15, Noise: 0.35, NoiseScale: 0.5, NoiseSpeed: 0.1, FieldInfluence: 1, GasInfluence: 0, Bounce: -0.05, SizeStart: 0.03, SizeEnd: 0.02, SizeRandom: 0.5, SizeMode: 'World', Sprite: 'Glow', Glow: 0.8, FocusDistance: 0, ColourMode: 'Life', Palette: ['#ffffff', '#bfe9ff', '#60a5fa', '#312e81'], BrightnessJitter: 0.3, Flicker: 0.4, Blend: 'Additive', Style: 'Point', Brightness: 1.3, Trail: 'Ribbon', TrailLength: 48, TrailInterval: 0.05, TrailWidth: 0.012, TrailTaper: 0.7, TrailFade: 0.8, TrailSubdivisions: 2, TrailColour: 'Along', TrailRatio: 1 },
+        Defaults: { Mode: 'Emit', Shape: 'Disc', Radius: 1.4, Direction: [1, 0, 0], Count: 1024, Rate: 0.6, Lifetime: 24, Speed: 1.1, Spread: 0.06, Gravity: 0, Drag: 0.1, Noise: 0.25, NoiseScale: 0.45, NoiseSpeed: 0.06, FieldInfluence: 1, GasInfluence: 0, Bounce: -0.05, SizeStart: 0.03, SizeEnd: 0.02, SizeRandom: 0.5, SizeMode: 'World', Sprite: 'Glow', Glow: 0.8, FocusDistance: 0, ColourMode: 'Life', Palette: ['#ffffff', '#bfe9ff', '#60a5fa', '#312e81'], BrightnessJitter: 0.3, Flicker: 0.4, Blend: 'Additive', Style: 'Point', Brightness: 1.3, Trail: 'Ribbon', TrailLength: 96, TrailInterval: 0.1, TrailWidth: 0.012, TrailTaper: 0.7, TrailFade: 0.6, TrailSubdivisions: 2, TrailColour: 'Along', TrailRatio: 1 },
     },
     {
         Id: 'silk-ribbons', Name: 'Silk Ribbons', Category: 'Trails', Icon: 'silk', Tint: '#f472b6',
         Summary: 'A twisting bundle of magenta strands with loose sparks — the woven X-Particles trail look.',
-        Defaults: { Mode: 'Emit', Shape: 'Disc', Radius: 0.5, Direction: [1, 0.1, 0], Count: 1536, Rate: 1.5, Lifetime: 10, Speed: 1.6, Spread: 0.1, Gravity: 0, Drag: 0.1, Noise: 0.9, NoiseScale: 0.45, NoiseSpeed: 0.08, FieldInfluence: 1, Bounce: -0.05, SizeStart: 0.02, SizeEnd: 0.012, SizeRandom: 0.8, SizeMode: 'World', Sprite: 'Glow', Glow: 0.7, FocusDistance: 6, Aperture: 0.5, ColourMode: 'Swatch', Palette: ['#ff7ab6', '#f472b6', '#c084fc', '#fb7185', '#fff1f2'], HueJitter: 0.05, BrightnessJitter: 0.4, Flicker: 0.2, Blend: 'Additive', Style: 'Point', Brightness: 1.2, Trail: 'Ribbon', TrailLength: 64, TrailInterval: 0.06, TrailWidth: 0.016, TrailTaper: 0.5, TrailFade: 0.6, TrailSubdivisions: 3, TrailColour: 'Particle', TrailRatio: 1 },
+        Defaults: { Mode: 'Emit', Shape: 'Disc', Radius: 0.5, Direction: [1, 0.1, 0], Count: 1536, Rate: 0.7, Lifetime: 26, Speed: 0.8, Spread: 0.1, Gravity: 0, Drag: 0.08, Noise: 0.55, NoiseScale: 0.4, NoiseSpeed: 0.05, FieldInfluence: 1, Bounce: -0.05, SizeStart: 0.02, SizeEnd: 0.012, SizeRandom: 0.8, SizeMode: 'World', Sprite: 'Glow', Glow: 0.7, FocusDistance: 6, Aperture: 0.5, ColourMode: 'Swatch', Palette: ['#ff7ab6', '#f472b6', '#c084fc', '#fb7185', '#fff1f2'], HueJitter: 0.05, BrightnessJitter: 0.4, Flicker: 0.2, Blend: 'Additive', Style: 'Point', Brightness: 1.2, Trail: 'Ribbon', TrailLength: 96, TrailInterval: 0.12, TrailWidth: 0.016, TrailTaper: 0.5, TrailFade: 0.5, TrailSubdivisions: 3, TrailColour: 'Particle', TrailRatio: 1 },
     },
     {
         Id: 'neon-filaments', Name: 'Neon Filaments', Category: 'Trails', Icon: 'filaments', Tint: '#a78bfa',
         Summary: 'Pink-to-blue fibre-optic filaments spiralling out of a ring; heads glow, tails fade.',
-        Defaults: { Mode: 'Emit', Shape: 'Ring', Radius: 0.8, Direction: [0, 1, 0], Count: 2048, Rate: 2, Lifetime: 8, Speed: 1.2, Spread: 0.35, Gravity: 0, Drag: 0.2, Noise: 0.6, NoiseScale: 0.6, NoiseSpeed: 0.15, FieldInfluence: 1, Bounce: -0.05, SizeStart: 0.025, SizeEnd: 0.015, SizeRandom: 0.6, SizeMode: 'World', Sprite: 'Glow', Glow: 0.9, FocusDistance: 0, ColourMode: 'Height', RampSource: 'Palette', Palette: ['#38bdf8', '#818cf8', '#c084fc', '#f472b6'], BrightnessJitter: 0.3, Flicker: 0.3, Blend: 'Additive', Style: 'Point', Brightness: 1.3, Trail: 'Ribbon', TrailLength: 56, TrailInterval: 0.05, TrailWidth: 0.01, TrailTaper: 0.6, TrailFade: 0.7, TrailSubdivisions: 2, TrailColour: 'Particle', TrailRatio: 1 },
+        Defaults: { Mode: 'Emit', Shape: 'Ring', Radius: 0.8, Direction: [0, 1, 0], Count: 2048, Rate: 0.8, Lifetime: 22, Speed: 0.6, Spread: 0.35, Gravity: 0, Drag: 0.15, Noise: 0.4, NoiseScale: 0.55, NoiseSpeed: 0.08, FieldInfluence: 1, Bounce: -0.05, SizeStart: 0.025, SizeEnd: 0.015, SizeRandom: 0.6, SizeMode: 'World', Sprite: 'Glow', Glow: 0.9, FocusDistance: 0, ColourMode: 'Height', RampSource: 'Palette', Palette: ['#38bdf8', '#818cf8', '#c084fc', '#f472b6'], BrightnessJitter: 0.3, Flicker: 0.3, Blend: 'Additive', Style: 'Point', Brightness: 1.3, Trail: 'Ribbon', TrailLength: 96, TrailInterval: 0.1, TrailWidth: 0.01, TrailTaper: 0.6, TrailFade: 0.55, TrailSubdivisions: 2, TrailColour: 'Particle', TrailRatio: 1 },
     },
     {
         Id: 'stardust', Name: 'Stardust Ribbon', Category: 'Cinematic', Icon: 'stardust', Tint: '#c8b8ff',
@@ -198,7 +204,7 @@ export function createParticleSystem(templateId, overrides = {})
         Style: base.Style || 'Point',
         Trail: base.Trail || 'Off',
         TrailLength: Math.min(MaximumTrailLength, Math.max(2, Math.round(base.TrailLength ?? 24))),
-        TrailInterval: base.TrailInterval ?? 0.04,   // seconds between history samples (longer = longer trails)
+        TrailInterval: base.TrailInterval ?? 0.08,   // seconds between history samples (longer = longer trails)
         TrailWidth: base.TrailWidth ?? 0.01,         // same units as SizeMode
         TrailTaper: base.TrailTaper ?? 0.6,
         TrailFade: base.TrailFade ?? 0.7,

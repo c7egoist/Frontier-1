@@ -298,20 +298,21 @@ export const ScenePresets = Object.freeze([
     },
     {
         Id: 'preset-light-strands', Name: 'Light Strands', Icon: 'strands', Summary: 'No smoke — aerodynamic light strands streaming past a sphere collider wake, plus a bundle of silk ribbons twisting through an orbit field.',
-        Domain: { Resolution: [96, 40, 56], Size: [12, 5, 7], Buoyancy: 0, AmbientTemperature: 0, Cooling: 0, Vorticity: 0.2, Dissipation: 0.995, VelocityDissipation: 0.999, PressureIterations: 16 },
+        Domain: { Resolution: [96, 36, 48], Size: [16, 6, 8], Buoyancy: 0, AmbientTemperature: 0, Cooling: 0, Vorticity: 0.2, Dissipation: 0.995, VelocityDissipation: 0.999, PressureIterations: 16 },
         Boundary: 'OpenAll',
         Look: { Visible: false },
         Particles: [
-            { Template: 'light-strands', Name: 'Streamlines', Position: [-5.4, 0.2, 0], Radius: 1.6, GasInfluence: 2.5, Count: 1536 },
-            { Template: 'silk-ribbons', Name: 'Silk Bundle', Position: [-5.0, -1.4, 1.8], Radius: 0.35, Count: 1024 },
+            { Template: 'light-strands', Name: 'Streamlines', Position: [-7.4, 0.2, 0], Radius: 1.6, GasInfluence: 1.5, Count: 1536 },
+            { Template: 'silk-ribbons', Name: 'Silk Bundle', Position: [-7.0, -1.6, 2.2], Radius: 0.35, Count: 1024 },
         ],
         Forces: [
-            { Type: 'DirectionalWind', Name: 'Tunnel Wind', Position: [0, 0, 0], Strength: 2.4, Direction: [1, 0, 0], Falloff: 'Constant', Frequency: 0.2, Secondary: 0.15 },
-            { Type: 'Orbit', Name: 'Twist', Position: [1.5, -0.5, 1.2], Strength: 4, Radius: 2.2, Falloff: 'Gaussian', Direction: [1, 0.2, 0], Frequency: 0.2, Secondary: 0.3 },
-            { Type: 'CurlNoiseTurbulence', Name: 'Weave', Position: [0, 0, 0], Strength: 0.6, Radius: 6, Falloff: 'Plateau', Frequency: 0.5, Secondary: 0.2 },
+            { Type: 'DirectionalWind', Name: 'Tunnel Wind', Position: [0, 0, 0], Strength: 0.9, Direction: [1, 0, 0], Falloff: 'Constant', Frequency: 0.2, Secondary: 0.1 },
+            { Type: 'Orbit', Name: 'Twist', Position: [2.0, -0.6, 1.4], Strength: 2.2, Radius: 2.6, Falloff: 'Gaussian', Direction: [1, 0.2, 0], Frequency: 0.15, Secondary: 0.3 },
+            { Type: 'CurlNoiseTurbulence', Name: 'Weave', Position: [0, 0, 0], Strength: 0.35, Radius: 8, Falloff: 'Plateau', Frequency: 0.4, Secondary: 0.12 },
+            { Type: 'DragBaffle', Name: 'Air Resistance', Position: [0, 0, 0], Strength: 0.25, Radius: 9, Falloff: 'Constant' },
         ],
         Colliders: [
-            { Name: 'Bluff Body', Position: [0.5, 0, 0], Radius: 0.9 },
+            { Name: 'Bluff Body', Position: [-1.0, 0, 0], Radius: 1.0 },
         ],
     },
     {

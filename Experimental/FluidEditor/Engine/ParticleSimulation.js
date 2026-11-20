@@ -10,7 +10,7 @@
 
 import * as ParticleShaders from './ParticleShaders.js';
 import { FullscreenVertex } from './FluidShaders.js';
-import { ParticleShapes, ParticleModes, ParticleColourModes, ParticleBlendModes, ParticleRenderStyles, ParticleRampSources, ParticleSprites, ParticleSizeModes, ParticleTrailModes, ParticleTrailColours, MaximumPaletteStops, particleTextureSide } from './ParticleCatalog.js';
+import { ParticleShapes, ParticleModes, ParticleColourModes, ParticleBlendModes, ParticleRenderStyles, ParticleRampSources, ParticleSprites, ParticleSizeModes, ParticleTrailModes, ParticleTrailColours, MaximumPaletteStops, particleTextureSide, effectiveTrailLength } from './ParticleCatalog.js';
 import { ColourRamps, timingEnvelope } from './ForceGeneratorCatalog.js';
 
 function hexToRgb(hex)
@@ -71,11 +71,12 @@ export class ParticleSimulation
         if (record.signature !== signature) { record.needsReset = true; record.signature = signature; }
         // Trail history is allocated on demand and rebuilt when its length changes.
         const wantsTrail = node.Trail && node.Trail !== 'Off';
-        if (wantsTrail && (!record.trails || record.trailLength !== node.TrailLength))
+        const trailLength = effectiveTrailLength(node.Count, node.TrailLength);
+        if (wantsTrail && (!record.trails || record.trailLength !== trailLength))
         {
             if (record.trails) this.context.destroyPingPong(record.trails);
-            record.trails = this.context.createPingPong(side, side * node.TrailLength, { rgba32f: true, nearest: true });
-            record.trailLength = node.TrailLength;
+            record.trails = this.context.createPingPong(side, side * trailLength, { rgba32f: true, nearest: true });
+            record.trailLength = trailLength;
             record.trailHead = 0;
             record.trailClock = 0;
             record.trailNeedsReset = true;

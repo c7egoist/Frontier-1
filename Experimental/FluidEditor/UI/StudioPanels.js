@@ -599,7 +599,7 @@ export function mountStudioUI({ app, refs })
         host.appendChild(card('Trails', 'Spline ribbons (X-Particles style)', [
             choice(node, 'Trail', 'Trail', ParticleTrailModes, { Off: 'Off', Ribbon: 'Ribbon + head', Only: 'Ribbon only' }),
             trails ? slider(node, 'TrailLength', 'History samples', 2, MaximumTrailLength, 1, '', 0) : null,
-            trails ? slider(node, 'TrailInterval', 'Sample interval', 0.01, 0.5, 0.01, 's') : null,
+            trails ? slider(node, 'TrailInterval', 'Sample interval', 0.01, 1.0, 0.01, 's') : null,
             trails ? slider(node, 'TrailWidth', 'Width', world ? 0.001 : 0.5, world ? 0.1 : 12, world ? 0.001 : 0.5, world ? 'm' : 'px', world ? 3 : 1) : null,
             trails ? slider(node, 'TrailTaper', 'Taper to tail', 0, 1, 0.02) : null,
             trails ? slider(node, 'TrailFade', 'Fade to tail', 0.05, 3, 0.05) : null,
