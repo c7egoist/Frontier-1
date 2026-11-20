@@ -6,7 +6,7 @@
 
 import * as Shaders from './FluidShaders.js';
 import { Vec3 } from './OrbitCamera.js';
-import { ForceTypeById, ColourRamps, ScalarChannels, SliceAxes, VolumeFilters, VectorModes, timingEnvelope } from './ForceGeneratorCatalog.js';
+import { ForceTypeById, ColourRamps, ScalarChannels, SliceAxes, VolumeFilters, VectorModes, timingEnvelope, emitterTransform } from './ForceGeneratorCatalog.js';
 
 function hexToRgb(hex)
 {
@@ -74,6 +74,7 @@ export class VolumeRenderer
         if (visualizers.Tracers.Visible) this.renderTracers(visualizers.Tracers, matrices, deltaTime);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
         if (visualizers.Debris && visualizers.Debris.Visible) this.renderDebris(visualizers.Debris, matrices);
+        if (this.particles && scene.Particles) this.particles.render(scene, matrices, typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 1.5) : 1);
         this.renderGizmos(scene, matrices, selection);
         gl.disable(gl.BLEND);
         return matrices;
@@ -809,11 +810,61 @@ export class VolumeRenderer
         }
     }
 
-    emitterGizmo(emitter, selected, opacity)
+    particleGizmo(node, selected, opacity, time)
+    {
+        const alpha = (node.Enabled ? 1 : 0.35) * opacity;
+        const colour = selected ? [1, 1, 1, alpha] : [0.66, 0.55, 0.98, alpha * 0.9];
+        const faint = [colour[0], colour[1], colour[2], alpha * 0.4];
+        const c = node.Position, r = Math.max(0.05, node.Radius);
+        const axis = Vec3.normalize(node.Direction);
+        switch (node.Shape)
+        {
+            case 'Sphere': this.sphereWire(c, r, colour); break;
+            case 'Box': this.box(c, [r, r, r], colour); break;
+            case 'Grid':
+                this.box(c, [r, r, r], colour);
+                this.box(c, [r * 0.5, r * 0.5, r * 0.5], faint);
+                break;
+            case 'Disc': this.circle(c, axis, r, colour, 40); this.circle(c, axis, r * 0.5, faint, 24); break;
+            case 'Ring': this.circle(c, axis, r, colour, 48); this.dashedCircle(c, axis, r * 1.08, faint, 32); break;
+            case 'Line':
+                this.polyline([Vec3.add(c, Vec3.scale(axis, -r)), Vec3.add(c, Vec3.scale(axis, r))], colour);
+                this.chevron(Vec3.add(c, Vec3.scale(axis, r)), axis, 0.12, colour);
+                this.chevron(Vec3.add(c, Vec3.scale(axis, -r)), Vec3.scale(axis, -1), 0.12, colour);
+                break;
+            default:
+                this.polyline([Vec3.add(c, [-0.15, 0, 0]), Vec3.add(c, [0.15, 0, 0])], colour);
+                this.polyline([Vec3.add(c, [0, -0.15, 0]), Vec3.add(c, [0, 0.15, 0])], colour);
+                this.polyline([Vec3.add(c, [0, 0, -0.15]), Vec3.add(c, [0, 0, 0.15])], colour);
+        }
+        if (node.Mode === 'Emit' && node.Speed > 1e-3) this.arrow(c, axis, Math.min(1.2, 0.3 + node.Speed * 0.08), colour);
+        if (node.Mode === 'Cloner')
+        {
+            // Breathing marker: cloners pulse so they read as "held formation" rather than a source.
+            const pulse = 1 + 0.06 * Math.sin(time * 3);
+            this.dashedCircle(c, [0, 1, 0], r * pulse * 1.15, faint, 28);
+        }
+    }
+
+    emitterGizmo(emitter, selected, opacity, time = 0)
     {
         const alpha = (emitter.Enabled ? 1 : 0.35) * opacity;
         const colour = selected ? [1, 1, 1, alpha] : [1.0, 0.62, 0.25, alpha * 0.9];
         const faint = [colour[0], colour[1], colour[2], alpha * 0.35];
+        const transform = emitterTransform(emitter, time);
+        if (emitter.PathKind && emitter.PathKind !== 'None')
+        {
+            if (emitter.PathKind === 'Circle') this.dashedCircle(emitter.Position, [0, 1, 0], emitter.PathRadius, faint, 36);
+            else if (emitter.PathKind === 'Line') this.polyline([Vec3.add(emitter.Position, [-emitter.PathRadius, 0, 0]), Vec3.add(emitter.Position, [emitter.PathRadius, 0, 0])], faint);
+            else
+            {
+                const points = [];
+                for (let i = 0; i <= 64; i += 1) { const a = (i / 64) * Math.PI * 2; points.push(Vec3.add(emitter.Position, [Math.sin(a) * emitter.PathRadius, 0, Math.sin(a * 2) * emitter.PathRadius * 0.5])); }
+                this.polyline(points, faint);
+            }
+            if (transform.Heading) this.chevron(transform.Position, transform.Heading, 0.14, colour);
+        }
+        emitter = { ...emitter, Position: transform.Position, Velocity: transform.Velocity };
         const c = emitter.Position, r = emitter.Radius;
         if (emitter.Shape === 'Sphere') this.sphereWire(c, r, colour);
         else if (emitter.Shape === 'Disc')
@@ -836,7 +887,8 @@ export class VolumeRenderer
         if (gizmos.Visible)
         {
             for (const force of scene.Forces) if (force.Visible) this.forceGizmo(force, force.Id === selection, gizmos.Opacity * (0.3 + 0.7 * timingEnvelope(force, solver.time)), solver.time);
-            for (const emitter of scene.Emitters) if (emitter.Visible) this.emitterGizmo(emitter, emitter.Id === selection, gizmos.Opacity * (0.3 + 0.7 * timingEnvelope(emitter, solver.time)));
+            for (const emitter of scene.Emitters) if (emitter.Visible) this.emitterGizmo(emitter, emitter.Id === selection, gizmos.Opacity * (0.3 + 0.7 * timingEnvelope(emitter, solver.time)), solver.time);
+            for (const node of scene.Particles || []) if (node.Visible) this.particleGizmo(node, node.Id === selection, gizmos.Opacity * (0.3 + 0.7 * timingEnvelope(node, solver.time)), solver.time);
             for (const collider of scene.Colliders) if (collider.Visible && collider.Id === selection) this.sphereWire(collider.Position, collider.Radius * 1.04, [1, 1, 1, 0.8]);
         }
         if (this.lineVertexCount === 0) return;

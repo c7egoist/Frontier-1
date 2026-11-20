@@ -9,6 +9,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import * as Shaders from './Engine/FluidShaders.js';
+import * as ParticleShaders from './Engine/ParticleShaders.js';
+import { ParticleSimulation } from './Engine/ParticleSimulation.js';
+import { ParticleTemplates, ParticleShapes, ParticleColourModes, createParticleSystem, particleTextureSide } from './Engine/ParticleCatalog.js';
 import { GpuContext } from './Engine/GpuContext.js';
 import { FluidSolver } from './Engine/FluidSolver.js';
 import { VolumeRenderer } from './Engine/VolumeRenderer.js';
@@ -49,12 +52,17 @@ for (const preset of ScenePresets)
     check(preset.Domain.Resolution.every((cells) => cells >= 8 && cells <= 160), `${preset.Name}: resolution inside solver limits`);
 }
 
+for (const shape of ParticleShapes) check(shape === 'Point' || ParticleShaders.ParticleShapeChunk.includes(`uShape == ${ParticleShapes.indexOf(shape)}`), `Particle shape ${shape} sampled by GLSL`);
+for (const mode of ParticleColourModes) check(mode === 'Life' || ParticleShaders.ParticleRenderVertex.includes(`uColourMode == ${ParticleColourModes.indexOf(mode)}`), `Particle colour rule ${mode} shaded by GLSL`);
+check(ParticleTemplates.length >= 10 && particleTextureSide(16384) === 128 && particleTextureSide(500) === 24, `${ParticleTemplates.length} particle templates · texture sizing`);
+for (const preset of ScenePresets) for (const node of preset.Particles || []) check(ParticleTemplates.some((template) => template.Id === node.Template), `${preset.Name}: particle template ${node.Template} resolves`);
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                  2. GLSL STATIC COMPILATION
 //------------------------------------------------------------------------------------------------------------------------
 
 console.log('\n[2] GLSL ES 3.00 shaders');
-const shaderEntries = Object.entries(Shaders).filter(([, source]) => typeof source === 'string' && source.startsWith('#version 300 es'));
+const shaderEntries = [...Object.entries(Shaders), ...Object.entries(ParticleShaders)].filter(([, source]) => typeof source === 'string' && source.startsWith('#version 300 es'));
 check(shaderEntries.length >= 18, `${shaderEntries.length} shader stages exported`);
 const candidates = [
     process.env.GLSLANG_VALIDATOR,
@@ -146,7 +154,9 @@ const mockCanvas = { width: 1280, height: 720, getContext: () => mockGl };
 const context = new GpuContext(mockCanvas);
 const solver = new FluidSolver(context);
 const renderer = new VolumeRenderer(context, solver);
-for (const programRecord of [...Object.values(solver.programs), ...Object.values(renderer.programs)]) mockGl.__labelProgram(programRecord);
+const particles = new ParticleSimulation(context, solver);
+renderer.particles = particles;
+for (const programRecord of [...Object.values(solver.programs), ...Object.values(renderer.programs), ...Object.values(particles.programs)]) mockGl.__labelProgram(programRecord);
 
 const preset = ScenePresets.find((candidate) => candidate.Id === 'preset-wind-tunnel');
 const domain = createDomain({ ...preset.Domain, Boundary: preset.Boundary });
@@ -156,6 +166,7 @@ const scene = {
     Emitters: preset.Emitters.map((emitter) => createEmitter(emitter)),
     Forces: [...preset.Forces.map((force) => createForceGenerator(force.Type, force)), ...ForceGeneratorTypes.map((type) => createForceGenerator(type.Id)), ],
     Colliders: preset.Colliders.map((collider) => createCollider(collider)),
+    Particles: ParticleTemplates.map((template) => createParticleSystem(template.Id)),
     Visualizers: createVisualizerSet(),
 };
 scene.Visualizers.ScalarSlice.Visible = true;
@@ -177,6 +188,9 @@ solver.updateTracers(1 / 60, 4);
 const camera = new OrbitCamera();
 camera.setViewport(1280, 720);
 renderer.render(scene, camera, scene.Forces[0].Id, 1 / 60);
+particles.update(scene, 1 / 60); particles.update(scene, 1 / 60);
+renderer.render(scene, new OrbitCamera(), null, 1 / 60);
+check(particles.records.size === ParticleTemplates.length, `Every particle template allocates GPU state (${particles.records.size} systems)`);
 check(mockGl.__calls.uniformErrors.length === 0, `Every uniform written exists in its shader (${mockGl.__calls.uniformErrors.length} mismatches)`);
 for (const error of mockGl.__calls.uniformErrors.slice(0, 12)) console.log('     ↳ ' + error);
 check(renderer.lineVertexCount > 100, `Gizmo batch produced ${renderer.lineVertexCount} line vertices for ${scene.Forces.length} forces`);

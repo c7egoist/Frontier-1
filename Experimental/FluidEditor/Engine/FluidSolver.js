@@ -7,7 +7,7 @@
 
 import { computeVolumeLayout } from './GpuContext.js';
 import * as Shaders from './FluidShaders.js';
-import { ForceTypeById, FalloffCurves, EmitterShapes, BoundaryModes, MaximumForceGenerators, MaximumEmitters, MaximumColliders, timingEnvelope, DebrisKinds } from './ForceGeneratorCatalog.js';
+import { ForceTypeById, FalloffCurves, EmitterShapes, BoundaryModes, MaximumForceGenerators, MaximumEmitters, MaximumColliders, timingEnvelope, DebrisKinds, emitterTransform } from './ForceGeneratorCatalog.js';
 
 export class FluidSolver
 {
@@ -161,8 +161,9 @@ export class FluidSolver
             const envelope = timingEnvelope(emitter, this.time);
             if (envelope <= 0 && !(emitter.Debris > 0)) continue;
             const offset = count * 4;
-            arrays.a.set([emitter.Position[0], emitter.Position[1], emitter.Position[2], emitter.Radius], offset);
-            arrays.b.set([emitter.Velocity[0], emitter.Velocity[1], emitter.Velocity[2], emitter.Density * envelope], offset);
+            const transform = emitterTransform(emitter, this.time);
+            arrays.a.set([transform.Position[0], transform.Position[1], transform.Position[2], emitter.Radius], offset);
+            arrays.b.set([transform.Velocity[0], transform.Velocity[1], transform.Velocity[2], emitter.Density * envelope], offset);
             arrays.c.set([emitter.Temperature * envelope, emitter.Fuel * envelope, emitter.Jitter, Math.max(0, EmitterShapes.indexOf(emitter.Shape))], offset);
             arrays.d.set([emitter.Orientation[0], emitter.Orientation[1], emitter.Orientation[2], emitter.Pulse], offset);
             arrays.e.set([emitter.Debris || 0, emitter.DebrisSpeed || 0, envelope, Math.max(0, DebrisKinds.indexOf(emitter.DebrisKind))], offset);

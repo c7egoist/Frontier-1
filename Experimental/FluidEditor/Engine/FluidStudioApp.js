@@ -9,7 +9,9 @@ import { GpuContext } from './GpuContext.js';
 import { FluidSolver } from './FluidSolver.js';
 import { VolumeRenderer } from './VolumeRenderer.js';
 import { OrbitCamera, Vec3 } from './OrbitCamera.js';
-import { ScenePresets, createDomain, createEmitter, createForceGenerator, createCollider, createVisualizerSet, ForceTypeById, resolveDomainGrid } from './ForceGeneratorCatalog.js';
+import { ScenePresets, createDomain, createEmitter, createForceGenerator, createCollider, createVisualizerSet, ForceTypeById, resolveDomainGrid, emitterTransform } from './ForceGeneratorCatalog.js';
+import { ParticleSimulation } from './ParticleSimulation.js';
+import { createParticleSystem, ParticleTemplateById, MaximumParticleSystems } from './ParticleCatalog.js';
 
 export class FluidStudioApp
 {
@@ -43,6 +45,8 @@ export class FluidStudioApp
             this.context = new GpuContext(this.canvas);
             this.solver = new FluidSolver(this.context);
             this.renderer = new VolumeRenderer(this.context, this.solver);
+            this.particles = new ParticleSimulation(this.context, this.solver);
+            this.renderer.particles = this.particles;
         }
         catch (error)
         {
@@ -86,16 +90,18 @@ export class FluidStudioApp
         {
             if (this.playing || this.stepRequested)
             {
-                if (domain.SceneLoop > 0 && this.solver.time >= domain.SceneLoop) this.solver.reset();
+                if (domain.SceneLoop > 0 && this.solver.time >= domain.SceneLoop) { this.solver.reset(); this.particles.resetAll(); }
                 this.solver.step(this.scene, deltaTime);
                 this.solver.updateTracers(deltaTime, this.scene.Visualizers.Tracers.Lifetime);
                 this.solver.updateDebris(deltaTime, this.scene.Visualizers.Debris);
+                this.particles.update(this.scene, deltaTime);
                 this.stepRequested = false;
             }
             else
             {
                 if (this.solver.tracersNeedReset) this.solver.updateTracers(0, this.scene.Visualizers.Tracers.Lifetime);
                 if (this.solver.debrisNeedReset) this.solver.updateDebris(0, this.scene.Visualizers.Debris);
+                this.particles.update(this.scene, 0);
             }
             this.lastMatrices = this.renderer.render(this.scene, this.camera, this.selection, deltaTime);
         }
@@ -124,6 +130,8 @@ export class FluidStudioApp
             textureSize: [layout.textureWidth, layout.textureHeight],
             forces: this.scene.Forces.filter((force) => force.Enabled).length,
             emitters: this.scene.Emitters.filter((emitter) => emitter.Enabled).length,
+            particleSystems: this.particles.statistics.systems,
+            particles: this.particles.statistics.particles,
             playing: this.playing,
         });
     }
@@ -143,9 +151,11 @@ export class FluidStudioApp
             Emitters: (preset.Emitters || []).map((emitter) => createEmitter(emitter)),
             Forces: (preset.Forces || []).map((force) => createForceGenerator(force.Type, force)),
             Colliders: (preset.Colliders || []).map((collider) => createCollider(collider)),
+            Particles: (preset.Particles || []).map((node) => createParticleSystem(node.Template, node)),
             Visualizers: createVisualizerSet(),
         };
         Object.assign(this.scene.Visualizers.Volume, preset.Look || {});
+        this.particles.resetAll();
         for (const [key, overrides] of Object.entries(preset.Visualizers || {})) Object.assign(this.scene.Visualizers[key], overrides);
         this.applyDomainResolution();
         this.camera.frame(this.solver.domainHalfExtent);
@@ -174,7 +184,7 @@ export class FluidStudioApp
     {
         if (!this.scene || !id) return null;
         if (id === 'domain') return this.scene.Domain;
-        for (const list of [this.scene.Emitters, this.scene.Forces, this.scene.Colliders])
+        for (const list of [this.scene.Emitters, this.scene.Forces, this.scene.Colliders, this.scene.Particles])
         {
             const node = list.find((candidate) => candidate.Id === id);
             if (node) return node;
@@ -212,6 +222,21 @@ export class FluidStudioApp
         return emitter;
     }
 
+    addParticles(templateId)
+    {
+        if (this.scene.Particles.length >= MaximumParticleSystems) return null;
+        const template = ParticleTemplateById[templateId];
+        const existing = this.scene.Particles.filter((node) => node.Template === templateId).length;
+        const half = this.solver.domainHalfExtent;
+        const node = createParticleSystem(templateId, {
+            Name: existing > 0 ? `${template.Name} ${existing + 1}` : template.Name,
+            Position: template.Defaults.Mode === 'Cloner' ? [0, 0, 0] : [0, template.Defaults.Direction && template.Defaults.Direction[1] < 0 ? half[1] * 0.9 : -half[1] * 0.85, 0],
+        });
+        this.scene.Particles.push(node);
+        this.select(node.Id);
+        return node;
+    }
+
     addCollider()
     {
         const collider = createCollider({ Name: `Sphere Collider ${this.scene.Colliders.length + 1}`, Position: [0, 0, 0] });
@@ -222,7 +247,7 @@ export class FluidStudioApp
 
     removeNode(id)
     {
-        for (const key of ['Emitters', 'Forces', 'Colliders'])
+        for (const key of ['Emitters', 'Forces', 'Colliders', 'Particles'])
         {
             const index = this.scene[key].findIndex((node) => node.Id === id);
             if (index >= 0)
@@ -243,6 +268,7 @@ export class FluidStudioApp
         let copy;
         if (node.Kind === 'Force') { copy = createForceGenerator(node.Type, { ...node, Name: node.Name + ' Copy' }); this.scene.Forces.push(copy); }
         else if (node.Kind === 'Emitter') { copy = createEmitter({ ...node, Name: node.Name + ' Copy' }); this.scene.Emitters.push(copy); }
+        else if (node.Kind === 'Particles') { if (this.scene.Particles.length >= MaximumParticleSystems) return null; copy = createParticleSystem(node.Template, { ...node, Name: node.Name + ' Copy' }); this.scene.Particles.push(copy); }
         else { copy = createCollider({ ...node, Name: node.Name + ' Copy' }); this.scene.Colliders.push(copy); }
         copy.Position = [node.Position[0] + 0.4, node.Position[1], node.Position[2]];
         this.select(copy.Id);
@@ -276,7 +302,8 @@ export class FluidStudioApp
         }
         if (node.Kind === 'Visualizer' && key === 'Lifetime' && node.Id === 'vis-tracers') this.solver.tracersNeedReset = true;
         if (node.Kind === 'Visualizer' && key === 'Lifetime' && node.Id === 'vis-debris') this.solver.debrisNeedReset = true;
-        if ((node.Kind === 'Force' || node.Kind === 'Emitter') && (key === 'StartTime' || key === 'Duration' || key === 'Repeat') && this.solver.time > (node.StartTime || 0) + (node.Duration || 0) + 0.5) this.solver.reset();
+        if (node.Kind === 'Particles' && (key === 'Mode' || key === 'Shape' || key === 'Count')) this.particles.reset(node.Id);
+        if ((node.Kind === 'Force' || node.Kind === 'Emitter' || node.Kind === 'Particles') && (key === 'StartTime' || key === 'Duration' || key === 'Repeat') && this.solver.time > (node.StartTime || 0) + (node.Duration || 0) + 0.5) this.solver.reset();
     }
 
     //------------------------------------------------------------------------------------------------------------------------
@@ -287,7 +314,7 @@ export class FluidStudioApp
     pause() { this.playing = false; this.notify(); }
     togglePlay() { this.playing = !this.playing; this.notify(); }
     stepOnce() { this.playing = false; this.stepRequested = true; this.notify(); }
-    reset() { this.solver.reset(); this.notify(); }
+    reset() { this.solver.reset(); this.particles.resetAll(); this.notify(); }
     frameDomain() { this.camera.frame(this.solver.domainHalfExtent); }
 
     setCameraPreset(name)
@@ -305,8 +332,8 @@ export class FluidStudioApp
 
     exportJson()
     {
-        const { Domain, Emitters, Forces, Colliders, Visualizers, Name } = this.scene;
-        return JSON.stringify({ Format: 'FrontierFluidScene', Version: 1, Name, Domain, Emitters, Forces, Colliders, Visualizers }, null, 2);
+        const { Domain, Emitters, Forces, Colliders, Particles, Visualizers, Name } = this.scene;
+        return JSON.stringify({ Format: 'FrontierFluidScene', Version: 2, Name, Domain, Emitters, Forces, Colliders, Particles, Visualizers }, null, 2);
     }
 
     importJson(text)
@@ -321,6 +348,7 @@ export class FluidStudioApp
             Emitters: (data.Emitters || []).map((emitter) => createEmitter(emitter)),
             Forces: (data.Forces || []).map((force) => createForceGenerator(force.Type, force)),
             Colliders: (data.Colliders || []).map((collider) => createCollider(collider)),
+            Particles: (data.Particles || []).map((node) => createParticleSystem(node.Template, node)),
             Visualizers: Object.fromEntries(Object.entries(createVisualizerSet()).map(([key, defaults]) => [key, { ...defaults, ...((data.Visualizers || {})[key] || {}) }])),
         };
         this.applyDomainResolution();
@@ -364,6 +392,7 @@ export class FluidStudioApp
         {
             for (const force of this.scene.Forces) if (force.Visible) nodes.push(force);
             for (const emitter of this.scene.Emitters) if (emitter.Visible) nodes.push(emitter);
+            for (const node of this.scene.Particles) if (node.Visible) nodes.push(node);
         }
         for (const collider of this.scene.Colliders) if (collider.Visible) nodes.push(collider);
         return nodes;
@@ -375,7 +404,7 @@ export class FluidStudioApp
         let best = null, bestDistance = 26;
         for (const node of this.pickableNodes())
         {
-            const screen = this.camera.project(this.lastMatrices.viewProjection, node.Position);
+            const screen = this.camera.project(this.lastMatrices.viewProjection, node.Kind === 'Emitter' ? emitterTransform(node, this.solver.time).Position : node.Position);
             if (!screen) continue;
             const distance = Math.hypot(screen[0] - x, screen[1] - y);
             if (distance < bestDistance) { best = node; bestDistance = distance; }

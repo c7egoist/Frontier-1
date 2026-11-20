@@ -7,8 +7,9 @@
 import { icon } from './StudioIcons.js';
 import {
     ForceGeneratorTypes, ForceTypeById, FalloffCurves, EmitterShapes, ColourRamps, SliceAxes, ScalarChannels, AdvectionSchemes, BoundaryModes,
-    ScenePresets, RampStops, MaximumForceGenerators, SmokeLooks, FireLooks, ResolutionPresets, VolumeFilters, FalloffLabels, ForceCategories, VectorModes, timingEnvelope, isKeyed, DebrisKinds,
+    ScenePresets, RampStops, MaximumForceGenerators, SmokeLooks, FireLooks, ResolutionPresets, VolumeFilters, FalloffLabels, ForceCategories, VectorModes, timingEnvelope, isKeyed, DebrisKinds, EmitterPathKinds,
 } from '../Engine/ForceGeneratorCatalog.js';
+import { ParticleTemplates, ParticleTemplateById, ParticleCategories, ParticleShapes, ParticleModes, ParticleColourModes, ParticleColourLabels, ParticleBlendModes, ParticleRenderStyles, MaximumParticleSystems } from '../Engine/ParticleCatalog.js';
 const BoundaryLabels = { ClosedBox: 'Closed Box', OpenTop: 'Open Top', OpenAll: 'Open All' };
 
 function element(tag, className, html)
@@ -36,6 +37,7 @@ function rampGradient(name)
 
 function nodeIcon(node)
 {
+    if (node.Kind === 'Particles') return (ParticleTemplateById[node.Template] || ParticleTemplates[0]).Icon;
     if (node.Kind === 'Force') return ForceTypeById[node.Type].Icon;
     if (node.Kind === 'Emitter') return node.Fuel > 0 ? 'flame' : 'smoke';
     if (node.Kind === 'Collider') return 'collider';
@@ -48,6 +50,7 @@ function nodeTint(node)
     if (node.Kind === 'Force') return ForceTypeById[node.Type].Tint;
     if (node.Kind === 'Emitter') return node.Fuel > 0 ? '#f97316' : '#cbd5e1';
     if (node.Kind === 'Collider') return '#94a3b8';
+    if (node.Kind === 'Particles') return (ParticleTemplateById[node.Template] || ParticleTemplates[0]).Tint;
     if (node.Kind === 'Domain') return '#e2e8f0';
     return '#38bdf8';
 }
@@ -111,6 +114,7 @@ export function mountStudioUI({ app, refs })
             { key: 'emitters', title: 'Emitters', icon: 'flame', items: scene.Emitters, subtitle: `${scene.Emitters.length} items`, add: () => app.addEmitter('Sphere') },
             { key: 'forces', title: 'Force Generators', icon: 'wind', items: scene.Forces, subtitle: `${scene.Forces.length} of ${MaximumForceGenerators} slots`, add: () => toggleDrawer(true, 'forces') },
             { key: 'colliders', title: 'Colliders', icon: 'collider', items: scene.Colliders, subtitle: `${scene.Colliders.length} items`, add: () => app.addCollider() },
+            { key: 'particles', title: 'Particle Systems', icon: 'particles', items: scene.Particles || [], subtitle: `${(scene.Particles || []).length} of ${MaximumParticleSystems} systems`, add: () => toggleDrawer(true, 'particles') },
             { key: 'visualizers', title: 'Visualizers', icon: 'vectors', items: Object.values(scene.Visualizers), subtitle: 'Flow diagnostics' },
         ];
         for (const collection of collections)
@@ -143,6 +147,7 @@ export function mountStudioUI({ app, refs })
             case 'Force': return `${ForceTypeById[node.Type].Name} · ${formatNumber(node.Strength, 1)} · ${FalloffLabels[node.Falloff]}${keyedSuffix(node)}`;
             case 'Emitter': return `${node.Shape} · ρ ${formatNumber(node.Density, 1)} · T ${formatNumber(node.Temperature, 1)}${node.Fuel > 0 ? ' · fuel' : ''}${node.Debris > 0 ? ` · ${(node.DebrisKind || 'rubble').toLowerCase()}` : ''}${keyedSuffix(node)}`;
             case 'Collider': return `Sphere · r ${formatNumber(node.Radius, 2)} m`;
+            case 'Particles': return `${node.Mode} · ${node.Shape} · ${node.Count} pts${keyedSuffix(node)}`;
             default:
                 if (node.Id === 'vis-vectors') return `${node.Axis} slice · stride ${node.Stride}`;
                 if (node.Id === 'vis-slice') return `${node.Channel} · ${node.Axis} ${Math.round(node.Offset * 100)}%`;
@@ -320,7 +325,7 @@ export function mountStudioUI({ app, refs })
         const host = refs.inspector;
         host.innerHTML = '';
         const node = snapshot.node || snapshot.scene.Domain;
-        const kindLabel = { Domain: 'Gas Domain', Force: 'Force Generator', Emitter: 'Emitter', Collider: 'Collider', Visualizer: 'Visualizer' }[node.Kind];
+        const kindLabel = { Domain: 'Gas Domain', Force: 'Force Generator', Emitter: 'Emitter', Collider: 'Collider', Particles: 'Particle System', Visualizer: 'Visualizer' }[node.Kind];
 
         const breadcrumb = element('div', 'inspector-breadcrumb', `<span>Inspector / ${kindLabel}</span>`);
         const notes = element('button', 'pill', `${icon('plus', 11)} Add notes`);
@@ -337,13 +342,14 @@ export function mountStudioUI({ app, refs })
             rename.addEventListener('change', () => app.updateNode(node.Id, 'Name', rename.value.trim() || node.Name));
             title.appendChild(rename);
         }
-        title.appendChild(element('div', 'kind', node.Kind === 'Force' ? ForceTypeById[node.Type].Summary : kindLabel));
+        title.appendChild(element('div', 'kind', node.Kind === 'Force' ? ForceTypeById[node.Type].Summary : node.Kind === 'Particles' ? (ParticleTemplateById[node.Template] || ParticleTemplates[0]).Summary : kindLabel));
         host.appendChild(title);
 
         if (node.Kind === 'Domain') renderDomainInspector(host, node, snapshot);
         else if (node.Kind === 'Force') renderForceInspector(host, node, snapshot);
         else if (node.Kind === 'Emitter') renderEmitterInspector(host, node, snapshot);
         else if (node.Kind === 'Collider') renderColliderInspector(host, node, snapshot);
+        else if (node.Kind === 'Particles') renderParticleInspector(host, node, snapshot);
         else renderVisualizerInspector(host, node, snapshot);
     }
 
@@ -501,6 +507,12 @@ export function mountStudioUI({ app, refs })
             slider(emitter, 'Pulse', 'Pulse period', 0, 5, 0.1, 's'),
         ]));
         host.appendChild(card('Exit Velocity', 'm/s', [vector(emitter, 'Velocity', 'Velocity', 0.1)]));
+        host.appendChild(card('Motion Path', 'Animated source', [
+            choice(emitter, 'PathKind', 'Path', EmitterPathKinds, { None: 'Static', Figure8: 'Figure 8' }),
+            emitter.PathKind !== 'None' ? slider(emitter, 'PathRadius', 'Path radius', 0.1, 4, 0.05, 'm') : null,
+            emitter.PathKind !== 'None' ? slider(emitter, 'PathSpeed', 'Angular speed', 0, 4, 0.05, 'rad/s') : null,
+            element('p', 'note', 'The emitter orbits its Position along the path; exit velocity is expressed in the moving frame (X = forward, Z = right), so a negative X trails smoke behind it like a drifting tyre.'),
+        ]));
         host.appendChild(card('Debris', 'Ballistic ejecta', [
             choice(emitter, 'DebrisKind', 'Kind', DebrisKinds),
             slider(emitter, 'Debris', 'Debris amount', 0, 1, 0.02),
@@ -509,6 +521,63 @@ export function mountStudioUI({ app, refs })
         ]));
         host.appendChild(timingCard(emitter));
         host.appendChild(nodeActions(emitter));
+    }
+
+    function renderParticleInspector(host, node, snapshot)
+    {
+        const template = ParticleTemplateById[node.Template] || ParticleTemplates[0];
+        const cloner = node.Mode === 'Cloner';
+        host.appendChild(hero(template.Tint, `${node.Mode} · ${node.Shape}`, cloner ? 'Spring-held formation displaced by the force field' : 'Born, accelerated by the field, aged out', `${node.Count} pts`, template.Icon));
+        host.appendChild(element('div', 'metric-grid',
+            metric(node.Count, '', 'Particles') +
+            metric(cloner ? formatNumber(node.Spring, 1) : formatNumber(node.Lifetime, 1), cloner ? 'k' : 's', cloner ? 'Spring' : 'Lifetime') +
+            metric(formatNumber(node.FieldInfluence, 2), '×', 'Field influence') +
+            metric(formatNumber(node.Radius, 2), 'm', 'Shape radius')));
+        const status = element('div', 'status-grid');
+        status.appendChild(statusTile('Enabled', node.Enabled ? 'ON' : 'OFF', 'power', node.Enabled, () => app.updateNode(node.Id, 'Enabled', !node.Enabled)));
+        status.appendChild(statusTile('Mode', cloner ? 'CLONER' : 'EMIT', cloner ? 'gridcloner' : 'sparks', cloner, () => app.updateNode(node.Id, 'Mode', cloner ? 'Emit' : 'Cloner')));
+        host.appendChild(status);
+        host.appendChild(element('div', 'section-head', '<span>Properties</span><span>Shape, motion & look</span>'));
+        host.appendChild(card('Shape', 'Spawn region / formation', [
+            choice(node, 'Shape', 'Shape', ParticleShapes),
+            slider(node, 'Radius', 'Radius / half-size', 0.05, 4, 0.05, 'm'),
+            slider(node, 'Count', 'Particle count', 16, 16384, 16, '', 0),
+            vector(node, 'Position', 'Position (m)'),
+            vector(node, 'Direction', 'Axis / launch direction', 0.1),
+        ]));
+        host.appendChild(card(cloner ? 'Formation' : 'Emission', cloner ? 'Spring return' : 'Per second', cloner ? [
+            slider(node, 'Spring', 'Spring stiffness', 0, 30, 0.5),
+            slider(node, 'Damping', 'Damping', 0, 10, 0.1),
+            element('p', 'note', 'Every clone is tethered to its lattice home. Drag any force gizmo through the formation to displace it; the spring pulls it back.'),
+        ] : [
+            slider(node, 'Rate', 'Spawn rate', 0, 40, 0.5, '/s', 1),
+            slider(node, 'Lifetime', 'Lifetime', 0.1, 15, 0.1, 's'),
+            slider(node, 'Speed', 'Launch speed', 0, 15, 0.1, 'm/s'),
+            slider(node, 'Spread', 'Spread (0 = axis, 1 = omni)', 0, 1, 0.02),
+        ]));
+        host.appendChild(card('Dynamics', 'Forces acting on each particle', [
+            slider(node, 'FieldInfluence', 'Force field influence', -2, 3, 0.05, '×'),
+            slider(node, 'GasInfluence', 'Gas coupling', 0, 6, 0.1),
+            slider(node, 'Gravity', 'Gravity', 0, 20, 0.1, 'm/s²'),
+            slider(node, 'Drag', 'Air drag', 0, 6, 0.05),
+            slider(node, 'Noise', 'Curl-noise wander', 0, 4, 0.05),
+            slider(node, 'Bounce', 'Floor restitution (−0.05 = pass through)', -0.05, 0.95, 0.05),
+        ]));
+        host.appendChild(card('Look', 'Sprite shading', [
+            choice(node, 'ColourMode', 'Colour rule', ParticleColourModes, ParticleColourLabels),
+            node.ColourMode === 'Life' ? colour(node, 'ColourStart', 'Start colour') : null,
+            node.ColourMode === 'Life' ? colour(node, 'ColourEnd', 'End colour') : null,
+            ['Speed', 'Displacement', 'Height'].includes(node.ColourMode) ? choice(node, 'Ramp', 'Colour ramp', ColourRamps) : null,
+            node.ColourMode === 'Speed' ? slider(node, 'MaxSpeed', 'Ramp max speed', 0.5, 20, 0.1, 'm/s') : null,
+            node.ColourMode === 'Displacement' ? slider(node, 'DisplacementRange', 'Ramp max displacement', 0.05, 3, 0.05, 'm') : null,
+            slider(node, 'SizeStart', 'Size at birth', 0.5, 12, 0.5, 'px'),
+            slider(node, 'SizeEnd', 'Size at death', 0.5, 12, 0.5, 'px'),
+            slider(node, 'Flicker', 'Flicker', 0, 1, 0.05),
+            choice(node, 'Blend', 'Blend', ParticleBlendModes),
+            choice(node, 'Style', 'Render style', ParticleRenderStyles),
+        ]));
+        host.appendChild(timingCard(node));
+        host.appendChild(nodeActions(node));
     }
 
     function renderColliderInspector(host, collider)
@@ -807,14 +876,14 @@ export function mountStudioUI({ app, refs })
         drawer.innerHTML = '';
         const head = element('div', 'drawer-head', `<span style="color:#ddd;font-size:12px">${icon('folder', 13)}</span>`);
         const seg = element('div', 'seg');
-        for (const [key, label] of [['presets', 'Scene Presets'], ['forces', 'Force Generators'], ['emitters', 'Emitters & Colliders']])
+        for (const [key, label] of [['presets', 'Scene Presets'], ['forces', 'Force Generators'], ['particles', 'Particle Systems'], ['emitters', 'Emitters & Colliders']])
         {
             const button = element('button', state.drawerTab === key ? 'active' : '', label);
             button.addEventListener('click', () => { state.drawerTab = key; renderDrawer(); });
             seg.appendChild(button);
         }
         head.appendChild(seg);
-        head.appendChild(element('span', 'hint', state.drawerTab === 'forces' ? `Click a card to construct it in the domain · ${app.scene.Forces.length}/${MaximumForceGenerators} slots used` : 'Click a card to construct'));
+        head.appendChild(element('span', 'hint', state.drawerTab === 'forces' ? `Click a card to construct it in the domain · ${app.scene.Forces.length}/${MaximumForceGenerators} slots used` : state.drawerTab === 'particles' ? `Mograph-style GPU particles driven by the same force gizmos · ${(app.scene.Particles || []).length}/${MaximumParticleSystems} systems` : 'Click a card to construct'));
         const close = element('button', 'icon-button', '×');
         close.addEventListener('click', () => toggleDrawer(false));
         head.appendChild(close);
@@ -841,6 +910,24 @@ export function mountStudioUI({ app, refs })
                 {
                     const cardNode = element('button', 'asset-card', `<div class="thumb" style="background:linear-gradient(140deg,${type.Tint}55,#141414)">${icon(type.Icon, 34, 1)}</div><strong>${type.Name}</strong><span>${type.Summary}</span><span class="badge">${FalloffLabels[type.Defaults.Falloff]} falloff</span>`);
                     cardNode.addEventListener('click', () => { app.addForce(type.Id); });
+                    row.appendChild(cardNode);
+                }
+                group.appendChild(row);
+                body.appendChild(group);
+            }
+        }
+        else if (state.drawerTab === 'particles')
+        {
+            body.classList.add('categorised');
+            for (const category of ParticleCategories)
+            {
+                const group = element('div', 'asset-group');
+                group.appendChild(element('h4', '', `${category} <span>${ParticleTemplates.filter((template) => template.Category === category).length}</span>`));
+                const row = element('div', 'asset-row');
+                for (const template of ParticleTemplates.filter((entry) => entry.Category === category))
+                {
+                    const cardNode = element('button', 'asset-card', `<div class="thumb" style="background:linear-gradient(140deg,${template.Tint}55,#141414)">${icon(template.Icon, 34, 1)}</div><strong>${template.Name}</strong><span>${template.Summary}</span><span class="badge">${template.Defaults.Mode} · ${template.Defaults.Shape}</span>`);
+                    cardNode.addEventListener('click', () => { app.addParticles(template.Id); });
                     row.appendChild(cardNode);
                 }
                 group.appendChild(row);
@@ -876,7 +963,7 @@ export function mountStudioUI({ app, refs })
         refs.statusFps.textContent = `${metrics.fps.toFixed(0)} fps`;
         refs.statusStep.textContent = `${metrics.stepMilliseconds.toFixed(1)} ms · ${metrics.passes} passes`;
         refs.statusGrid.textContent = `${metrics.resolution.join('×')} · ${formatCells(metrics.cells)}`;
-        refs.statusForces.textContent = `${metrics.forces} active · ${metrics.emitters} emitters`;
+        refs.statusForces.textContent = `${metrics.forces} active · ${metrics.emitters} emitters${metrics.particleSystems ? ` · ${formatCells(metrics.particles)} particles` : ''}`;
         refs.statusText.innerHTML = `HTML preview · <b>WebGL2 GPU solver</b> · ${metrics.playing ? 'simulating' : 'paused'} · no engine connection`;
     }
 

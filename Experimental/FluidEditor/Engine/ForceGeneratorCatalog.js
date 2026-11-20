@@ -254,6 +254,48 @@ export const ScenePresets = Object.freeze([
         ],
     },
     {
+        Id: 'preset-tyre-drift', Name: 'Tyre Drift Smoke', Icon: 'tyre', Summary: 'A spinning tyre circling the pad: dense white rubber smoke trailing behind, hugging the ground and shearing in the crosswind.',
+        Domain: { Resolution: [96, 36, 96], Size: [7, 2.6, 7], Buoyancy: 0.12, AmbientTemperature: 0, Cooling: 0.4, Vorticity: 0.3, Dissipation: 0.994, Gravity: 0.3, VelocityDissipation: 0.998 },
+        Boundary: 'OpenAll',
+        Look: { Albedo: '#d2d2d6', Absorption: 3.0, Anisotropy: 0.55, Exposure: 1.1 },
+        Visualizers: { Debris: { Visible: true, Count: 768, Lifetime: 2.5, Size: 2.0, Drag: 0.6, Bounce: 0.3, Glow: 0.05 } },
+        Emitters: [
+            { Name: 'Rear Tyre', Shape: 'Disc', Position: [0, -1.18, 0], Radius: 0.26, Density: 2.2, Temperature: 0.4, Fuel: 0, Velocity: [-2.8, 0.7, 0], Jitter: 0.45, Orientation: [1, 0, 0], PathKind: 'Circle', PathRadius: 1.9, PathSpeed: 1.15, Debris: 0.05, DebrisSpeed: 3.5, DebrisKind: 'Rubble' },
+        ],
+        Forces: [
+            { Type: 'DirectionalWind', Name: 'Crosswind', Position: [0, 0, 0], Strength: 0.45, Direction: [0.3, 0, 1], Falloff: 'Constant', Frequency: 0.4, Secondary: 0.5 },
+            { Type: 'DragBaffle', Name: 'Ceiling Brake', Position: [0, 1.0, 0], Strength: 1.4, Radius: 3.4, Falloff: 'Plateau' },
+        ],
+    },
+    {
+        Id: 'preset-mograph-grid', Name: 'Mograph Field', Icon: 'gridcloner', Summary: 'No smoke — a spring-held grid cloner and a ring cloner displaced by an orbit, a vortex and a repulsor you can drag through them.',
+        Domain: { Resolution: [48, 48, 48], Size: [5, 5, 5], Buoyancy: 0, AmbientTemperature: 0, Cooling: 0, Vorticity: 0, Dissipation: 0.99, PressureIterations: 8 },
+        Look: { Visible: false },
+        Particles: [
+            { Template: 'grid-cloner', Name: 'Grid Cloner', Position: [0, 0, 0], Radius: 1.7, Count: 4096 },
+            { Template: 'ring-cloner', Name: 'Ring Cloner', Position: [0, -2.2, 0], Radius: 2.1, Count: 720, Direction: [0, 1, 0] },
+        ],
+        Forces: [
+            { Type: 'PointRepulsor', Name: 'Push Probe', Position: [0.8, 0.4, 0.3], Strength: 14, Radius: 1.1, Falloff: 'SmoothStep', Secondary: 0.2 },
+            { Type: 'Orbit', Position: [0, 0, 0], Strength: 5, Radius: 2.4, Falloff: 'Plateau', Frequency: 0.3, Secondary: 0.4 },
+            { Type: 'CurlNoiseTurbulence', Position: [0, 0, 0], Strength: 1.6, Radius: 3.0, Frequency: 0.9, Secondary: 0.5 },
+        ],
+    },
+    {
+        Id: 'preset-celebration', Name: 'Celebration', Icon: 'confetti', Summary: 'No smoke — two confetti cannons, a sparks fountain and fireflies, all pushed around by a gusting wind gizmo.',
+        Domain: { Resolution: [40, 48, 40], Size: [5, 6, 5], Buoyancy: 0, AmbientTemperature: 0, Cooling: 0, Vorticity: 0, Dissipation: 0.99, PressureIterations: 8 },
+        Look: { Visible: false },
+        Particles: [
+            { Template: 'confetti', Name: 'Cannon Left', Position: [-1.8, -2.8, 0], Direction: [0.45, 1, 0.1] },
+            { Template: 'confetti', Name: 'Cannon Right', Position: [1.8, -2.8, 0], Direction: [-0.45, 1, -0.1] },
+            { Template: 'sparks', Name: 'Spark Fountain', Position: [0, -2.9, 0], Speed: 6, Spread: 0.35 },
+            { Template: 'fireflies', Name: 'Fireflies', Position: [0, 0.5, 0], Radius: 2.0 },
+        ],
+        Forces: [
+            { Type: 'DirectionalWind', Name: 'Gust', Position: [0, 0, 0], Strength: 1.2, Direction: [1, 0, 0.3], Falloff: 'Constant', Frequency: 0.6, Secondary: 1.0 },
+        ],
+    },
+    {
         Id: 'preset-wind-tunnel', Name: 'Wind Tunnel', Icon: 'wind', Summary: 'Crosswind jet over a spherical collider with a von Kármán wake.',
         Domain: { Resolution: [96, 48, 48], Size: [6, 3, 3], Buoyancy: 0.0, AmbientTemperature: 0, Cooling: 0.0, Vorticity: 0.45, Dissipation: 0.999 },
         Boundary: 'OpenAll',
@@ -348,6 +390,44 @@ export function createForceGenerator(typeId, overrides = {})
 }
 
 export const DebrisKinds = Object.freeze(['Rubble', 'Ember', 'Paper']);
+export const EmitterPathKinds = Object.freeze(['None', 'Circle', 'Line', 'Figure8']);
+
+/** Animated emitter transform: returns { Position, Velocity } for an emitter following its motion path at `time`. */
+export function emitterTransform(emitter, time)
+{
+    const kind = emitter.PathKind || 'None';
+    if (kind === 'None') return { Position: emitter.Position, Velocity: emitter.Velocity };
+    const radius = emitter.PathRadius || 0, speed = emitter.PathSpeed || 0;
+    const angle = time * speed;
+    let offset, heading;
+    if (kind === 'Circle')
+    {
+        offset = [Math.cos(angle) * radius, 0, Math.sin(angle) * radius];
+        heading = [-Math.sin(angle), 0, Math.cos(angle)];
+    }
+    else if (kind === 'Line')
+    {
+        const s = Math.sin(angle);
+        offset = [s * radius, 0, 0];
+        heading = [Math.cos(angle) >= 0 ? 1 : -1, 0, 0];
+    }
+    else
+    {
+        offset = [Math.sin(angle) * radius, 0, Math.sin(angle * 2) * radius * 0.5];
+        const length = Math.hypot(Math.cos(angle), Math.cos(angle * 2)) || 1;
+        heading = [Math.cos(angle) / length, 0, Math.cos(angle * 2) / length];
+    }
+    // Rotate the local exit velocity so "backwards" stays behind the moving source: local x = heading, local z = right.
+    const right = [heading[2], 0, -heading[0]];
+    const local = emitter.Velocity;
+    const velocity = [
+        heading[0] * local[0] + right[0] * local[2],
+        local[1],
+        heading[2] * local[0] + right[2] * local[2],
+    ];
+    return { Position: [emitter.Position[0] + offset[0], emitter.Position[1] + offset[1], emitter.Position[2] + offset[2]], Velocity: velocity, Heading: heading };
+}
+
 
 export function createEmitter(overrides = {})
 {
@@ -374,6 +454,9 @@ export function createEmitter(overrides = {})
         Debris: overrides.Debris ?? 0,
         DebrisSpeed: overrides.DebrisSpeed ?? 6,
         DebrisKind: overrides.DebrisKind || 'Rubble',
+        PathKind: overrides.PathKind || 'None',
+        PathRadius: overrides.PathRadius ?? 1.5,
+        PathSpeed: overrides.PathSpeed ?? 1.0,
     };
 }
 
@@ -441,7 +524,7 @@ export function createVisualizerSet()
         },
         VelocityVectors: { Id: 'vis-vectors', Kind: 'Visualizer', Name: 'Velocity Vectors', Visible: true, Axis: 'Z', Offset: 0.5, Stride: 2, Scale: 0.35, Ramp: 'Turbo', MaxSpeed: 6 },
         ScalarSlice: { Id: 'vis-slice', Kind: 'Visualizer', Name: 'Scalar Slice', Visible: false, Axis: 'Y', Offset: 0.35, Channel: 'Speed', Ramp: 'Turbo', Range: 6, Opacity: 0.85 },
-        Tracers: { Id: 'vis-tracers', Kind: 'Visualizer', Name: 'Flow Tracers', Visible: true, Count: 8192, Lifetime: 4.0, Ramp: 'Turbo', MaxSpeed: 6, Size: 2.0 },
+        Tracers: { Id: 'vis-tracers', Kind: 'Visualizer', Name: 'Flow Tracers', Visible: false, Count: 8192, Lifetime: 4.0, Ramp: 'Turbo', MaxSpeed: 6, Size: 2.0 },
         Debris: { Id: 'vis-debris', Kind: 'Visualizer', Name: 'Debris', Visible: false, Count: 2048, Lifetime: 5.0, Size: 3.0, Gravity: 9.8, Drag: 1.2, Bounce: 0.35, Glow: 1.0 },
         ForceVectors: { Id: 'vis-forces', Kind: 'Visualizer', Name: 'Force Vectors', Visible: false, Mode: 'Slice', Axis: 'Z', Offset: 0.5, Stride: 3, Scale: 0.04, Ramp: 'Plasma', MaxForce: 20 },
         ForceGizmos: { Id: 'vis-gizmos', Kind: 'Visualizer', Name: 'Force Gizmos', Visible: true, Opacity: 0.9 },

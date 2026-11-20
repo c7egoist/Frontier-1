@@ -36,6 +36,22 @@ Fields are 3D grids stored as 2D tile atlases (`RGBA16F`, hardware bilinear + ma
 | 6 | Projection | `DivergenceFragment` → `PressureFragment` × N Jacobi → `GradientFragment` with closed / open-top / open boundaries and solid Neumann cells |
 | 7 | Tracers | `TracerUpdateFragment` — RK2 particle integration, lifetime respawn, previous-frame copy for trails |
 
+### Particle / mograph system (`Engine/ParticleCatalog.js` · `ParticleShaders.js` · `ParticleSimulation.js`)
+
+A self-contained GPU particle module that shares the force-generator gizmos with the gas solver — drag any force through a system and it reacts. Up to 4 systems × 16 384 particles.
+
+| Layer | Contents |
+| :--- | :--- |
+| **Catalog** (portable, no WebGL) | Shapes `Point · Sphere · Box · Disc · Ring · Line · Grid`, modes `Emit · Cloner`, colour rules `Life · Speed · Displacement · Height · Seed`, blend/style, 11 templates (Sparks, Confetti Cannon, Fireflies, Fountain, Grid/Ring/Line Cloner, Sphere Swarm, Snowfall, Ground Dust, Rain) |
+| **Shaders** | `ParticleShapeChunk` (lattice + random sampling per shape), update kernel (spawn, force field × influence, gas coupling, gravity, drag, curl wander, cloner spring, floor bounce, timing envelope), soft-sprite + streak render |
+| **Simulation** | One ping-pong record per scene node, lazily created and pruned; borrows solver force uniforms + velocity volume |
+
+**Cloners** hold a formation (Fibonacci sphere, sunflower disc, cubic lattice, ring, line) with a spring and colour by displacement — the mograph effector workflow: your force gizmos are the effectors. Presets *Mograph Field* and *Celebration* hide the volume render entirely. Adding a shape/colour rule/template = one catalog entry + one shader branch; the C++ port mirrors the same numeric codes.
+
+### Emitter motion paths
+
+Emitters can orbit their position on a `Circle`, `Line` or `Figure 8` path; exit velocity is expressed in the moving frame so smoke trails behind (see *Tyre Drift Smoke*).
+
 ### Timing keys (forces + emitters)
 
 Every force generator and emitter carries `StartTime · Duration · Fade · Repeat`. The solver scales strength (or emission) by a trapezoid envelope on its own clock, so a curl-noise generator can be live only during an explosion's roll-up and silent afterwards; a Scene Loop on the domain replays the sequence. Keyed nodes show a ⏱ range in the Outliner, a key track in the Inspector and a dimmed gizmo while inactive.
