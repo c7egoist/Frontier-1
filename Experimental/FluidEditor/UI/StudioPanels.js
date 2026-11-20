@@ -552,16 +552,17 @@ export function mountStudioUI({ app, refs })
             slider(node, 'Dissolve', 'Dissolve (homes drift on noise)', 0, 2, 0.02, 'm'),
             element('p', 'note', 'Every clone is tethered to its lattice home. Drag any force gizmo through the formation to displace it; the spring pulls it back.'),
         ] : [
-            slider(node, 'Rate', 'Spawn rate', 0, 40, 0.5, '/s', 1),
+            slider(node, 'Rate', 'Spawn rate (burst ≥ 200)', 0, 500, 0.5, '/s', 1),
             slider(node, 'Lifetime', 'Lifetime', 0.1, 40, 0.1, 's'),
             slider(node, 'Linger', 'Fade-out after death', 0, 10, 0.1, 's'),
             slider(node, 'Speed', 'Launch speed', 0, 15, 0.1, 'm/s'),
             slider(node, 'Spread', 'Spread (0 = axis, 1 = omni)', 0, 1, 0.02),
+            slider(node, 'Radial', 'Radial launch (outward from origin)', 0, 1, 0.02),
         ]));
         host.appendChild(card('Dynamics', 'Forces acting on each particle', [
             slider(node, 'FieldInfluence', 'Force field influence', -2, 3, 0.05, '×'),
             slider(node, 'GasInfluence', 'Gas coupling', 0, 6, 0.1),
-            slider(node, 'Gravity', 'Gravity', 0, 20, 0.1, 'm/s²'),
+            slider(node, 'Gravity', 'Gravity (negative = buoyant)', -10, 20, 0.1, 'm/s²'),
             slider(node, 'Drag', 'Air drag', 0, 6, 0.05),
             slider(node, 'Noise', 'Turbulence field strength', 0, 4, 0.05),
             slider(node, 'NoiseScale', 'Turbulence scale (1/m)', 0.1, 4, 0.05),

@@ -55,6 +55,16 @@ export const ParticleCategories = Object.freeze(['Cinematic', 'Trails', 'Emitter
 /** Asset-browser templates. Each is a full set of overrides for createParticleSystem. */
 export const ParticleTemplates = Object.freeze([
     {
+        Id: 'field-streamlines', Name: 'Field Streamlines', Category: 'Trails', Icon: 'streamlines', Tint: '#34c759',
+        Summary: 'Diagnostic tool: massless tracers that follow the force field exactly, coloured by speed — see what your gizmos are doing.',
+        Defaults: { Mode: 'Emit', Shape: 'Box', Radius: 2.4, Count: 2048, Rate: 1.5, Lifetime: 12, Linger: 2, Speed: 0.05, Spread: 1.0, Gravity: 0, Drag: 4.0, Noise: 0, FieldInfluence: 3.0, GasInfluence: 0, Bounce: -0.05, SizeStart: 0.01, SizeEnd: 0.01, SizeRandom: 0.2, SizeMode: 'World', Sprite: 'Disc', Glow: 0.3, ColourMode: 'Speed', RampSource: 'Ramp', Ramp: 'Turbo', MaxSpeed: 4, Palette: ['#34c759', '#ffb454'], Blend: 'Alpha', Style: 'Point', Brightness: 1.1, Trail: 'Only', TrailLength: 64, TrailInterval: 0.08, TrailWidth: 0.008, TrailTaper: 0.4, TrailFade: 0.5, TrailSubdivisions: 2, TrailColour: 'Particle', TrailRatio: 1 },
+    },
+    {
+        Id: 'meteor-shower', Name: 'Meteor Shower', Category: 'Trails', Icon: 'meteor', Tint: '#fdba74',
+        Summary: 'Fast diagonal streaks from the top of the domain with white-hot heads and orange tails that linger after impact.',
+        Defaults: { Mode: 'Emit', Shape: 'Box', Radius: 2.5, Direction: [-0.6, -1, 0.2], Count: 256, Rate: 1.2, Lifetime: 1.6, Linger: 1.8, Speed: 9, Spread: 0.03, Gravity: 2, Drag: 0, Noise: 0, Bounce: -0.05, SizeStart: 0.03, SizeEnd: 0.02, SizeRandom: 0.4, SizeMode: 'World', Sprite: 'Glow', Glow: 1.0, ColourMode: 'Life', Palette: ['#ffffff', '#fde68a', '#fb923c'], Flicker: 0.2, Blend: 'Additive', Style: 'Point', Brightness: 1.8, Trail: 'Ribbon', TrailLength: 32, TrailInterval: 0.025, TrailWidth: 0.02, TrailTaper: 0.95, TrailFade: 0.8, TrailSubdivisions: 1, TrailColour: 'Along', TrailRatio: 1 },
+    },
+    {
         Id: 'light-strands', Name: 'Light Strands', Category: 'Trails', Icon: 'strands', Tint: '#7dd3fc',
         Summary: 'Aerodynamic streamlines: long thin blue ribbons riding the wind with sparkling heads.',
         Defaults: { Mode: 'Emit', Shape: 'Disc', Radius: 1.4, Direction: [1, 0, 0], Count: 1024, Rate: 0.6, Lifetime: 24, Speed: 1.1, Spread: 0.06, Gravity: 0, Drag: 0.1, Noise: 0.25, NoiseScale: 0.45, NoiseSpeed: 0.06, FieldInfluence: 1, GasInfluence: 0, Bounce: -0.05, SizeStart: 0.03, SizeEnd: 0.02, SizeRandom: 0.5, SizeMode: 'World', Sprite: 'Glow', Glow: 0.8, FocusDistance: 0, ColourMode: 'Life', Palette: ['#ffffff', '#bfe9ff', '#60a5fa', '#312e81'], BrightnessJitter: 0.3, Flicker: 0.4, Blend: 'Additive', Style: 'Point', Brightness: 1.3, Trail: 'Ribbon', TrailLength: 96, TrailInterval: 0.1, TrailWidth: 0.012, TrailTaper: 0.7, TrailFade: 0.6, TrailSubdivisions: 2, TrailColour: 'Along', TrailRatio: 1, Linger: 4 },
@@ -90,6 +100,21 @@ export const ParticleTemplates = Object.freeze([
         Defaults: { Mode: 'Emit', Shape: 'Disc', Radius: 1.8, Count: 12288, Rate: 4, Lifetime: 9, Speed: 0.45, Spread: 0.5, Direction: [0, 1, 0], Gravity: 0, Drag: 1.1, Noise: 1.0, NoiseScale: 0.7, NoiseSpeed: 0.25, Bounce: -0.05, SizeStart: 0.006, SizeEnd: 0.014, SizeRandom: 0.85, SizeMode: 'World', Sprite: 'Bokeh', Glow: 0.4, FocusDistance: 5.5, Aperture: 0.45, ColourMode: 'Life', Palette: ['#d9fff0', '#6ee7b7', '#10b981', '#064e3b'], HueJitter: 0.06, BrightnessJitter: 0.5, Flicker: 0.7, Blend: 'Additive', Style: 'Point', Brightness: 1.3 },
     },
     {
+        Id: 'fireworks', Name: 'Fireworks', Category: 'Emitters', Icon: 'fireworks', Tint: '#fb7185',
+        Summary: 'Keyed shell burst every 2.5 s: a radial sphere of streaking embers that arc down and fade — timing keys + radial launch.',
+        Defaults: { Mode: 'Emit', Shape: 'Point', Radius: 0.05, Count: 4096, Rate: 400, Lifetime: 2.8, Linger: 1.5, Speed: 7, Spread: 0.15, Radial: 1, Gravity: 3.5, Drag: 1.1, Noise: 0.15, Bounce: -0.05, SizeStart: 0.012, SizeEnd: 0.004, SizeRandom: 0.6, SizeMode: 'World', Sprite: 'Glow', Glow: 0.8, ColourMode: 'Swatch', Palette: ['#fff1c9', '#fb7185', '#f59e0b', '#38bdf8', '#a78bfa'], BrightnessJitter: 0.4, Flicker: 0.6, Blend: 'Additive', Style: 'Point', Brightness: 1.5, Trail: 'Ribbon', TrailLength: 24, TrailInterval: 0.03, TrailWidth: 0.006, TrailTaper: 0.9, TrailFade: 1.2, TrailSubdivisions: 1, TrailColour: 'Particle', TrailRatio: 1, StartTime: 0.5, Duration: 0.08, Fade: 0.02, Repeat: 2.5 },
+    },
+    {
+        Id: 'pulse-ring', Name: 'Pulse Ring', Category: 'Emitters', Icon: 'pulsering', Tint: '#38bdf8',
+        Summary: 'Expanding shock ring: a planar ring launched radially outward every 1.5 s, thinning as it grows.',
+        Defaults: { Mode: 'Emit', Shape: 'Ring', Radius: 0.3, Direction: [0, 1, 0], Count: 4096, Rate: 400, Lifetime: 2.2, Linger: 0.6, Speed: 3.5, Spread: 0.02, Radial: 1, Gravity: 0, Drag: 0.9, Noise: 0.05, Bounce: -0.05, SizeStart: 0.012, SizeEnd: 0.003, SizeRandom: 0.4, SizeMode: 'World', Sprite: 'Glow', Glow: 0.9, ColourMode: 'Life', Palette: ['#ffffff', '#7dd3fc', '#38bdf8', '#1e3a8a'], Flicker: 0.1, Blend: 'Additive', Style: 'Point', Brightness: 1.6, StartTime: 0.3, Duration: 0.06, Fade: 0.02, Repeat: 1.5 },
+    },
+    {
+        Id: 'electric-sparks', Name: 'Electric Sparks', Category: 'Emitters', Icon: 'electric', Tint: '#e0f2fe',
+        Summary: 'Short-lived violent arcs: star sprites, hard flicker, jittery turbulence, white-blue.',
+        Defaults: { Mode: 'Emit', Shape: 'Sphere', Radius: 0.12, Count: 2048, Rate: 30, Lifetime: 0.35, Linger: 0.1, Speed: 6, Spread: 1.0, Gravity: 2, Drag: 2.5, Noise: 4, NoiseScale: 3.5, NoiseSpeed: 2, Bounce: 0.4, SizeStart: 0.02, SizeEnd: 0.004, SizeRandom: 0.7, SizeMode: 'World', Sprite: 'Star', Glow: 1.2, ColourMode: 'Life', Palette: ['#ffffff', '#e0f2fe', '#60a5fa'], Flicker: 1.0, Blend: 'Additive', Style: 'Streak', Brightness: 2.0 },
+    },
+    {
         Id: 'sparks', Name: 'Sparks', Category: 'Emitters', Icon: 'sparks', Tint: '#ffb454',
         Summary: 'Hot ballistic sparks that streak, cool and fall.',
         Defaults: { Mode: 'Emit', Shape: 'Point', Radius: 0.1, Count: 4096, Rate: 18, Lifetime: 1.4, Speed: 4.5, Spread: 0.55, Direction: [0, 1, 0], Gravity: 6, Drag: 0.6, Noise: 0.4, Bounce: 0.2, SizeStart: 3.5, SizeEnd: 1.0, ColourMode: 'Life', Palette: ['#fff3c4', '#ffb454', '#ff5a1f', '#b3120a'], BrightnessJitter: 0.3, Blend: 'Additive', Style: 'Streak' },
@@ -110,6 +135,11 @@ export const ParticleTemplates = Object.freeze([
         Defaults: { Mode: 'Emit', Shape: 'Disc', Radius: 0.12, Count: 8192, Rate: 25, Lifetime: 3, Speed: 6.5, Spread: 0.12, Direction: [0, 1, 0], Gravity: 9.8, Drag: 0.2, Noise: 0.2, Bounce: 0.15, SizeStart: 2.5, SizeEnd: 2.0, ColourMode: 'Speed', RampSource: 'Palette', Palette: ['#1d6fa8', '#38bdf8', '#bfe9ff', '#ffffff'], Blend: 'Alpha', Style: 'Streak' },
     },
     {
+        Id: 'galaxy-disc', Name: 'Galaxy Disc', Category: 'Cloners', Icon: 'galaxy', Tint: '#c4b5fd',
+        Summary: 'Sixteen thousand points on a sunflower disc with a gentle dissolve — add a Rigid Spin or Vortex gizmo and it becomes a spiral galaxy.',
+        Defaults: { Mode: 'Cloner', Shape: 'Disc', Radius: 2.2, Direction: [0, 1, 0], Count: 16384, Spring: 1.2, Damping: 0.8, Dissolve: 0.12, NoiseScale: 0.6, NoiseSpeed: 0.05, FieldInfluence: 1, Gravity: 0, Drag: 0, Noise: 0, SizeStart: 0.008, SizeEnd: 0.008, SizeRandom: 0.9, SizeMode: 'World', Sprite: 'Glow', Glow: 0.5, FocusDistance: 7, Aperture: 0.3, ColourMode: 'Displacement', RampSource: 'Palette', Palette: ['#fff7ed', '#c4b5fd', '#60a5fa', '#312e81'], DisplacementRange: 1.2, BrightnessJitter: 0.6, Flicker: 0.3, Blend: 'Additive', Style: 'Point', Brightness: 1.2 },
+    },
+    {
         Id: 'grid-cloner', Name: 'Grid Cloner', Category: 'Cloners', Icon: 'gridcloner', Tint: '#a78bfa',
         Summary: 'Lattice of points held by springs — forces push it, colour shows the displacement.',
         Defaults: { Mode: 'Cloner', Shape: 'Grid', Radius: 1.6, Count: 4096, Spring: 7, Damping: 3.5, FieldInfluence: 1.0, GasInfluence: 0.0, Gravity: 0, Drag: 0, Noise: 0, SizeStart: 4.0, SizeEnd: 4.0, ColourMode: 'Displacement', RampSource: 'Palette', Palette: ['#8b7cf6', '#38bdf8', '#34c759', '#ffb454', '#f472b6'], DisplacementRange: 0.8, Blend: 'Alpha', Style: 'Point' },
@@ -128,6 +158,16 @@ export const ParticleTemplates = Object.freeze([
         Id: 'line-cloner', Name: 'Line Cloner', Category: 'Cloners', Icon: 'linecloner', Tint: '#38bdf8',
         Summary: 'Row of clones along the axis — a wave-table that reacts to every gizmo you drag through it.',
         Defaults: { Mode: 'Cloner', Shape: 'Line', Radius: 2.2, Count: 256, Spring: 10, Damping: 3, FieldInfluence: 1.0, GasInfluence: 0.0, Gravity: 0, Drag: 0, Noise: 0, SizeStart: 7.0, SizeEnd: 7.0, ColourMode: 'Displacement', RampSource: 'Palette', Palette: ['#38bdf8', '#a78bfa', '#f472b6'], DisplacementRange: 0.5, Blend: 'Alpha', Style: 'Point' },
+    },
+    {
+        Id: 'bubbles', Name: 'Bubbles', Category: 'Environment', Icon: 'bubbles', Tint: '#a5f3fc',
+        Summary: 'Buoyant bokeh rings wobbling upward (negative gravity) and popping at the top.',
+        Defaults: { Mode: 'Emit', Shape: 'Disc', Radius: 1.2, Direction: [0, 1, 0], Count: 1024, Rate: 1.5, Lifetime: 7, Linger: 0.2, Speed: 0.3, Spread: 0.3, Gravity: -1.2, Drag: 1.6, Noise: 0.6, NoiseScale: 1.5, NoiseSpeed: 0.6, GasInfluence: 0.8, Bounce: -0.05, SizeStart: 0.015, SizeEnd: 0.05, SizeRandom: 0.8, SizeMode: 'World', Sprite: 'Bokeh', Glow: 0.2, ColourMode: 'Life', Palette: ['#ecfeff', '#a5f3fc', '#67e8f9'], Flicker: 0, Blend: 'Alpha', Style: 'Point', Brightness: 1.0 },
+    },
+    {
+        Id: 'mist-spray', Name: 'Mist Spray', Category: 'Environment', Icon: 'mist', Tint: '#e2e8f0',
+        Summary: 'Dense fine spray from a nozzle that drifts, slows and hangs in the air — droplets, not smoke.',
+        Defaults: { Mode: 'Emit', Shape: 'Disc', Radius: 0.08, Direction: [1, 0.35, 0], Count: 16384, Rate: 12, Lifetime: 5, Linger: 0.5, Speed: 4, Spread: 0.18, Gravity: 1.5, Drag: 2.2, Noise: 0.5, NoiseScale: 1.2, NoiseSpeed: 0.4, GasInfluence: 1.0, Bounce: 0.05, SizeStart: 0.004, SizeEnd: 0.009, SizeRandom: 0.7, SizeMode: 'World', Sprite: 'Glow', Glow: 0.2, ColourMode: 'Life', Palette: ['#ffffff', '#e2e8f0', '#94a3b8'], BrightnessJitter: 0.3, Blend: 'Alpha', Style: 'Point', Brightness: 0.9 },
     },
     {
         Id: 'snowfall', Name: 'Snowfall', Category: 'Environment', Icon: 'snow', Tint: '#e2e8f0',
@@ -173,6 +213,7 @@ export function createParticleSystem(templateId, overrides = {})
         NoiseSpeed: base.NoiseSpeed ?? 0.5,        // evolution speed of the turbulence field
         Speed: base.Speed ?? 2,
         Spread: base.Spread ?? 0.5,                // 0 = all along Direction, 1 = fully random
+        Radial: base.Radial ?? 0,                  // blend launch direction toward 'outward from the shape origin'
         Gravity: base.Gravity ?? 0,
         Drag: base.Drag ?? 0.5,
         Noise: base.Noise ?? 0,                    // curl-noise wander strength

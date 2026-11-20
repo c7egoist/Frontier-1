@@ -191,6 +191,7 @@ export class ParticleSimulation
             gl.uniform1f(uniforms.uLifetime, Math.max(0.05, node.Lifetime));
             gl.uniform1f(uniforms.uSpeed, node.Speed);
             gl.uniform1f(uniforms.uSpread, node.Spread);
+            gl.uniform1f(uniforms.uRadial, node.Radial);
             gl.uniform1f(uniforms.uGravity, node.Gravity);
             gl.uniform1f(uniforms.uDrag, node.Drag);
             gl.uniform1f(uniforms.uNoise, node.Noise);

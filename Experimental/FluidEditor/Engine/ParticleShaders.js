@@ -94,6 +94,7 @@ uniform float uRate;
 uniform float uLifetime;
 uniform float uSpeed;
 uniform float uSpread;
+uniform float uRadial;
 uniform float uGravity;
 uniform float uDrag;
 uniform float uNoise;
@@ -148,7 +149,10 @@ void main()
             vec3 rnd = vec3(Hash31(vec3(pixel, uTime + 1.3)), Hash31(vec3(pixel.yx, uTime + 2.9)), Hash31(vec3(pixel + 7.0, uTime + 4.1)));
             position = ShapePoint(index, rnd, false);
             vec3 random = RandomDirection(vec3(pixel, uTime + 8.8));
-            velocity = normalize(mix(uAxis, random, uSpread) + 1e-4) * uSpeed * (0.75 + 0.5 * Hash31(vec3(pixel, uTime + 6.6)));
+            vec3 outward = position - uOrigin;
+            outward = length(outward) > 1e-4 ? normalize(outward) : random;
+            vec3 launch = normalize(mix(uAxis, outward, uRadial) + 1e-4);
+            velocity = normalize(mix(launch, random, uSpread) + 1e-4) * uSpeed * (0.75 + 0.5 * Hash31(vec3(pixel, uTime + 6.6)));
             age = 0.0;
             alive = true;
         }
