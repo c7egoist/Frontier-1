@@ -1,7 +1,7 @@
 /*============================================================================================================================================
                                                         FRAMETIMINGTELEMETRY.H
 ============================================================================================================================================*/
-// 🧩 Per-stage CPU/GPU timing breakdown and debug timing log utilities for Frontier diagnostics
+// 🧩 Per-stage CPU/GPU timing breakdown with shutdown-only persistence path for Frontier diagnostics
 
 #pragma once
 
@@ -10,9 +10,7 @@
 //------------------------------------------------------------------------------------------------------------------------
 
 #include <cstdint>
-#include <cstdio>
 #include <filesystem>
-#include <fstream>
 #include <string>
 
 namespace Frontier
@@ -34,7 +32,7 @@ struct ViewportTimingBreakdown
     bool        GpuTimestampsValid  = false; // [-]   - True when VkQueryPool timestamps populated GPU pass times
     bool        WorldDispatched     = false; // [-]   - True when world compute pipeline executed this frame
     std::string AdapterName         { "Unknown" }; // [-] - Active Vulkan adapter name
-    std::string TimingLogPath       { "FrontierTiming.log" }; // [-] - Debug log file path
+    std::string TimingLogPath       { "SessionOutput/ThoughtLog.md" }; // [-] - Shutdown-only ledger report path
 
     // End-to-end host frame stages [ms]
     float TotalFrameMs              = 0.0f;  // [ms] - Full frame wall-clock delta
@@ -79,57 +77,6 @@ struct ViewportTimingBreakdown
     case 4u: return "RayQuery";
     default: return "Unknown";
     }
-}
-
-inline void InitializeTimingLogFile(const std::filesystem::path& LogPath, std::string_view AdapterName, bool HwGpu)
-{
-    std::ofstream Out(LogPath, std::ios::trunc);
-    if (!Out)
-    {
-        return;
-    }
-    Out << "# Frontier Per-Stage Timing Log\n";
-    Out << "# Adapter: " << AdapterName << " | HardwareGPU: " << (HwGpu ? "YES" : "NO") << "\n";
-    Out << "# Columns: Frame | FPS | TotalMs | Engine | Shadow | Res | WorldGpuTotalMs | SkyLutMs | CloudsMs | TraceMs | DenoiseMs | CopyMs | HostWaitMs | SceneSyncMs | TickMs | GizmoMs | UiBuildMs | PresentMs\n";
-}
-
-inline void AppendTimingLogLine(const std::filesystem::path& LogPath, const ViewportTimingBreakdown& T, const char* ReasonTag = "SAMPLE")
-{
-    std::ofstream Out(LogPath, std::ios::app);
-    if (!Out)
-    {
-        return;
-    }
-    const float Fps = (T.TotalFrameMs > 0.01f) ? (1000.0f / T.TotalFrameMs) : 0.0f;
-    char Line[512]{};
-    std::snprintf(
-        Line,
-        sizeof(Line),
-        "[%s] F=%llu | %5.1f fps | Total=%6.2f ms | %s/%s Q%u | %ux%u | "
-        "GPU(Tot=%5.2f Sky=%4.2f Cld=%4.2f Trc=%5.2f Den=%4.2f Cpy=%4.2f HostWait=%5.2f) | "
-        "SceneSync=%5.2f Tick=%4.2f Gizmo=%4.2f UI=%4.2f Present=%5.2f\n",
-        ReasonTag != nullptr ? ReasonTag : "SAMPLE",
-        static_cast<unsigned long long>(T.FrameIndex),
-        Fps,
-        T.TotalFrameMs,
-        QueryEngineShortLabel(T.EngineMode),
-        QueryShadowShortLabel(T.ShadowAlgorithm),
-        T.QualityTier,
-        T.RenderWidthPx,
-        T.RenderHeightPx,
-        T.GpuTotalPassMs,
-        T.GpuSkyLutMs,
-        T.GpuCloudsMs,
-        T.GpuPrimaryTraceMs,
-        T.GpuDenoiseMs,
-        T.GpuReadbackCopyMs,
-        T.GpuHostSubmitWaitMs,
-        T.SceneSyncGpuMs,
-        T.EditorTickMs,
-        T.GizmoOverlayMs,
-        T.DesktopPollAndUiMs,
-        T.SwapchainPresentMs);
-    Out << Line;
 }
 
 } // namespace Frontier

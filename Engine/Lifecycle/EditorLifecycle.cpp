@@ -9,6 +9,7 @@
 #if FRONTIER_EDITOR_ENABLED
 
 #include "Engine/Components/Controls/CapsuleButton.h"
+#include "Engine/Threading/Diagnostics/ExecutionTimingLedger.h"
 
 #include <imgui.h>
 
@@ -36,6 +37,7 @@ bool EditorLifecycle::Initialize(const EditorStartupConfiguration& Configuration
     TerminationRequested = false;
     CurrentStepSeconds   = 1.0 / 60.0;
     EditorCameraLag.Configure(0.09f, 0.07f, 2.50f);
+    Threading::ExecutionTimingLedger::Instance().ConfigureOutputPath(LatestViewportTiming.TimingLogPath);
 
     if (!DockContainer.Initialize(StartupConfig.WindowDescriptor))
     {
@@ -2322,22 +2324,28 @@ void EditorLifecycle::RecordFramePresentationTiming(
         Panes->Viewport.ConfigureViewportTimingBreakdown(LatestViewportTiming);
     }
 
-    if (!TimingLogInitialized)
+    // 💡 Every stage is buffered in RAM by a background-fed ledger; no per-frame file I/O stalls the authoring loop.
+    auto& Ledger = Threading::ExecutionTimingLedger::Instance();
+    Ledger.AppendTiming("Frame.Total", TotalFrameMs, TimingFrameCounter);
+    Ledger.AppendTiming("Frame.DesktopPollAndUi", DesktopPollAndUiMs, TimingFrameCounter);
+    Ledger.AppendTiming("Frame.EditorTick", LatestViewportTiming.EditorTickMs, TimingFrameCounter);
+    Ledger.AppendTiming("Frame.SceneSyncGpu", LatestViewportTiming.SceneSyncGpuMs, TimingFrameCounter);
+    Ledger.AppendTiming("Frame.GizmoOverlay", LatestViewportTiming.GizmoOverlayMs, TimingFrameCounter);
+    Ledger.AppendTiming("Frame.SwapchainPresent", SwapchainPresentMs, TimingFrameCounter);
+    Ledger.AppendTiming("Gpu.TotalPass", LatestViewportTiming.GpuTotalPassMs, TimingFrameCounter);
+    Ledger.AppendTiming("Gpu.SkyLut", LatestViewportTiming.GpuSkyLutMs, TimingFrameCounter);
+    Ledger.AppendTiming("Gpu.Clouds", LatestViewportTiming.GpuCloudsMs, TimingFrameCounter);
+    Ledger.AppendTiming("Gpu.PrimaryTrace", LatestViewportTiming.GpuPrimaryTraceMs, TimingFrameCounter);
+    Ledger.AppendTiming("Gpu.Denoise", LatestViewportTiming.GpuDenoiseMs, TimingFrameCounter);
+    Ledger.AppendTiming("Gpu.ReadbackCopy", LatestViewportTiming.GpuReadbackCopyMs, TimingFrameCounter);
+    Ledger.AppendTiming("Gpu.HostSubmitWait", LatestViewportTiming.GpuHostSubmitWaitMs, TimingFrameCounter);
+    if (TimingFrameCounter == 1ull)
     {
-        InitializeTimingLogFile(
-            LatestViewportTiming.TimingLogPath,
-            LatestViewportTiming.AdapterName,
-            LatestViewportTiming.HardwareGpuActive);
-        TimingLogInitialized = true;
-    }
-
-    const bool LogStartup = (TimingFrameCounter <= 5ull);
-    const bool LogPeriodic = (TimingFrameCounter % 60ull) == 0ull;
-    const bool LogSpike = (TotalFrameMs > 30.0f) || (LatestViewportTiming.SceneSyncGpuMs > 10.0f);
-    if (LogStartup || LogPeriodic || LogSpike)
-    {
-        const char* Tag = LogStartup ? "INIT" : (LogSpike ? "SPIKE" : "SAMPLE");
-        AppendTimingLogLine(LatestViewportTiming.TimingLogPath, LatestViewportTiming, Tag);
+        Ledger.AppendNote(
+            "Session.Adapter",
+            "Adapter=" + LatestViewportTiming.AdapterName +
+                " HardwareGpu=" + (LatestViewportTiming.HardwareGpuActive ? "yes" : "no"),
+            TimingFrameCounter);
     }
 }
 
@@ -2517,6 +2525,7 @@ void EditorLifecycle::Finalize() noexcept
     if (!Initialized)
     {
         EditorSequence.Finalize();
+        Threading::ExecutionTimingLedger::Instance().PersistAndStop(LatestViewportTiming.TimingLogPath);
         return;
     }
 
@@ -2555,6 +2564,7 @@ void EditorLifecycle::Finalize() noexcept
     InspectorPaneToken   = {};
     Initialized          = false;
     TerminationRequested = false;
+    Threading::ExecutionTimingLedger::Instance().PersistAndStop(LatestViewportTiming.TimingLogPath);
 }
 
 void EditorLifecycle::ConfigureEditorCameraLag(float EyeLagSeconds, float TargetLagSeconds) noexcept

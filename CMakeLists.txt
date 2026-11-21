@@ -857,6 +857,7 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/Lifecycle/ProjectExecutionRunner.cpp
     Engine/Workspaces/WorkspaceCapabilityRegister.cpp
     Engine/Windowing/PlatformWindowStub.cpp
+    Engine/Threading/Diagnostics/ExecutionTimingLedger.cpp
     Engine/Threading/Sync/ThreadProgressionTracker.cpp
     Engine/Threading/Tasks/TaskChannel.cpp
     Engine/Threading/Tasks/ExecutionChannels.cpp

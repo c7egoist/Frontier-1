@@ -232,7 +232,6 @@ private:
     double                                     CurrentStepSeconds     = 0.016;// [s]     - Active authoring step passed to pane presenters
     uint32_t                                   RegisteredGpuOverlays = 0u;   // [count] - Registered GPU .slang viewport overlay hooks
     ViewportTimingBreakdown                       LatestViewportTiming      {};     // [ms]    - Latest per-stage GPU/CPU telemetry
-    bool                                       TimingLogInitialized   = false;
     uint64_t                                   TimingFrameCounter     = 0ull;
     bool                                       Initialized            = false;// [-]     - True between Initialize and Finalize
     bool                                       TerminationRequested   = false;// [-]     - Latch stopping authoring loop
