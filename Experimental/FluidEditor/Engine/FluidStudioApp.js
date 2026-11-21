@@ -161,6 +161,8 @@ export class FluidStudioApp
         Object.assign(this.scene.Visualizers.Volume, preset.Look || {});
         this.particles.resetAll();
         for (const [key, overrides] of Object.entries(preset.Visualizers || {})) Object.assign(this.scene.Visualizers[key], overrides);
+        // Debug overlays never come on by themselves: presets may tune them, only the user switches them on.
+        for (const [key, visualizer] of Object.entries(this.scene.Visualizers)) if (key !== 'Volume') visualizer.Visible = false;
         this.applyDomainResolution();
         this.camera.frame(this.solver.domainHalfExtent, this.solver.domainCentre);
         this.selection = this.scene.Forces[0] ? this.scene.Forces[0].Id : 'domain';

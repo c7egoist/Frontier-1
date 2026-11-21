@@ -496,6 +496,8 @@ export function mountStudioUI({ app, refs })
             element('p', 'note', 'Following slides the window across the world grid by whole tiles whenever the target enters a neighbouring tile. The fields are moved by an exact cell offset, so smoke already laid down keeps simulating in place — nothing is clipped at the old box. Use 3 × 1 × 3 tiles with an Emitter on a Straight or Slalom path for an endless drift run.'),
         ]));
         host.appendChild(card('Dynamics', 'Per second', [
+            slider(domain, 'ForceScale', 'Force generator scale', 0, 2, 0.05, '×'),
+            element('p', 'note', 'Global multiplier on every force generator in the scene — turn it down when gizmos overpower a delicate plume.'),
             slider(domain, 'Buoyancy', 'Thermal buoyancy', 0, 4, 0.05),
             slider(domain, 'Gravity', 'Smoke weight', 0, 2, 0.05),
             slider(domain, 'Vorticity', 'Vorticity confinement', 0, 2, 0.01),

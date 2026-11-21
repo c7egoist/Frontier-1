@@ -412,7 +412,7 @@ export class FluidSolver
     //                                                  UNIFORM PACKING
     //------------------------------------------------------------------------------------------------------------------------
 
-    packForces(forces)
+    packForces(forces, scale = 1)
     {
         const arrays = this.forceArrays;
         let count = 0;
@@ -423,7 +423,7 @@ export class FluidSolver
             const envelope = timingEnvelope(force, this.time);
             const offset = count * 4;
             arrays.a.set([force.Position[0], force.Position[1], force.Position[2], force.Radius], offset);
-            arrays.b.set([force.Direction[0], force.Direction[1], force.Direction[2], force.Strength * envelope], offset);
+            arrays.b.set([force.Direction[0], force.Direction[1], force.Direction[2], force.Strength * envelope * scale], offset);
             arrays.c.set([type.Code, Math.max(0, FalloffCurves.indexOf(force.Falloff)), force.Frequency, force.Secondary], offset);
             arrays.d.set([force.Tertiary || 0, 0, 0, 0], offset);
             count += 1;
@@ -589,7 +589,7 @@ export class FluidSolver
         const domain = scene.Domain;
         this.statistics.passes = 0;
         if (this.sparse) this.scheduleTiles(scene);
-        this.packForces(scene.Forces);
+        this.packForces(scene.Forces, domain.ForceScale ?? 1);
         this.packEmitters(scene.Emitters);
         this.packColliders(scene.Colliders);
         gl.disable(gl.BLEND);
