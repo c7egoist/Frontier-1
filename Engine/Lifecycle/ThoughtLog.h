@@ -1,7 +1,7 @@
 /*============================================================================================================================================
                                                             THOUGHTLOG.H
 ============================================================================================================================================*/
-// 🧠 In-memory timing "thought log": instrumented scopes write samples into a RAM ring buffer only.
+// 🧩 In-memory timing "thought log": instrumented scopes write samples into a RAM ring buffer only.
 //    A background aggregator thread folds samples into per-name statistics (still RAM only — no disk I/O
 //    while the application runs). The report file is written exactly once, when the application closes
 //    (explicit ThoughtLog::Shutdown() at host exit, with an atexit fallback), and the log then closes.
@@ -13,6 +13,7 @@
 #include <filesystem>
 
 //------------------------------------------------------------------------------------------------------------------------
+//                                                       NAMESPACE
 //------------------------------------------------------------------------------------------------------------------------
 namespace Frontier::Diagnostics
 {

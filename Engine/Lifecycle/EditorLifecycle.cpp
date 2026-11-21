@@ -568,6 +568,50 @@ void EditorLifecycle::PopulateWorldSceneSession(uint32_t RenderWidthPx, uint32_t
     RefreshShowcaseViewportRaster();
 }
 
+void EditorLifecycle::ConfigureEditorCameraLag(Components::CameraLagConfiguration Configuration) noexcept
+{
+    EditorCameraLag.Configure(Configuration);
+    DisplayCameraPrimed = false;
+}
+
+const GeometricRaster::PerspectiveCameraBasis& EditorLifecycle::QueryDisplayEditorCamera() const noexcept
+{
+    if (DisplayCameraPrimed)
+    {
+        return DisplayEditorCamera;
+    }
+    if (ShowcaseBundle != nullptr)
+    {
+        return ShowcaseBundle->EditorCamera;
+    }
+    static const GeometricRaster::PerspectiveCameraBasis FallbackCamera {};
+    return FallbackCamera;
+}
+
+void EditorLifecycle::SynchronizeEditorCameraLag(double DeltaSeconds) noexcept
+{
+    FRONTIER_THOUGHT_SCOPE("Editor.CameraLag");
+    if (ShowcaseBundle == nullptr)
+    {
+        return;
+    }
+
+    const GeometricRaster::PerspectiveCameraBasis& Source = ShowcaseBundle->EditorCamera;
+    if (!DisplayCameraPrimed)
+    {
+        EditorCameraLag.Reset(Source.CameraOrigin, Source.TargetPoint);
+        DisplayCameraPrimed = true;
+    }
+
+    const Components::CameraLagPose Lagged = EditorCameraLag.Advance(
+        Source.CameraOrigin,
+        Source.TargetPoint,
+        static_cast<float>(DeltaSeconds));
+    DisplayEditorCamera               = Source;
+    DisplayEditorCamera.CameraOrigin  = Lagged.Eye;
+    DisplayEditorCamera.TargetPoint   = Lagged.Target;
+}
+
 void EditorLifecycle::SynchronizeShowcaseGizmoAnchor() noexcept
 {
     WorkspaceSessionPanes* Panes = Workspaces.AccessActivePanes();
@@ -834,16 +878,17 @@ void EditorLifecycle::ProcessShowcaseViewportInteraction(
         }
     }
 
-    // 3. Unreal Engine Camera Navigation:
-    //    - RMB: 6-DOF Mouse-Look + WASD + Q (Down) + E (Up) + Shift (3x Sprint)
-    //    - LMB (when not dragging Gizmo): Drag Yaw/Horizontal-Walk + WASD + Q/E + Shift
-    //    - MMB or LMB+RMB: Truck / Pedestal Pan
+    // 3. Single Unreal-style Editor Camera Navigation Model:
+    //    - RMB: Mouse-Look + WASD + Q (Down) + E (Up) + Shift (3x Sprint) - the only mouse-flight gesture
+    //    - LMB: selection and TransformGizmo handles exclusively - never moves the camera
+    //    - MMB: Truck / Pedestal Pan
     //    - Alt+LMB: Orbit around Target, Alt+RMB: Smooth Dolly, Alt+MMB: Pan
-    //    - Wheel (with or without RMB): Fly-Speed Adjustment (never Dolly-Zoom; Dolly stays on Alt+RMB & +/- capsule)
-    //    - Shift is a Sprint modifier only: it must never switch RMB Mouse-Look into Pan or stop Fly keys
-    //    - Arrow Keys + PageUp/PageDown: Keyboard Fly
+    //    - Wheel (with or without RMB): Fly-Speed Adjustment (never Dolly-Zoom)
+    //    - Shift is a Sprint modifier only
+    //    - Arrow Keys + PageUp/PageDown: keyboard fly when no mouse gesture is held
     const bool GizmoBusy = WorldTransformGizmo.QueryDragging();
-    const bool FlyKeysPossible = !Io.WantTextInput && !GizmoBusy && (RightHeld || (LeftHeld && !AltHeld && !MiddleHeld));
+    const bool FlyKeysPossible =
+        !Io.WantTextInput && !GizmoBusy && RightHeld && !AltHeld && !LeftHeld && !MiddleHeld;
 
     // Wheel source: InputExtension snapshot and ImGui carry the same packet in the desktop host;
     // take the larger magnitude so neither path is double-counted and headless ImGui-only frames still work.
@@ -939,29 +984,6 @@ void EditorLifecycle::ProcessShowcaseViewportInteraction(
                 CameraMoved      = true;
             }
         }
-        else if (LeftHeld && !RightHeld && !MiddleHeld && !AltHeld && !Input.PrimaryPointer.Pressed)
-        {
-            // Unreal Engine LMB viewport drag: Yaw turn + horizontal ground-plane walk
-            if (std::fabs(NavDeltaX) > 0.05f || std::fabs(NavDeltaY) > 0.05f)
-            {
-                const Mathematics::Axis3D ToTarget = Cam.TargetPoint - Cam.CameraOrigin;
-                const float Dist  = std::max(0.35f, std::sqrt(Mathematics::EvaluateDot(ToTarget, ToTarget)));
-                const float Yaw   = std::atan2(Fwd.X, Fwd.Y) + NavDeltaX * 0.0040f;
-                const float Pitch = std::asin(std::clamp(Fwd.Z, -0.995f, 0.995f));
-                const float CosP  = std::cos(Pitch);
-                Fwd               = Mathematics::NormalizeAxis({ std::sin(Yaw) * CosP, std::cos(Yaw) * CosP, std::sin(Pitch) }, Fwd);
-                Right             = Mathematics::NormalizeAxis(Mathematics::EvaluateCross(Fwd, Cam.WorldUpAxis), Right);
-                Up                = Mathematics::NormalizeAxis(Mathematics::EvaluateCross(Right, Fwd), Up);
-
-                const Mathematics::Axis3D GroundFwd = Mathematics::NormalizeAxis({ Fwd.X, Fwd.Y, 0.0f }, { std::sin(Yaw), std::cos(Yaw), 0.0f });
-                const float WalkScale = 0.018f * CameraFlySpeedScalar * (ShiftHeld ? 3.0f : 1.0f);
-                const Mathematics::Axis3D WalkOffset = GroundFwd * (-NavDeltaY * WalkScale);
-                Cam.CameraOrigin = Cam.CameraOrigin + WalkOffset;
-                Cam.TargetPoint  = Cam.CameraOrigin + Fwd * Dist;
-                CameraMoved      = true;
-            }
-        }
-
         if (FlyKeysPossible)
         {
             Mathematics::Axis3D WishDir { 0.0f, 0.0f, 0.0f };
@@ -986,7 +1008,7 @@ void EditorLifecycle::ProcessShowcaseViewportInteraction(
                 CameraMoved      = true;
             }
         }
-        else if (!RightHeld && !LeftHeld && !Io.WantTextInput && !CtrlHeld && !AltHeld)
+        else if (!AnyNavButtonHeld && !Io.WantTextInput && !CtrlHeld && !AltHeld)
         {
             // Arrow-key + PageUp/PageDown viewport flight without mouse button
             Mathematics::Axis3D ArrowDir { 0.0f, 0.0f, 0.0f };
@@ -1024,27 +1046,31 @@ void EditorLifecycle::ProcessShowcaseViewportInteraction(
         Panes->Viewport.ConfigureProbeReadoutText(SpeedReadout);
     }
 
-    CameraInteractiveDrag = RightHeld || MiddleHeld || (AltHeld && LeftHeld) || WorldTransformGizmo.QueryDragging() || CameraMoved;
+    // 📝 LMB is reserved for picking and gizmo dragging: never suspend GPU gizmo picking because of a camera gesture.
+    CameraInteractiveDrag = RightHeld ||
+                            MiddleHeld ||
+                            (AltHeld && (LeftHeld || MiddleHeld)) ||
+                            WorldTransformGizmo.QueryDragging();
 
-    // 4. Gizmo & Frame-Selection Keyboard Shortcuts (when not flying RMB/LMB and not typing in text fields)
-    if (!RightHeld && !LeftHeld && !Io.WantTextInput && !CtrlHeld && !AltHeld)
+    // 4. Gizmo & Frame-Selection Keyboard Shortcuts (1..4 avoid the W/E/Q fly keys)
+    if (!AnyNavButtonHeld && !Io.WantTextInput && !CtrlHeld && !AltHeld)
     {
-        if (ImGui::IsKeyPressed(ImGuiKey_W, false))
+        if (ImGui::IsKeyPressed(ImGuiKey_1, false))
         {
             WorldTransformGizmo.ConfigureHandleFilter(Editor::GizmoHandleFilter::TranslateOnly);
             GizmoOverlayOnly = true;
         }
-        else if (ImGui::IsKeyPressed(ImGuiKey_E, false))
+        else if (ImGui::IsKeyPressed(ImGuiKey_2, false))
         {
             WorldTransformGizmo.ConfigureHandleFilter(Editor::GizmoHandleFilter::RotateOnly);
             GizmoOverlayOnly = true;
         }
-        else if (ImGui::IsKeyPressed(ImGuiKey_R, false))
+        else if (ImGui::IsKeyPressed(ImGuiKey_3, false))
         {
             WorldTransformGizmo.ConfigureHandleFilter(Editor::GizmoHandleFilter::ScaleOnly);
             GizmoOverlayOnly = true;
         }
-        else if (ImGui::IsKeyPressed(ImGuiKey_U, false) || ImGui::IsKeyPressed(ImGuiKey_Q, false))
+        else if (ImGui::IsKeyPressed(ImGuiKey_4, false))
         {
             WorldTransformGizmo.ConfigureHandleFilter(Editor::GizmoHandleFilter::Universal);
             GizmoOverlayOnly = true;
@@ -1785,7 +1811,7 @@ void EditorLifecycle::RefreshGizmoOverlayFromCachedWorld()
         CompReq.WorldSourceView      = LastWorldImageView;
         CompReq.TargetWidthPx        = LastTargetWidthPx;
         CompReq.TargetHeightPx       = LastTargetHeightPx;
-        CompReq.Camera               = ShowcaseBundle->EditorCamera;
+        CompReq.Camera               = QueryDisplayEditorCamera();
         CompReq.Gizmo3D              = &WorldTransformGizmo;
         CompReq.DrawGizmo            = LastGizmoSlot.Valid();
         CompReq.RequestPickPatch     = !CameraInteractiveDrag && CursorInCanvas && LastGizmoSlot.Valid();
@@ -1829,7 +1855,7 @@ void EditorLifecycle::RefreshGizmoOverlayFromCachedWorld()
             ViewportRgba,
             CachedWorldWidthPx,
             CachedWorldHeightPx,
-            ShowcaseBundle->EditorCamera,
+            QueryDisplayEditorCamera(),
             WorldTransformGizmo);
     }
     const auto GizmoEnd = std::chrono::steady_clock::now();
@@ -1890,6 +1916,11 @@ void EditorLifecycle::RefreshShowcaseViewportRaster()
 
     ShowcaseBundle->EditorCamera.ViewportWidthPx  = UseGpuViewport ? TargetW : TraceW;
     ShowcaseBundle->EditorCamera.ViewportHeightPx = UseGpuViewport ? TargetH : TraceH;
+    if (DisplayCameraPrimed)
+    {
+        DisplayEditorCamera.ViewportWidthPx  = ShowcaseBundle->EditorCamera.ViewportWidthPx;
+        DisplayEditorCamera.ViewportHeightPx = ShowcaseBundle->EditorCamera.ViewportHeightPx;
+    }
 
     const uint32_t QTier = std::min(4u, DisplayCfg.QualityTier);
 
@@ -1913,7 +1944,7 @@ void EditorLifecycle::RefreshShowcaseViewportRaster()
 
     if (UseGpuViewport)
     {
-        auto TraceCam = ShowcaseBundle->EditorCamera;
+        auto TraceCam = QueryDisplayEditorCamera();
         TraceCam.ViewportWidthPx  = TraceW;
         TraceCam.ViewportHeightPx = TraceH;
         VkImageView WorldView = VK_NULL_HANDLE;
@@ -1954,7 +1985,7 @@ void EditorLifecycle::RefreshShowcaseViewportRaster()
             CompReq.WorldSourceView      = WorldView;
             CompReq.TargetWidthPx        = TargetW;
             CompReq.TargetHeightPx       = TargetH;
-            CompReq.Camera               = ShowcaseBundle->EditorCamera;
+            CompReq.Camera               = QueryDisplayEditorCamera();
             CompReq.Gizmo3D              = &WorldTransformGizmo;
             CompReq.DrawGizmo            = LastGizmoSlot.Valid();
             CompReq.RequestPickPatch     = !CameraInteractiveDrag && CursorInCanvas && LastGizmoSlot.Valid();
@@ -1987,7 +2018,7 @@ void EditorLifecycle::RefreshShowcaseViewportRaster()
         RenderedOnGpu = GpuWorldRenderer->RenderWorldViewportWithEngine(
             RenderConfig,
             0u,
-            ShowcaseBundle->EditorCamera,
+            QueryDisplayEditorCamera(),
             ShowcaseBundle->Scene,
             CleanWorldRgba);
         if (RenderedOnGpu)
@@ -2007,8 +2038,8 @@ void EditorLifecycle::RefreshShowcaseViewportRaster()
         }
         auto CpuOutput = ShowcaseRenderer->RenderWorldFrameWithEngine(
             RenderConfig,
-            ShowcaseBundle->EditorCamera,
-            ShowcaseBundle->EditorCamera,
+            QueryDisplayEditorCamera(),
+            QueryDisplayEditorCamera(),
             ShowcaseBundle->Scene);
         OutWidthPx     = CpuOutput.WidthPx;
         OutHeightPx    = CpuOutput.HeightPx;
@@ -2029,7 +2060,7 @@ void EditorLifecycle::RefreshShowcaseViewportRaster()
                 CleanWorldRgba,
                 OutWidthPx,
                 OutHeightPx,
-                ShowcaseBundle->EditorCamera,
+                QueryDisplayEditorCamera(),
                 WorldTransformGizmo);
         }
         const auto GizmoEnd = std::chrono::steady_clock::now();
@@ -2108,6 +2139,7 @@ bool EditorLifecycle::ExecuteExternalDesktopTick(double Δt)
     const double MaxStep  = StartupConfig.MaximumStep > 0.0 ? StartupConfig.MaximumStep : 0.100;
     const double SafeStep = (std::isfinite(Δt) && Δt > 0.0) ? std::min(Δt, MaxStep) : 0.0;
     CurrentStepSeconds    = SafeStep;
+    SynchronizeEditorCameraLag(SafeStep);
 
     Workspaces.Tick(SafeStep);
     if (ShowcaseBundle != nullptr)

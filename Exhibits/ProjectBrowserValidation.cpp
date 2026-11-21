@@ -568,6 +568,25 @@ int main()
             TargetAfterWheel - TargetBeforeWheel,
             TargetAfterWheel - TargetBeforeWheel);
 
+        // LMB drag must belong to picking / gizmo only: it must never engage a second camera model.
+        const Mathematics::Axis3D OriginBeforeLmb = LiveBundle->EditorCamera.CameraOrigin;
+        const Mathematics::Axis3D TargetBeforeLmb = LiveBundle->EditorCamera.TargetPoint;
+        Io.AddMousePosEvent(960.0f, 420.0f);
+        Io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+        Io.AddMousePosEvent(1000.0f, 436.0f);
+        ImGui::NewFrame();
+        EditorSession.PresentPrimaryEditorImGui(1.0 / 60.0);
+        ImGui::Render();
+        Io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+        const Mathematics::Axis3D OriginAfterLmb = LiveBundle->EditorCamera.CameraOrigin;
+        const Mathematics::Axis3D TargetAfterLmb = LiveBundle->EditorCamera.TargetPoint;
+        const float LmbOriginDriftSq = Mathematics::EvaluateDot(
+            OriginAfterLmb - OriginBeforeLmb,
+            OriginAfterLmb - OriginBeforeLmb);
+        const float LmbTargetDriftSq = Mathematics::EvaluateDot(
+            TargetAfterLmb - TargetBeforeLmb,
+            TargetAfterLmb - TargetBeforeLmb);
+
         if (NormalStepDist < 0.20f ||
             SprintStepDist < NormalStepDist * 2.5f ||
             (ZAfterE - ZBeforeE) < 0.20f ||
@@ -577,11 +596,13 @@ int main()
             SpeedAfterRmbWheel > SpeedAfterWheelUp * 0.90f ||
             SpeedAfterRmbWheel < SpeedBeforeWheel * 1.05f ||
             WheelOriginDriftSq > 1.0e-6f ||
-            WheelTargetDriftSq > 1.0e-6f)
+            WheelTargetDriftSq > 1.0e-6f ||
+            LmbOriginDriftSq > 1.0e-6f ||
+            LmbTargetDriftSq > 1.0e-6f)
         {
             std::fprintf(
                 stderr,
-                "[FAIL] Unreal Engine camera controls validation failed (NormalW=%.3f, SprintW=%.3f, dZE=%.3f, dZShiftQ=%.3f, OutBoundsStrafeSq=%.4f, SpeedBefore=%.3f, SpeedWheelUp=%.3f, SpeedRmbWheel=%.3f, WheelDriftSq=%.6f/%.6f).\n",
+                "[FAIL] Unreal Engine camera controls validation failed (NormalW=%.3f, SprintW=%.3f, dZE=%.3f, dZShiftQ=%.3f, OutBoundsStrafeSq=%.4f, SpeedBefore=%.3f, SpeedWheelUp=%.3f, SpeedRmbWheel=%.3f, WheelDriftSq=%.6f/%.6f, LmbDriftSq=%.6f/%.6f).\n",
                 NormalStepDist,
                 SprintStepDist,
                 ZAfterE - ZBeforeE,
@@ -591,7 +612,9 @@ int main()
                 SpeedAfterWheelUp,
                 SpeedAfterRmbWheel,
                 WheelOriginDriftSq,
-                WheelTargetDriftSq);
+                WheelTargetDriftSq,
+                LmbOriginDriftSq,
+                LmbTargetDriftSq);
             EditorSession.Finalize();
             ImGui::DestroyContext(Ctx);
             return 1;

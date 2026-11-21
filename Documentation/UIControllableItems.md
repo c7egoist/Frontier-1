@@ -93,7 +93,100 @@ Source: `SolarCelestialConfiguration` (`CelestialEphemerisSolver.h`).
 
 Source: `LunarBodyConfiguration` (`LunarStarfieldSequence.h`). Outliner eye controls slot 0 only.
 
-Per slot: Visible · Follow-Sky-Opposite-Sun · Surface Preset (Luna, Ember, Glacier, Sulfur,
-Shroud, Shard) · Synodic Phase (0=new … 0.5=full) · Brightness (0–6×) · Halo Glow (0–3×) ·
-Angular Diameter (0.1–180°) · Azimuth / Elevation · Surface Roll / Pitch · Has
-...[truncated 3881 chars]
+| Parameter | Range / Options |
+|---|---|
+| Visible | on/off |
+| Follow Sky Opposite Sun | on/off |
+| Surface Preset | Luna · Ember · Glacier · Sulfur · Shroud · Shard |
+| Synodic Phase | 0..1 (0/1 = new, 0.5 = full) |
+| Brightness | 0..6 x |
+| Halo Glow | 0..3 x |
+| Angular Diameter | 0.1..180 deg |
+| Azimuth / Elevation | 0..360 deg / -90..90 deg |
+| Surface Roll / Pitch | 0..360 deg / -180..180 deg |
+| Has Atmosphere | on/off |
+| Atmosphere Intensity / Thickness / Tint | 0..3 x / relative radius / LinearRGB |
+
+## 7. Stars (backend space)
+
+Source: `StarfieldConfiguration` (`LunarStarfieldSequence.h`).
+
+| Parameter | Range / Options |
+|---|---|
+| Starfield Enabled | on/off (also Outliner eye) |
+| Scintillation Enabled / Depth / Rate | on/off / 0..100 % / 0.2..3.0 Hz |
+| Limiting Magnitude | 0..8 mag |
+| Brightness / Point Size Scale | 0..4 x / 0.4..3.0 x |
+| Celestial Rotation | 0..360 deg |
+| Bright Star Catalog / Galactic Band / Zodiacal Light | on/off each |
+| Zodiacal Radiance Scale | 0..4 x |
+| Preset | Galactic Bulge · Zodiacal Light Dusk · Southern Cross Coalsack · Winter Hunter Betelgeuse · Magellanic Clouds |
+
+## 8. Atmosphere & sky (backend space)
+
+Source: `AtmosphericMediumConfiguration` (`AtmosphericSkySequence.h`).
+
+| Parameter | Range / Options | Status |
+|---|---|---|
+| Atmosphere Enabled | on/off | [UI] via Viewport toggle |
+| Rayleigh Strength | 0..4 x | [Backend] |
+| Mie Strength / Anisotropy | 0..6 x / 0..0.99 | [Backend] |
+| Ozone Strength | 0..4 x | [Backend] |
+| Rayleigh / Mie Scale Height | m | [Backend] |
+| Atmosphere Thickness / Planet Radius | m | [Backend] |
+| Limb Glow / Sky Brightness | 0..3 x / 0..3 x | [Backend] |
+| Sky Tint / Ground Albedo | LinearRGB | [Backend] |
+| Orbital View / Observer Altitude | on/off / m | [Backend] |
+
+## 9. Clouds (backend space)
+
+Source: `CloudDeckConfiguration`, `BoundedCloudVolume`, `CloudShadowConfiguration`, `LensFlareConfiguration`
+(`VolumetricCloudSequence.h`).
+
+| Parameter | Range / Options | Status |
+|---|---|---|
+| Clouds Enabled / Follow Wind | on/off | [UI] toggle / [Backend] |
+| Cloud Type | Stratus · Stratocumulus · Cumulus · Cumulonimbus · Altostratus · Cirrus · Lenticular · Mammatus · KelvinHelmholtz · Asperitas · Nacreous · Pyrocumulus | [Backend] |
+| Cloud Fraction | 0..1 | [UI] via Cloud Cover |
+| Extinction / Feature Scale | 0..4 x / 0.2..3.0 x | [Backend] |
+| Cloud Floor / Layer Thickness / Deck Ceiling | 100..15000 m / 100..6500 m / 4000..22000 m | [Backend] |
+| Anvil Top Spread / Forward Scatter g | 0..1 / -0.9..0.9 | [Backend] |
+| Cloud March Steps | 16..128 | [Backend] |
+| Cloud Render Scale | 0.25..1 | [Backend] |
+| Wind Speed / Bearing / Shear / Veer / Turbulence | 0..40 m/s / 0..360 deg / per-km / d/km / 0..1 | [UI] speed / [Backend] rest |
+| Cloud Shadow: Enabled / Category / Fraction / Density / Scale / Anvil / Floor / Thickness | on/off + per-shadow values | [UI] enabled / [Backend] rest |
+| Local Cloud: Enabled / Shape / Prism Sides / Center / Half Extent / Yaw / Edge Softness / Extinction / Fraction / Feature Scale / Scatter | 8 GPU volumes maximum | [UI] slot 0 eye / [Backend] rest |
+| Lens Flare: Enabled / Style / Intensity / Spread / Halo / Ghost / Spacing / Count / Sides / Streak Rotation | Anamorphic · Streaks · Halos | [Backend] |
+
+## 10. Wind & fog (backend space)
+
+Sources: `AtmosphericWindParameters` (`AtmosphericWindSolver.h`), `AtmosphericFogConfiguration` (`VolumetricFogSequence.h`).
+
+- **Wind**: Enabled · Speed (0..40 m/s) · Bearing (0..360 deg) · Shear (/km) · Veer (-60..60 d/km) · Air Shear Advection · Gust Strength / Frequency · Turbulence · Steadiness.
+- **Height Fog**: Enabled · Density (0..0.2 /m) · Falloff Height (10..3000 m) · Base Altitude · Sun Scatter (0..2 x) · Height Colour · Follow Wind.
+- **Aerial Fog**: Enabled · Density Multiplier (0..4 x) · Start Distance (0..2000 m) · Mie Blend · Scale Height · Follow Wind.
+- **Local Fog Volumes**: Enabled · Follow Wind · Shape · Prism Sides · Center · Half Extent · Yaw · Edge Softness · Density · Coverage · Feature Scale · Anisotropy · Tint.
+- **God Rays**: Enabled · Intensity (0..4 x) · Anisotropy · Decay · Density · Max Distance · Sample Steps · Cloud / Fog Interaction · Shaft Tint.
+
+## 11. Camera & gizmo (editor)
+
+| Item | Control | Status |
+|---|---|---|
+| RMB Look + WASD / Q / E fly | mouse + keys | [UI] |
+| Shift Sprint (x3) / Ctrl precision (x0.3) | keys | [UI] |
+| Mouse wheel Fly Speed | 0.10..16.0 x | [UI] |
+| MMB pan, Alt+LMB orbit, Alt+RMB dolly, Alt+MMB pan | mouse modifiers | [UI] |
+| LMB pick / gizmo drag (no camera movement) | mouse | [UI] |
+| 1 Translate / 2 Rotate / 3 Scale / 4 Universal gizmo, F frame selection | keys | [UI] |
+| Camera Lag Enabled / Translation Lag / Rotation Lag / Teleport Distance | reusable `CameraLagComponent` | [Backend] via `EditorLifecycle::ConfigureEditorCameraLag` |
+| Camera FOV, near/far, sensor gate, focal length | `CameraConfiguration` | [Backend] |
+| Thin-lens DOF, motion blur, vignette, chromatic aberration, lens flare | `CameraConfiguration` GPU effects | [Backend] |
+
+## 12. Rendering, lighting & debug spaces (backend space)
+
+- **Solar shadows**: algorithm (Contact PCSS · PCSS Plane-Aware · Shadow Ray March · PCF Bilinear · WideTree RayQuery) [UI]; cascade count, penumbra filter, bias, Vogel sample count [Backend].
+- **SDF / GDF**: GDF clipmap resolution / voxel size / fine center-span, bake cadence, shadow cone aperture, SDF penumbra mode [UI mode / Backend parameters]. See `Documentation/Plans/SdfDebugAndAoAssessment.md` for the AO assessment.
+- **AO**: current GDF 4-tap AO and 3-ray BVH fallback [Backend]; XGTAO radius / bias / sample count / denoiser are proposed, not implemented yet.
+- **Direct lighting**: sun intensity / tint, area lights (4 GPU slots), photometric IES lamps, specular AO, reflection source [UI source / Backend rest].
+- **Materials**: albedo, roughness, metalness, normal, emissive, transmission, clearcoat, LTC area response — see `MaterialSpace` and the Albedo / Roughness / Metalness debug channels [UI channels / Backend values].
+- **Debug channels (12)**: Off · Depth · Albedo · Shading Nrm · Roughness · Metalness · Cluster ID · Geom Nrm · Sun Shadow · Ambient Occ · Direct Lit · Specular [UI].

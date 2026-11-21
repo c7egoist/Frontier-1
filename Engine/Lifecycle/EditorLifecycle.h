@@ -19,6 +19,7 @@
 #include "Engine/ComponentClass/ComponentWorldPlacement.h"
 #include "Engine/ComponentClass/ControlVehicleClassBuilder.h"
 #include "Engine/Components/Appearance/TypographyRepository.h"
+#include "Engine/Components/Camera/CameraLagComponent.h"
 #include "Engine/Components/ControlCentre/ControlCentrePanel.h"
 #include "Engine/Components/Diagnostics/ViewportTimingTelemetry.h"
 #include "Engine/Components/Docking/WorkspaceDockContainer.h"
@@ -126,6 +127,8 @@ public:
 
     [[nodiscard]] GeometricRaster::ShowcaseWorldSceneBundle* AccessShowcaseScene() noexcept { return ShowcaseBundle.get(); }
     [[nodiscard]] float QueryCameraFlySpeedScalar() const noexcept { return CameraFlySpeedScalar; }
+    void ConfigureEditorCameraLag(Components::CameraLagConfiguration Configuration) noexcept;
+    [[nodiscard]] const GeometricRaster::PerspectiveCameraBasis& QueryDisplayEditorCamera() const noexcept;
     [[nodiscard]] Editor::TransformGizmo&                    AccessTransformGizmo() noexcept { return WorldTransformGizmo; }
     [[nodiscard]] bool ExecuteAuthoringTick(double Δt);
     [[nodiscard]] bool ExecuteExternalDesktopTick(double Δt);
@@ -160,6 +163,7 @@ private:
     };
 
     void PopulateWorldSceneSession(uint32_t RenderWidthPx, uint32_t RenderHeightPx);
+    void SynchronizeEditorCameraLag(double DeltaSeconds) noexcept;
     void SynchronizeShowcaseGizmoAnchor() noexcept;
     void RefreshGizmoOverlayFromCachedWorld();
     void ProcessShowcaseViewportInteraction(uint32_t PaneIndex, Rectangle2D PaneBounds, const PaneInputReading& Input);
@@ -213,6 +217,9 @@ private:
     OutlinerSlotToken                                                LastGizmoSlot        {}; // [id]- Slot currently anchored by WorldTransformGizmo
     Point2D                                                          LastPointerPosition  {}; // [px]- Previous frame viewport pointer coordinate
     float                                                            CameraFlySpeedScalar = 1.0f; // [x] - Unreal RMB+Wheel dynamic fly-speed multiplier
+    Components::CameraLagComponent                                   EditorCameraLag       {}; // [-] - Reusable eye/target lag for the editor camera
+    GeometricRaster::PerspectiveCameraBasis                          DisplayEditorCamera  {}; // [-] - Lagged camera used only for viewport raster / gizmo overlay
+    bool                                                             DisplayCameraPrimed  = false;
     bool                                                             PointerTrackingValid = false;
     bool                                                             NavigationDragWasActive = false;
     bool                                                             RightMouseFlyActive  = false;

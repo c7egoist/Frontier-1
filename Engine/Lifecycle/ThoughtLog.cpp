@@ -1,7 +1,7 @@
 /*============================================================================================================================================
                                                            THOUGHTLOG.CPP
 ============================================================================================================================================*/
-// 🧠 Thought log implementation: MPSC sequence-stamped ring buffer in RAM + background aggregation thread.
+// 🧩 Thought log implementation: MPSC sequence-stamped ring buffer in RAM + background aggregation thread.
 //    Nothing touches the disk until Shutdown() flushes the aggregated report at application close.
 
 #include "Engine/Lifecycle/ThoughtLog.h"
@@ -211,11 +211,11 @@ void ThoughtLog::Initialize()
 void ThoughtLog::Shutdown()
 {
     ThoughtLogState& State = AccessState();
+    Initialize(); // No-op if already started; guarantees the RAM ring exists even if never sampled
     if (State.Closed.exchange(true, std::memory_order_acq_rel))
     {
         return; // Already closed
     }
-    Initialize(); // No-op if already started; guarantees state exists even if never sampled
     if (!State.Running.load(std::memory_order_acquire))
     {
         return;

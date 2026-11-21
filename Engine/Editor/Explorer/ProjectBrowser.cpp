@@ -753,15 +753,15 @@ bool ProjectBrowser::RegisterDiskPathInCollection(const std::filesystem::path& D
     Entry.SummaryCaption  = (Cat == BrowserEntryCategory::Cad)
                                 ? "Local Parametric CAD · Sketcher & Frontier"
                                 : (Cat == BrowserEntryCategory::Geometry)
-                                      ? "Local Geometry · UVWorkspace & Frontier"
-                                      : "Local C++20 Frontier Project · 3 Targets";
+                                      ? "Local Geometry · Frontier"
+                                      : "Local C++20 Frontier Project";
     Entry.Description     = "Mounted from local filesystem (" + DiskPath.generic_string() + ").";
     Entry.LastOpenedText  = "Just now";
     Entry.FilePath        = DiskPath;
     Entry.ViewTitles      = (Cat == BrowserEntryCategory::Cad)
                                 ? std::vector<std::string>{ "Isometric", "Front", "Drawing Sheet" }
                                 : (Cat == BrowserEntryCategory::Geometry)
-                                      ? std::vector<std::string>{ "Geometry", "UV layout", "Surface" }
+                                      ? std::vector<std::string>{ "Perspective", "Top", "Side" }
                                       : std::vector<std::string>{ "Studio", "Courtyard", "Workshop" };
     Entry.RevisionTitles  = { "Local working tree · Current" };
     Entry.Starred         = true;
@@ -1341,17 +1341,21 @@ void ProjectBrowser::RenderLibraryMode(
         Surface.Text({ RightX + 24.0f, HeaderH + 36.0f }, 12.0f, P.Ink, "Select a file to preview it.");
         Surface.Text({ RightX + 24.0f, HeaderH + 60.0f }, 10.5f, P.Muted, "Click any project or geometry tile to");
         Surface.Text({ RightX + 24.0f, HeaderH + 76.0f }, 10.5f, P.Muted, "inspect levels, notes, and revisions, or");
-        Surface.Text({ RightX + 24.0f, HeaderH + 92.0f }, 10.5f, P.Muted, "launch directly into Frontier / UVWorkspace.");
+        Surface.Text({ RightX + 24.0f, HeaderH + 92.0f }, 10.5f, P.Muted, "launch directly into Frontier.");
 
-        Surface.Text({ RightX + 24.0f, HeaderH + 134.0f }, 9.0f, P.Faint, "ACTIVE HOST WORKSPACES");
+        Surface.Text({ RightX + 24.0f, HeaderH + 134.0f }, 9.0f, P.Faint, "FRONTIER WORLD EDITOR");
         float CapY = HeaderH + 156.0f;
         for (const auto& Cap : CapabilityRegister.QueryAllCapabilities())
         {
+            if (Cap.Target != Workspaces::HostWorkspaceTarget::FrontierWorld)
+            {
+                continue; // Project Browser opens projects in Frontier only - other hosts keep their own entry points
+            }
             const Rectangle2D CapBox { RightX + 20.0f, CapY, RightW - 40.0f, 48.0f };
             Surface.FillRectangle(CapBox, P.Control, 7.0f);
             Surface.StrokeRectangle(CapBox, P.Line, 7.0f, 1.0f);
             Surface.Text({ CapBox.X + 12.0f, CapBox.Y + 9.0f }, 11.0f, P.Ink, Cap.ActionTitle.c_str());
-            Surface.Text({ CapBox.X + 12.0f, CapBox.Y + 27.0f }, 9.0f, P.Muted, Cap.Identifier == "Frontier" ? "World + Outliner + Clouds" : "Dual 2D UDIM + 3D Surface");
+            Surface.Text({ CapBox.X + 12.0f, CapBox.Y + 27.0f }, 9.0f, P.Muted, "World + Outliner + Clouds");
             CapY += 56.0f;
         }
     }
@@ -1467,12 +1471,7 @@ void ProjectBrowser::RenderReaderMode(
     {
         const auto& Cap = PermittedCaps[PermittedCaps.size() - 1u - CapIdx];
         const bool PrimaryAction = (CapIdx == PermittedCaps.size() - 1u);
-        const float BtnW =
-            (Cap.Target == Workspaces::HostWorkspaceTarget::PatternWorkspace ||
-             Cap.Target == Workspaces::HostWorkspaceTarget::StampWorkspace ||
-             Cap.Target == Workspaces::HostWorkspaceTarget::BakingWorkspace)
-                ? 172.0f
-                : ((Cap.Target == Workspaces::HostWorkspaceTarget::UVWorkspace) ? 156.0f : 138.0f);
+        const float BtnW = 138.0f; // Frontier-only launch action
         ActionRightX -= BtnW;
         const Rectangle2D LaunchRect { ActionRightX, 16.0f, BtnW, 32.0f };
 
