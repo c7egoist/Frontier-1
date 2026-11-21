@@ -19,6 +19,7 @@
 #include "Engine/ComponentClass/ComponentWorldPlacement.h"
 #include "Engine/ComponentClass/ControlVehicleClassBuilder.h"
 #include "Engine/Components/Appearance/TypographyRepository.h"
+#include "Engine/Components/Camera/CameraLagComponent.h"
 #include "Engine/Components/ControlCentre/ControlCentrePanel.h"
 #include "Engine/Components/Diagnostics/ViewportTimingTelemetry.h"
 #include "Engine/Components/Docking/WorkspaceDockContainer.h"
@@ -124,6 +125,7 @@ public:
 
     [[nodiscard]] GeometricRaster::ShowcaseWorldSceneBundle* AccessShowcaseScene() noexcept { return ShowcaseBundle.get(); }
     [[nodiscard]] float QueryCameraFlySpeedScalar() const noexcept { return CameraFlySpeedScalar; }
+    void ConfigureEditorCameraLag(float EyeLagSeconds, float TargetLagSeconds) noexcept;
     [[nodiscard]] Editor::TransformGizmo&                    AccessTransformGizmo() noexcept { return WorldTransformGizmo; }
     [[nodiscard]] bool ExecuteAuthoringTick(double Δt);
     [[nodiscard]] bool ExecuteExternalDesktopTick(double Δt);
@@ -205,6 +207,7 @@ private:
     float                                                            LastCloudWindSpeedMps  = 7.0f;
     ViewportProjectionPreset                                         LastPrimaryProjection = ViewportProjectionPreset::Perspective;
     int32_t                                                          LastRenderScalePct   = 100;
+    Components::CameraLagComponent                                   EditorCameraLag      {}; // [-] - Reusable eye/target lag applied to the editor camera
     Editor::TransformGizmo                                           WorldTransformGizmo  {}; // [-] - 13-handle 3D Slate GizmoPRO manipulator
     Mathematics::SpatialTransform                                    GizmoActiveTransform {}; // [-] - Working SpatialTransform during active drag
     OutlinerSlotToken                                                LastGizmoSlot        {}; // [id]- Slot currently anchored by WorldTransformGizmo

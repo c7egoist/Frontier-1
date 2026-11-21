@@ -35,6 +35,7 @@ bool EditorLifecycle::Initialize(const EditorStartupConfiguration& Configuration
     StartupConfig        = Configuration;
     TerminationRequested = false;
     CurrentStepSeconds   = 1.0 / 60.0;
+    EditorCameraLag.Configure(0.09f, 0.07f, 2.50f);
 
     if (!DockContainer.Initialize(StartupConfig.WindowDescriptor))
     {
@@ -343,6 +344,7 @@ void EditorLifecycle::PopulateShowcaseGallerySession(uint32_t RenderWidthPx, uin
         ShowcaseRenderer->PrepareWorldScene(ShowcaseBundle->Scene);
     }
     GeometricRaster::RegisterShowcaseGalleryInOutliner(Panes->Outliner, *ShowcaseBundle, true);
+    EditorCameraLag.Initialize(ShowcaseBundle->EditorCamera.CameraOrigin, ShowcaseBundle->EditorCamera.TargetPoint);
     Panes->Viewport.ConfigureSceneTitle(
         ActiveProjectTitle.empty() ? "Vehicle & Clear Sky" : (ActiveProjectTitle + " · Vehicle & Clear Sky"));
 
@@ -691,6 +693,17 @@ void EditorLifecycle::ProcessShowcaseViewportInteraction(
     bool GizmoDragEnded   = false;
 
     auto& Cam = ShowcaseBundle->EditorCamera;
+
+    // 💡 Input is authored against the authoritative pose; the reusable lag component presents a damped pose to the view transform.
+    EditorCameraLag.AssignTargets(Cam.CameraOrigin, Cam.TargetPoint);
+    EditorCameraLag.Advance(CurrentStepSeconds);
+    if (EditorCameraLag.QueryTeleported())
+    {
+        PointerTrackingValid = false;
+    }
+    Cam.CameraOrigin = EditorCameraLag.QuerySmoothedEye();
+    Cam.TargetPoint  = EditorCameraLag.QuerySmoothedTarget();
+
     Mathematics::Axis3D Fwd   = Mathematics::NormalizeAxis(Cam.TargetPoint - Cam.CameraOrigin, { 0.0f, 1.0f, 0.0f });
     Mathematics::Axis3D Right = Mathematics::NormalizeAxis(Mathematics::EvaluateCross(Fwd, Cam.WorldUpAxis), { 1.0f, 0.0f, 0.0f });
     Mathematics::Axis3D Up    = Mathematics::NormalizeAxis(Mathematics::EvaluateCross(Right, Fwd), { 0.0f, 0.0f, 1.0f });
@@ -716,7 +729,8 @@ void EditorLifecycle::ProcessShowcaseViewportInteraction(
         }
     }
 
-    const bool AnyNavButtonHeld = RightHeld || MiddleHeld || LeftHeld;
+    // 💡 Unreal-style navigation: RMB looks/flies, MMB pans, Alt+LMB orbits. Plain LMB is reserved for picking and gizmo handles.
+    const bool AnyNavButtonHeld = RightHeld || MiddleHeld || (AltHeld && LeftHeld);
     const float NavDeltaX       = NavigationDragWasActive ? DeltaX : 0.0f;
     const float NavDeltaY       = NavigationDragWasActive ? DeltaY : 0.0f;
     NavigationDragWasActive     = AnyNavButtonHeld;
@@ -808,15 +822,15 @@ void EditorLifecycle::ProcessShowcaseViewportInteraction(
     }
 
     // 3. Unreal Engine Camera Navigation:
-    //    - RMB: 6-DOF Mouse-Look + WASD + Q (Down) + E (Up) + Shift (3x Sprint)
-    //    - LMB (when not dragging Gizmo): Drag Yaw/Horizontal-Walk + WASD + Q/E + Shift
-    //    - MMB or LMB+RMB: Truck / Pedestal Pan
+    //    - RMB: 6-DOF Mouse-Look + WASD + Q (Down) + E (Up) + Shift (3x Sprint) — the single fly model
+    //    - LMB: Picking and GPU TransformGizmo handles only (never camera motion)
+    //    - MMB: Truck / Pedestal Pan
     //    - Alt+LMB: Orbit around Target, Alt+RMB: Smooth Dolly, Alt+MMB: Pan
     //    - Wheel (with or without RMB): Fly-Speed Adjustment (never Dolly-Zoom; Dolly stays on Alt+RMB & +/- capsule)
     //    - Shift is a Sprint modifier only: it must never switch RMB Mouse-Look into Pan or stop Fly keys
     //    - Arrow Keys + PageUp/PageDown: Keyboard Fly
     const bool GizmoBusy = WorldTransformGizmo.QueryDragging();
-    const bool FlyKeysPossible = !Io.WantTextInput && !GizmoBusy && (RightHeld || (LeftHeld && !AltHeld && !MiddleHeld));
+    const bool FlyKeysPossible = !Io.WantTextInput && !GizmoBusy && RightHeld;
 
     // Wheel source: InputExtension snapshot and ImGui carry the same packet in the desktop host;
     // take the larger magnitude so neither path is double-counted and headless ImGui-only frames still work.
@@ -851,7 +865,7 @@ void EditorLifecycle::ProcessShowcaseViewportInteraction(
                 CameraMoved      = true;
             }
         }
-        else if ((MiddleHeld && !AltHeld) || (LeftHeld && RightHeld && !AltHeld))
+        else if (MiddleHeld && !AltHeld)
         {
             if (std::fabs(NavDeltaX) > 0.01f || std::fabs(NavDeltaY) > 0.01f)
             {
@@ -912,28 +926,7 @@ void EditorLifecycle::ProcessShowcaseViewportInteraction(
                 CameraMoved      = true;
             }
         }
-        else if (LeftHeld && !RightHeld && !MiddleHeld && !AltHeld && !Input.PrimaryPointer.Pressed)
-        {
-            // Unreal Engine LMB viewport drag: Yaw turn + horizontal ground-plane walk
-            if (std::fabs(NavDeltaX) > 0.05f || std::fabs(NavDeltaY) > 0.05f)
-            {
-                const Mathematics::Axis3D ToTarget = Cam.TargetPoint - Cam.CameraOrigin;
-                const float Dist  = std::max(0.35f, std::sqrt(Mathematics::EvaluateDot(ToTarget, ToTarget)));
-                const float Yaw   = std::atan2(Fwd.X, Fwd.Y) + NavDeltaX * 0.0040f;
-                const float Pitch = std::asin(std::clamp(Fwd.Z, -0.995f, 0.995f));
-                const float CosP  = std::cos(Pitch);
-                Fwd               = Mathematics::NormalizeAxis({ std::sin(Yaw) * CosP, std::cos(Yaw) * CosP, std::sin(Pitch) }, Fwd);
-                Right             = Mathematics::NormalizeAxis(Mathematics::EvaluateCross(Fwd, Cam.WorldUpAxis), Right);
-                Up                = Mathematics::NormalizeAxis(Mathematics::EvaluateCross(Right, Fwd), Up);
-
-                const Mathematics::Axis3D GroundFwd = Mathematics::NormalizeAxis({ Fwd.X, Fwd.Y, 0.0f }, { std::sin(Yaw), std::cos(Yaw), 0.0f });
-                const float WalkScale = 0.018f * CameraFlySpeedScalar * (ShiftHeld ? 3.0f : 1.0f);
-                const Mathematics::Axis3D WalkOffset = GroundFwd * (-NavDeltaY * WalkScale);
-                Cam.CameraOrigin = Cam.CameraOrigin + WalkOffset;
-                Cam.TargetPoint  = Cam.CameraOrigin + Fwd * Dist;
-                CameraMoved      = true;
-            }
-        }
+        // 🔴 Plain LMB never moves the camera: keeping the second fly model here made GPU gizmo handles unusable.
 
         if (FlyKeysPossible)
         {
@@ -2562,6 +2555,15 @@ void EditorLifecycle::Finalize() noexcept
     InspectorPaneToken   = {};
     Initialized          = false;
     TerminationRequested = false;
+}
+
+void EditorLifecycle::ConfigureEditorCameraLag(float EyeLagSeconds, float TargetLagSeconds) noexcept
+{
+    EditorCameraLag.Configure(EyeLagSeconds, TargetLagSeconds, 2.50f);
+    if (ShowcaseBundle != nullptr)
+    {
+        EditorCameraLag.Initialize(ShowcaseBundle->EditorCamera.CameraOrigin, ShowcaseBundle->EditorCamera.TargetPoint);
+    }
 }
 
 EditorLifecycleReading EditorLifecycle::InspectReading() const noexcept

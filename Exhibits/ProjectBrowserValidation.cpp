@@ -436,6 +436,8 @@ int main()
         }
 
         // (f) Validate Unreal Engine Viewport Camera Controls: RMB + WASD + Q/E + Shift (3.0x Sprint) + Pointer Capture
+        // 📝 Disable reusable target lag here so deterministic fly-step distances remain exact; the editor enables it at runtime.
+        EditorSession.ConfigureEditorCameraLag(0.0f, 0.0f);
         EditorSession.AccessControlCentre().AccessSettings().UiScale = 1.0f;
         Drawer.SetShelfExtent(Components::ContentShelfExtent::Closed, true);
         StepEditorFrame(ImVec2(960.0f, 420.0f), false, false);
