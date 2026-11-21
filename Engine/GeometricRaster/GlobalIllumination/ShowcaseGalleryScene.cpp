@@ -1,7 +1,7 @@
 /*============================================================================================================================================
                                                            SHOWCASEGALLERYSCENE.CPP
 ============================================================================================================================================*/
-// 🧩 Canonical Architectural Cornell-Studio Gallery World Scene, EditorCamera, and OutlinerPanel bidirectional registration
+// 🧩 Validation gallery scene builder plus blank plane/sky default scene and OutlinerPanel bidirectional registration
 
 #include "Engine/GeometricRaster/GlobalIllumination/ShowcaseGalleryScene.h"
 
@@ -682,7 +682,7 @@ void BuildShowcaseGalleryScene(
         "gallery-back-wall",
         "GalleryNeutralPlaster",
         "Box · 5.60 × 0.16 × 2.90 m · Neutral Plaster",
-        "North neutral plaster backdrop closing the Cornell-Studio chamber.",
+        "North neutral plaster backdrop closing the validation gallery chamber.",
         { 0.00f, 2.35f, 0.70f },
         { 2.80f, 0.08f, 1.45f },
         SlotPlaster,

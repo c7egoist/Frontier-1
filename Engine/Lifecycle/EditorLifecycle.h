@@ -64,7 +64,7 @@ struct EditorStartupConfiguration
     std::filesystem::path ProjectSpacePath {};                                                         // [-] - Optional .projectspace persistence path
     OutlinerTitleVariant                  OutlinerHeading         = OutlinerTitleVariant::Outliner; // [-] - Outliner vs LayerStack heading
     double                                MaximumStep             = 0.100;                          // [s] - Upper Δt clamp per authoring tick
-    bool                                        PopulateShowcaseScene   = false;                          // [-] - Populate Cornell-Studio Gallery in Outliner & GTX Viewport
+    bool                                        PopulateShowcaseScene   = false;                          // [-] - Populate the blank plane/sky scene in Outliner & GTX Viewport
     GeometricRaster::VulkanInterchange*         VulkanDevice            = nullptr;                        // [-] - Optional hardware Vulkan device for GPU .slang World & Gizmo passes
     GeometricRaster::ImGuiOverlayRasterization* ImGuiPresenter          = nullptr;                        // [-] - Optional ImGui Vulkan presenter for zero-readback GPU viewport
     std::filesystem::path                       CompiledShaderDirectory {};                               // [-] - Optional CompiledShaders/ path for GPU .slang SPIR-V modules
@@ -176,7 +176,7 @@ private:
     WorkspaceLifecycle                         Workspaces             {};     // [-]     - Multi-document workspace session loop
     Input::InputExtension                      InputParticipant       {};     // [-]     - Hardware input & OS feedback participant
     LifecycleSequence                          EditorSequence         {};     // [-]     - Registered GPU .slang overlay & editor hooks
-    std::unique_ptr<GeometricRaster::ShowcaseWorldSceneBundle>       ShowcaseBundle       {}; // [-] - Mounted Cornell-Studio Gallery scene & Outliner tokens
+    std::unique_ptr<GeometricRaster::ShowcaseWorldSceneBundle>       ShowcaseBundle       {}; // [-] - Mounted blank plane/sky scene & Outliner tokens
     std::unique_ptr<GeometricRaster::TieredWorldRenderSequence>      ShowcaseRenderer     {}; // [-] - Calibrated MatCap / OpenPBR Direct world renderer
     std::unique_ptr<GeometricRaster::VulkanWorldRenderSequence>      GpuWorldRenderer     {}; // [-] - Hardware Vulkan .slang compute world render sequence
     std::unique_ptr<GeometricRaster::WorldGizmoOverlayRasterization> WorldGizmoRasterizer {}; // [-] - Vulkan .slang 3D Gizmo overlay rasterizer

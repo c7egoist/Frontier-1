@@ -1,7 +1,7 @@
 /*============================================================================================================================================
                                                             SHOWCASEGALLERYSCENE.H
 ============================================================================================================================================*/
-// 🧩 Canonical Architectural Cornell-Studio Gallery World Scene, EditorCamera, and OutlinerPanel bidirectional registration
+// 🧩 Validation gallery scene builder plus blank plane/sky default scene and OutlinerPanel bidirectional registration
 
 #pragma once
 
@@ -111,7 +111,7 @@ struct ShowcaseWorldSceneBundle
 //                                                  FUNCTION PROTOTYPES
 //------------------------------------------------------------------------------------------------------------------------
 
-// Constructs the canonical Architectural Cornell-Studio Gallery World Scene and EditorCamera (1:1 with HTML mirror)
+// Constructs the legacy multi-specimen validation gallery; the default editor and browser use BuildBlankPlaneSkyDefaultScene
 void BuildShowcaseGalleryScene(
     ShowcaseWorldSceneBundle& OutBundle,
     uint32_t                  ViewportWidthPx  = 640u,
