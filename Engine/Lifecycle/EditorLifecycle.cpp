@@ -1868,10 +1868,11 @@ void EditorLifecycle::RefreshShowcaseViewportRaster()
     RenderConfig.ReflectionSource = (DisplayCfg.ReflectionsEnabled && DisplayCfg.RaytracingEnabled && DisplayCfg.ReflectionSourceIndex == 0u)
         ? GeometricRaster::SpecularReflectionSource::WideTreeRaytrace
         : GeometricRaster::SpecularReflectionSource::SkyEnvironment;
-    RenderConfig.DebugChannel       = std::min(11u, DisplayCfg.DebugChannelIndex);
+    RenderConfig.DebugChannel       = std::min(15u, DisplayCfg.DebugChannelIndex);
     RenderConfig.QualityTier        = QTier;
     RenderConfig.ReflectionsEnabled = DisplayCfg.ReflectionsEnabled;
     RenderConfig.RaytracingEnabled  = DisplayCfg.RaytracingEnabled;
+    RenderConfig.XgtaoEnabled       = DisplayCfg.XgtaoEnabled;
 
     std::vector<uint8_t> CleanWorldRgba {};
     uint32_t             OutWidthPx     = TraceW;
@@ -2213,6 +2214,7 @@ bool EditorLifecycle::ExecuteExternalDesktopTick(double Δt)
                 DisplayCfg.SdfShadowPenumbraIndex != LastSdfPenumbraIndex ||
                 DisplayCfg.ReflectionSourceIndex != LastReflectionSource ||
                 DisplayCfg.TraceResolutionIndex != LastTraceResolutionIdx ||
+                DisplayCfg.XgtaoEnabled != LastXgtaoEnabled ||
                 DisplayCfg.ReflectionsEnabled != LastReflectionsEnabled ||
                 DisplayCfg.AntiAliasingEnabled != LastAaEnabled ||
                 DisplayCfg.RaytracingEnabled != LastRtEnabled ||
@@ -2232,6 +2234,7 @@ bool EditorLifecycle::ExecuteExternalDesktopTick(double Δt)
             LastSdfPenumbraIndex   = DisplayCfg.SdfShadowPenumbraIndex;
             LastReflectionSource   = DisplayCfg.ReflectionSourceIndex;
             LastTraceResolutionIdx = DisplayCfg.TraceResolutionIndex;
+            LastXgtaoEnabled       = DisplayCfg.XgtaoEnabled;
             LastReflectionsEnabled = DisplayCfg.ReflectionsEnabled;
             LastAaEnabled          = DisplayCfg.AntiAliasingEnabled;
             LastRtEnabled          = DisplayCfg.RaytracingEnabled;

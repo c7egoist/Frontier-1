@@ -908,6 +908,7 @@ bool VulkanWorldRenderSequence::DispatchGpuScenePrecompute(const WorldSceneSpeci
     Uniforms.SolarIrradiancePad[0]      = EffectiveSunIrrad.R;
     Uniforms.SolarIrradiancePad[1]      = EffectiveSunIrrad.G;
     Uniforms.SolarIrradiancePad[2]      = EffectiveSunIrrad.B;
+    Uniforms.SolarIrradiancePad[3]      = 0.65f; // [-] - Precompute path uses default XGTAO radius
     Uniforms.SkyRadianceBvhCount[0]     = Scene.SkyRadiance.R;
     Uniforms.SkyRadianceBvhCount[1]     = Scene.SkyRadiance.G;
     Uniforms.SkyRadianceBvhCount[2]     = Scene.SkyRadiance.B;
@@ -944,6 +945,7 @@ bool VulkanWorldRenderSequence::DispatchGpuScenePrecompute(const WorldSceneSpeci
     Uniforms.FineCascadeParams[0]     = static_cast<float>(CachedFineSunCascade.ResolutionTexels);
     Uniforms.FineCascadeParams[1]     = CachedFineSunCascade.DepthExtentMeters;
     Uniforms.FineCascadeParams[2]     = static_cast<float>(CoarseShadowOffsetTexels);
+    Uniforms.FineCascadeParams[3]     = 1.0f; // [x] - Precompute path uses default SDF AO intensity
     Uniforms.FineCascadeCenterSpan[0] = CachedFineSunCascade.CenterWorld.X;
     Uniforms.FineCascadeCenterSpan[1] = CachedFineSunCascade.CenterWorld.Y;
     Uniforms.FineCascadeCenterSpan[2] = CachedFineSunCascade.CenterWorld.Z;
@@ -1835,6 +1837,7 @@ bool VulkanWorldRenderSequence::ExecuteWorldRenderDispatch(
     Uniforms.SolarIrradiancePad[0]  = EffectiveSunIrrad.R;
     Uniforms.SolarIrradiancePad[1]  = EffectiveSunIrrad.G;
     Uniforms.SolarIrradiancePad[2]  = EffectiveSunIrrad.B;
+    Uniforms.SolarIrradiancePad[3]  = Config.XgtaoRadiusMeters;
     Uniforms.SkyRadianceBvhCount[0] = Scene.SkyRadiance.R;
     Uniforms.SkyRadianceBvhCount[1] = Scene.SkyRadiance.G;
     Uniforms.SkyRadianceBvhCount[2] = Scene.SkyRadiance.B;
@@ -1940,6 +1943,7 @@ bool VulkanWorldRenderSequence::ExecuteWorldRenderDispatch(
     Uniforms.FineCascadeParams[0] = static_cast<float>(CachedFineSunCascade.ResolutionTexels);
     Uniforms.FineCascadeParams[1] = CachedFineSunCascade.DepthExtentMeters;
     Uniforms.FineCascadeParams[2] = static_cast<float>(CoarseShadowOffsetTexels);
+    Uniforms.FineCascadeParams[3] = Config.SdfAoIntensity;
 
     Uniforms.AtmosphereMaskPad[0] = AtmoActive ? 1u : 0u;
     Uniforms.AtmosphereMaskPad[1] = AtmosphericSkySequence::SkyViewWidthPx;
@@ -1947,6 +1951,7 @@ bool VulkanWorldRenderSequence::ExecuteWorldRenderDispatch(
     Uniforms.AtmosphereMaskPad[3] =
         (Config.ReflectionsEnabled ? 0u : 2u) |
         (Config.RaytracingEnabled  ? 0u : 8u) |
+        (Config.XgtaoEnabled        ? 16u : 0u) |
         ((static_cast<uint32_t>(Config.SdfPenumbraMode) & 0x7u) << 16u) |
         ((static_cast<uint32_t>(Config.GiCandidate) & 0x3u) << 20u);
 
@@ -2483,7 +2488,7 @@ bool VulkanWorldRenderSequence::ExecuteWorldRenderDispatch(
         WriteStamp(5u, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 
         const bool ShadingDebug =
-            (Config.DebugChannel == 0u || (Config.DebugChannel >= 8u && Config.DebugChannel <= 11u));
+            (Config.DebugChannel == 0u || (Config.DebugChannel >= 8u && Config.DebugChannel <= 15u));
         const bool MultiPassSpatialDenoise =
             ShadingDebug &&
             ((EngIdx == 3u) || ((EngIdx == 1u || EngIdx == 2u) && PenumbraOrdinal >= 4u));

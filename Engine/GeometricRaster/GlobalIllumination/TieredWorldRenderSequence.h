@@ -68,9 +68,12 @@ struct WorldRenderConfiguration
     SpecularReflectionSource              ReflectionSource    = SpecularReflectionSource::WideTreeRaytrace;
     RealTimeGiCandidate                   GiCandidate         = RealTimeGiCandidate::SurfelRadiosity;
     DirectLighting::SdfShadowPenumbraMode SdfPenumbraMode     = DirectLighting::SdfShadowPenumbraMode::AnalyticSdfConePenumbra;
-    uint32_t                              DebugChannel        = 0u;   // [0..11] - 0=Lit, 1=Depth, 2=Albedo, 3=ShadingNrm, 4=Roughness, 5=Metalness, 6=ClusterId, 7=GeomNrm, 8=SunShadow, 9=AmbientOcc, 10=DirectLit, 11=Specular
+    uint32_t                              DebugChannel        = 0u;   // [0..15] - 0=Lit, 1=Depth, 2=Albedo, 3=ShadingNrm, 4=Roughness, 5=Metalness, 6=ClusterId, 7=GeomNrm, 8=SunShadow, 9=AmbientOcc, 10=DirectLit, 11=Specular, 12=SdfRaw, 13=SdfMaterial, 14=SdfNormals, 15=Xgtao
     bool                                  ReflectionsEnabled  = true; // [-]     - Specular reflection toggle
     bool                                  RaytracingEnabled   = true; // [-]     - Hardware/BVH raytracing toggle
+    bool                                  XgtaoEnabled        = false;// [-]     - Toggleable screen-space PBR occlusion (zero GI)
+    float                                 SdfAoIntensity      = 1.0f; // [x]     - Distance-field AO strength
+    float                                 XgtaoRadiusMeters   = 0.65f;// [m]     - Screen-space horizon AO search radius
     uint32_t                              QualityTier         = 1u;   // [0..4]  - Quality tier
     uint32_t                              PathTraceSamples    = 4u;   // [spp]   - Progressive/realtime sample batch when Order 3 is active
 };

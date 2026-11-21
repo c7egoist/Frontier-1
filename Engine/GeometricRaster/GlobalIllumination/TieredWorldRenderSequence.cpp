@@ -347,6 +347,11 @@ struct CpuDownsampledCloudField
     const AnalyticResolvedSurfaceSample&  Hit,
     const MaterialSpace::SurfaceMaterial& Mat) noexcept
 {
+    // 📝 SDF/XGTAO channels are GPU-buffer diagnostics; the CPU fallback shows neutral grey rather than faking a value.
+    if (DebugChannel >= 12u && DebugChannel <= 15u)
+    {
+        return { 0.5f, 0.5f, 0.5f };
+    }
     if (DebugChannel == 1u)
     {
         const float D = std::pow(std::clamp(1.0f - Mathematics::EvaluateLength(Hit.WorldPosition - CameraOrigin) / 11.0f, 0.0f, 1.0f), 1.8f);

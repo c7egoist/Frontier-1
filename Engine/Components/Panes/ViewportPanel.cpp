@@ -75,7 +75,7 @@ namespace
 
 [[nodiscard]] const char* QueryDebugChannelName(uint32_t Channel) noexcept
 {
-    constexpr std::array<const char*, 12> Names = {{
+    constexpr std::array<const char*, 16> Names = {{
         "Off",
         "Depth",
         "Albedo",
@@ -87,7 +87,11 @@ namespace
         "Sun Shadow",
         "Ambient Occ",
         "Direct Lit",
-        "Specular"
+        "Specular",
+        "SDF Distance",
+        "SDF × Material",
+        "SDF Normals",
+        "XGTAO"
     }};
     return Names[std::min<std::size_t>(Channel, Names.size() - 1u)];
 }
@@ -1070,6 +1074,7 @@ void ViewportPanel::RenderSettingsSheet(
 
     ConstructToggleRow("Reflections",         DisplaySettings.ReflectionsEnabled);
     ConstructToggleRow("Anti-aliasing",       DisplaySettings.AntiAliasingEnabled);
+    ConstructToggleRow("XGTAO (PBR AO)",      DisplaySettings.XgtaoEnabled);
     ConstructToggleRow("Raytracing",          DisplaySettings.RaytracingEnabled);
 
     // BVH4 Reflection Raytrace vs Sky Environment toggle
@@ -1382,7 +1387,7 @@ void ViewportPanel::RenderSettingsSheet(
     }
     else if (DebugDropdownOpen)
     {
-        constexpr std::array<const char*, 12> DebugOptions = {{
+        constexpr std::array<const char*, 16> DebugOptions = {{
             "Debug View: Off",
             "Debug View: Depth",
             "Debug View: Albedo",
@@ -1395,9 +1400,13 @@ void ViewportPanel::RenderSettingsSheet(
             "Debug View: Ambient Occlusion",
             "Debug View: Direct Lighting",
             "Debug View: Specular & Reflections",
+            "Debug View: SDF Signed Distance",
+            "Debug View: SDF with Materials",
+            "Debug View: SDF Normals",
+            "Debug View: XGTAO",
         }};
         const Rectangle2D DropBounds = DropdownSelector::QuerySheetBounds(DebugBtn, static_cast<uint32_t>(DebugOptions.size()));
-        const uint32_t    CurrentIdx = DisplaySettings.DebugChannelIndex % 12u;
+        const uint32_t    CurrentIdx = DisplaySettings.DebugChannelIndex % 16u;
         uint32_t          ChosenIdx  = CurrentIdx;
         if (DropdownSelector::ConstructOptionSheet(
                 Overlay,
@@ -1839,7 +1848,7 @@ void ViewportPanel::Render(
 
     if (HeaderDebugDropdownOpen)
     {
-        constexpr std::array<const char*, 12> HeaderDebugOptions = {{
+        constexpr std::array<const char*, 16> HeaderDebugOptions = {{
             "00 · Lit (Off)",
             "01 · Depth",
             "02 · Albedo",
@@ -1852,10 +1861,14 @@ void ViewportPanel::Render(
             "09 · Ambient Occlusion",
             "10 · Direct Lighting",
             "11 · Specular & Reflections",
+            "12 · SDF Distance",
+            "13 · SDF with Materials",
+            "14 · SDF Normals",
+            "15 · XGTAO",
         }};
         const Rectangle2D DropSheet = DropdownSelector::QuerySheetBounds(
             HeaderDebugButtonBounds, static_cast<uint32_t>(HeaderDebugOptions.size()));
-        const uint32_t CurIdx    = DisplaySettings.DebugChannelIndex % 12u;
+        const uint32_t CurIdx    = DisplaySettings.DebugChannelIndex % 16u;
         uint32_t       ChosenIdx = CurIdx;
         if (DropdownSelector::ConstructOptionSheet(
                 ActiveOverlay, HeaderDebugButtonBounds, HeaderDebugOptions.data(),

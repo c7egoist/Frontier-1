@@ -34,7 +34,7 @@ struct WorldViewportUniformBlock
     float4 CameraUpWidth;            // xyz = CameraUp,     w = ViewportWidth
     float4 CameraForwardHeight;      // xyz = CameraForward,w = ViewportHeight
     float4 SunDirConeTan;            // xyz = SunDirection, w = TanHalfSolarCone
-    float4 SolarIrradiancePad;       // xyz = SolarIrradiance, w = Reserved
+    float4 SolarIrradiancePad;       // xyz = SolarIrradiance, w = XGTAO search radius [m]
     float4 SkyRadianceBvhCount;      // xyz = SkyRadiance,  w = BvhEntryCount
     uint4  LightGlassMaterialDebug;  // x = AreaLightCount, y = GlassSphereCount, z = MaterialCount, w = DebugChannel
     uint4  EngineShadowReflPad;      // x = EngineMode (0..1), y = ShadowAlg (0..4), z = ReflSource (0..1), w = FrameIndex
@@ -43,7 +43,7 @@ struct WorldViewportUniformBlock
     float4 SunCascadeUpDepth;        // xyz = LightUp,      w = DepthExtentMeters
     float4 SunCascadeForwardPad;     // xyz = LightForward, w = Reserved
     float4 FineCascadeCenterSpan;    // xyz = FineCenter,   w = FineHalfSpanMeters
-    float4 FineCascadeParams;        // x = FineRes, y = FineDepthExtent, z = CoarseOffsetTexels, w = Reserved
+    float4 FineCascadeParams;        // x = FineRes, y = FineDepthExtent, z = CoarseOffsetTexels, w = SDF AO intensity
     uint4  DenoiseStepParams;        // x = StridePx, y = Flags (bit0=FinalComposite, bit1=SpatialDenoise), z = Reserved, w = FrameSequence
     GpuAreaQuadLight AreaLights[4];
     GpuGlassSphere   GlassSpheres[4];
@@ -755,6 +755,17 @@ bool IsGlobalDistanceFieldReady()
            (WorldUniforms.GlobalDistanceFineCenterSpan.w > 0.05);
 }
 
+bool IsXgtaoEnabled()
+{
+    // 📝 Bit 4 of the atmosphere flag word is reserved for screen-space PBR occlusion (no GI).
+    return (WorldUniforms.AtmosphereMaskPad[3] & 16u) != 0u;
+}
+
+float QuerySdfAoIntensity()
+{
+    return clamp(WorldUniforms.FineCascadeParams.w, 0.0, 2.0);
+}
+
 float QueryFineGdfVoxelSize()
 {
     return (2.0 * max(0.25, WorldUniforms.GlobalDistanceFineCenterSpan.w)) / float(GdfGridRes);
@@ -900,24 +911,85 @@ float TraceGlobalDistanceConeVisibility(
     return PointHard ? smoothstep(0.25, 0.75, MinVis) : (MinVis * MinVis * (3.0 - 2.0 * MinVis));
 }
 
-float EvaluateGlobalDistanceAmbientOcclusion(float3 Pos, float3 N, float3 GeomN)
+// 💡 Cosine-weighted hemisphere integration over multiple radii replaces the old four collinear taps that caused banding.
+float EvaluateGlobalDistanceAmbientOcclusion(uint2 PixelCoord, float3 Pos, float3 N, float3 GeomN)
 {
     if (!IsGlobalDistanceFieldReady()) return 1.0;
+
     float  Vox0   = QueryFineGdfVoxelSize();
     float3 StartP = Pos + GeomN * (Vox0 * 0.35);
-    float  OccSum = 0.0;
-    float  Weight = 0.52;
-    float  StepT  = Vox0 * 0.85;
-    for (uint S = 0u; S < 4u; ++S)
+    float3 UpRef  = (abs(N.z) < 0.92) ? float3(0.0, 0.0, 1.0) : float3(1.0, 0.0, 0.0);
+    float3 BasisT = normalize(cross(UpRef, N));
+    float3 BasisB = normalize(cross(N, BasisT));
+
+    const float GoldenAngle = 2.39996323;
+    float Rotation = frac(float(PixelCoord.x * 73u + PixelCoord.y * 151u)) * 6.28318531;
+    float OccSum   = 0.0;
+    float WeightSum = 0.0;
+    [loop]
+    for (uint Tap = 0u; Tap < 8u; ++Tap)
     {
-        float LocalVox = Vox0;
-        float Dist     = SampleGlobalDistanceWorld(StartP + N * StepT, LocalVox);
-        float Deficit  = saturate((StepT - max(0.0, Dist)) / max(1.0e-3, StepT));
-        OccSum += Weight * Deficit * exp(-StepT * 0.55);
-        Weight *= 0.55;
-        StepT  *= 1.85;
+        float Fi        = float(Tap);
+        float CosTheta  = sqrt(max(0.0, (Fi + 0.5) / 8.0));
+        float SinTheta  = sqrt(max(0.0, 1.0 - CosTheta * CosTheta));
+        float Phi       = Rotation + Fi * GoldenAngle;
+        float3 Dir      = BasisT * (cos(Phi) * SinTheta) + BasisB * (sin(Phi) * SinTheta) + N * CosTheta;
+        float Radius    = Vox0 * (1.6 + Fi * 1.35);
+        float LocalVox  = Vox0;
+        float Dist      = SampleGlobalDistanceWorld(StartP + Dir * Radius, LocalVox);
+        float Cone      = max(LocalVox * 0.25, Radius * 0.22);
+        float Deficit   = saturate((Radius - max(0.0, Dist) + Cone * 0.30) / max(1.0e-3, Radius + Cone));
+        float Weight    = exp(-Fi * 0.16);
+        OccSum   += Deficit * Weight;
+        WeightSum += Weight;
     }
-    return clamp(1.0 - OccSum * 0.92, 0.12, 1.0);
+
+    float Occlusion = (WeightSum > 1.0e-5) ? (OccSum / WeightSum) : 0.0;
+    float Ao = 1.0 - saturate(Occlusion * 1.35) * saturate(QuerySdfAoIntensity());
+    return clamp(Ao, 0.30, 1.0);
+}
+
+// 📝 Screen-space GTAO-style horizon occlusion: depth/normal neighbours only, no indirect light or GI contribution.
+float EvaluateXgtaoHorizonOcclusion(uint2 PixelCoord, float3 Pos, float3 N)
+{
+    if (!IsXgtaoEnabled()) return 1.0;
+
+    uint Width  = uint(WorldUniforms.CameraUpWidth.w + 0.5);
+    uint Height = uint(WorldUniforms.CameraForwardHeight.w + 0.5);
+    float3 CamOrigin = WorldUniforms.CameraOriginTanX.xyz;
+    float ViewDist = max(0.25, length(Pos - CamOrigin));
+    float Radius  = clamp(WorldUniforms.SolarIrradiancePad.w, 0.05, 4.0);
+    float TanHalf = max(0.05, WorldUniforms.CameraRightTanY.w);
+    float RadiusPx = clamp((Radius / ViewDist) * (float(Height) * 0.5) / TanHalf, 2.0, 24.0);
+
+    const float GoldenAngle = 2.39996323;
+    float Rotation = frac(float(PixelCoord.x * 37u + PixelCoord.y * 97u)) * 6.28318531;
+    float OccSum = 0.0;
+    uint  Samples = 0u;
+    [loop]
+    for (uint Tap = 0u; Tap < 8u; ++Tap)
+    {
+        float Fi  = float(Tap);
+        float Phi = Rotation + Fi * GoldenAngle;
+        float Mag = RadiusPx * (0.55 + 0.45 * frac(Fi * 0.5));
+        int2 Offset = int2(round(float2(cos(Phi), sin(Phi)) * Mag));
+        int2 Neighbour = clamp(int2(PixelCoord) + Offset, int2(0), int2(int(Width) - 1, int(Height) - 1));
+        uint NIdx = uint(Neighbour.y) * Width + uint(Neighbour.x);
+        float4 NPos = GBufPosMask[NIdx];
+        if (NPos.w < 0.0) continue;
+
+        float3 Delta = NPos.xyz - Pos;
+        float Dist = length(Delta);
+        if (Dist < 1.0e-4 || Dist > Radius * 3.0) continue;
+        float3 NDir = Delta / Dist;
+        float Horizon = saturate(dot(N, NDir) - 0.05);
+        float Falloff = exp(-Dist / max(0.05, Radius));
+        OccSum += Horizon * Falloff;
+        ++Samples;
+    }
+
+    if (Samples == 0u) return 1.0;
+    return clamp(1.0 - (OccSum / float(Samples)) * 1.6, 0.25, 1.0);
 }
 
 void QueryRadiosityMipLayout(uint MipIdx, out uint OutRes, out uint OutOffset)
@@ -2019,7 +2091,7 @@ void ShadePrimarySurfaceDemod(
     ConstructOrthonormalBasis(N, BasisT, BasisB);
     if (EngineMode <= 2u && IsGlobalDistanceFieldReady())
     {
-        OutDiffAo = EvaluateGlobalDistanceAmbientOcclusion(Hit.Position, N, Hit.GeomNormal);
+        OutDiffAo = EvaluateGlobalDistanceAmbientOcclusion(DispatchThreadID.xy, Hit.Position, N, Hit.GeomNormal);
     }
     else
     {
@@ -2565,7 +2637,7 @@ void ComputeEntry(uint3 DispatchThreadID : SV_DispatchThreadID)
     float HitDistForClouds = (BestGlassIdx >= 0) ? BestGlassT : (PrimaryHit.Hit ? PrimaryHit.Distance : 60000.0);
     float HitDistForFog    = (BestGlassIdx >= 0) ? BestGlassT : (PrimaryHit.Hit ? PrimaryHit.Distance : 3500.0);
 
-    bool UsesShadingDebug = (DebugMode >= 8u && DebugMode <= 11u);
+    bool UsesShadingDebug = (DebugMode >= 8u && DebugMode <= 15u);
     if (DebugMode != 0u && !UsesShadingDebug)
     {
         float3 DbgHdr = float3(0.0);
@@ -2872,7 +2944,14 @@ void DenoiseCompositeEntry(uint3 DispatchThreadID : SV_DispatchThreadID)
     float4 DirectBase = GBufDirectBase[PixelIdx];
     float4 SunContrib = GBufSunContrib[PixelIdx];
     float4 AlbedoPack = CenterAlb;
-    bool   UsesShadingDebug = (DebugMode >= 8u && DebugMode <= 11u);
+    bool   UsesShadingDebug = (DebugMode >= 8u && DebugMode <= 15u);
+
+    // 💡 PBR-only screen-space occlusion folds into the same AO lane as the distance-field term; no GI is introduced.
+    if (CenterPos.w > 0.0)
+    {
+        float Xgtao = EvaluateXgtaoHorizonOcclusion(DispatchThreadID.xy, CenterPos.xyz, normalize(CenterNorm.xyz));
+        OutDiffAo = min(OutDiffAo, lerp(1.0f, Xgtao, 0.85f));
+    }
 
     float3 FinalHdr = DirectBase.xyz;
     if (CenterPos.w < -0.5)
@@ -2920,6 +2999,26 @@ void DenoiseCompositeEntry(uint3 DispatchThreadID : SV_DispatchThreadID)
         float  SpecRough = clamp(SpecPack.w, 0.025, 1.0);
         float  SpecAo    = saturate(pow(NdotV + OutDiffAo, exp2(-16.0 * SpecRough - 1.0)) - 1.0 + OutDiffAo);
         FinalHdr = ApplyAcesFilmicGpu(SpecPack.xyz * SpecAo);
+    }
+    else if (CenterPos.w > 0.0 && DebugMode == 12u)
+    {
+        float VoxelSpan = QueryFineGdfVoxelSize();
+        float LocalVox = VoxelSpan;
+        float SignedDistance = SampleGlobalDistanceWorld(
+            CenterPos.xyz + normalize(CenterNorm.xyz) * VoxelSpan * 0.50, LocalVox);
+        FinalHdr = float3(saturate(0.5 + SignedDistance / max(0.02, LocalVox * 8.0) * 0.5));
+    }
+    else if (CenterPos.w > 0.0 && DebugMode == 13u)
+    {
+        FinalHdr = AlbedoPack.xyz * OutDiffAo;
+    }
+    else if (CenterPos.w > 0.0 && DebugMode == 14u)
+    {
+        FinalHdr = normalize(CenterNorm.xyz) * 0.5 + 0.5;
+    }
+    else if (CenterPos.w > 0.0 && DebugMode == 15u)
+    {
+        FinalHdr = float3(EvaluateXgtaoHorizonOcclusion(DispatchThreadID.xy, CenterPos.xyz, normalize(CenterNorm.xyz)));
     }
 
     if (DebugMode == 0u)

@@ -195,6 +195,7 @@ private:
     uint32_t                                                         LastSdfPenumbraIndex = UINT32_MAX;
     uint32_t                                                         LastReflectionSource = UINT32_MAX;
     uint32_t                                                         LastTraceResolutionIdx = UINT32_MAX;
+    bool                                                             LastXgtaoEnabled     = false;
     bool                                                             LastReflectionsEnabled = true;
     bool                                                             LastAaEnabled        = true;
     bool                                                             LastRtEnabled        = true;
