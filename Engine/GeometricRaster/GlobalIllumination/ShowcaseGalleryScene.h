@@ -123,6 +123,12 @@ void BuildVehicleClearSkyDefaultScene(
     uint32_t                  ViewportWidthPx  = 640u,
     uint32_t                  ViewportHeightPx = 336u);
 
+// Constructs the blank starter scene: Ground Plane and Clear Sky only (zero props, zero indoor luminaires)
+void BuildBlankPlaneSkyDefaultScene(
+    ShowcaseWorldSceneBundle& OutBundle,
+    uint32_t                  ViewportWidthPx  = 640u,
+    uint32_t                  ViewportHeightPx = 336u);
+
 // Loads any .WorldSpace scene hierarchy + linked .GeometrySpace/.MaterialSpace/.PhotometrySpace/.VolumetricSpace assets
 [[nodiscard]] bool LoadWorldSceneFromSpaceFile(
     const std::filesystem::path& WorldSpacePath,

@@ -376,7 +376,9 @@ ProjectScaffoldOutcome ProjectGenerator::GenerateProject(const ProjectScaffoldSp
         std::ostringstream WorldDoc {};
         WorldDoc << "# Frontier .WorldSpace Container\n"
                  << "Project = \"" << Proj << "\"\n"
-                 << "ScenePreset = \"CornellStudioGallery\"\n"
+                 << "ScenePreset = \"BlankPlaneSky\"\n"
+                 << "SkyPath = \"Content/Environment/Skies/ClearSkyDaylight.VolumetricSpace\"\n"
+                 << "GroundPlanePath = \"Content/Geometry/Primitives/GroundPlane.GeometrySpace\"\n"
                  << "RenderTier = \"Tier1GtxCalibrated\"\n"
                  << "UpAxis = \"+Z\"\n";
         if (!WriteTextArtifact(Outcome.MainWorldFile, WorldDoc.str(), Outcome.GeneratedFiles, Outcome.Diagnostic))

@@ -147,6 +147,16 @@ int main()
         return 1;
     }
 
+    const std::string GeneratedWorldText = ReadEntireFileText(Scaffold.MainWorldFile);
+    if (GeneratedWorldText.find("ScenePreset = \"BlankPlaneSky\"") == std::string::npos ||
+        GeneratedWorldText.find("GroundPlanePath") == std::string::npos ||
+        GeneratedWorldText.find("SkyPath") == std::string::npos ||
+        GeneratedWorldText.find("Cornell") != std::string::npos)
+    {
+        std::fprintf(stderr, "[FAIL] Generated MainWorld.WorldSpace must open a blank plane + sky scene.\n");
+        return 1;
+    }
+
     // 3. Validate FrontierRunShippingProjectLoop directly in-process
     double TickedTime = 0.0;
     FrontierProjectLaunchDescriptor ShipDesc {};
@@ -285,7 +295,7 @@ int main()
 
         Editor::Explorer::ProjectBrowser Browser {};
         Browser.InitializeDefaultCollection(TempBase, RepoRoot, ActiveBinDir);
-        if (Browser.QueryCollection().size() < 5u ||
+        if (Browser.QueryCollection().size() != 1u ||
             Browser.QueryCollection()[0].ThumbnailW != 264u ||
             Browser.QueryCollection()[0].ThumbnailH != 160u)
         {

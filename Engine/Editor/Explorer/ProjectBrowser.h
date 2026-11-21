@@ -135,7 +135,7 @@ public:
     void ConfigureThemePreset(ThemePreset Preset) noexcept;
     [[nodiscard]] ThemePreset QueryThemePreset() const noexcept { return ActiveTheme; }
 
-    void OpenNewProjectSheet(std::string_view InitialName = "AeroGallery", const std::filesystem::path& DestinationFolder = {});
+    void OpenNewProjectSheet(std::string_view InitialName = "NewProject", const std::filesystem::path& DestinationFolder = {});
     [[nodiscard]] Configuration::ProjectScaffoldOutcome TriggerCreateProjectFromDraft(bool LaunchImmediately);
     bool RegisterDiskPathInCollection(const std::filesystem::path& DiskPath, bool ActivateInReader = true);
     uint32_t ScanFolderForEntries(const std::filesystem::path& FolderPath);

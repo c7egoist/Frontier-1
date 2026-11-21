@@ -1351,6 +1351,73 @@ void BuildVehicleClearSkyDefaultScene(
     OutBundle.EditorCamera.ViewportHeightPx   = std::max(1u, ViewportHeightPx);
 }
 
+void BuildBlankPlaneSkyDefaultScene(
+    ShowcaseWorldSceneBundle& OutBundle,
+    uint32_t                  ViewportWidthPx,
+    uint32_t                  ViewportHeightPx)
+{
+    BuildVehicleClearSkyDefaultScene(OutBundle, ViewportWidthPx, ViewportHeightPx);
+
+    // 💡 Start from the catalogued clear-sky world, then peel off every non-ground placement so new projects open empty.
+    std::vector<ShowcaseWorldAssetEntry>          KeptObjects {};
+    std::vector<std::unique_ptr<ShowcaseGeometryAsset>> KeptAssets {};
+    std::vector<RigidClusterInstance>            KeptInstances {};
+    KeptObjects.reserve(OutBundle.Objects.size());
+    KeptAssets.reserve(OutBundle.DynamicGeometryAssets.size());
+    KeptInstances.reserve(OutBundle.Scene.ClusterInstances.size());
+
+    for (const ShowcaseWorldAssetEntry& Object : OutBundle.Objects)
+    {
+        if (ContainsCaseInsensitive(Object.StableIdentifier, "vehicle") ||
+            ContainsCaseInsensitive(Object.Title, "vehicle"))
+        {
+            continue;
+        }
+        if (Object.ClusterInstanceIndex >= OutBundle.Scene.ClusterInstances.size())
+        {
+            continue;
+        }
+        const auto* Pyramid = OutBundle.Scene.ClusterInstances[Object.ClusterInstanceIndex].PyramidAsset;
+        std::size_t AssetIndex = OutBundle.DynamicGeometryAssets.size();
+        for (std::size_t Idx = 0u; Idx < OutBundle.DynamicGeometryAssets.size(); ++Idx)
+        {
+            if (OutBundle.DynamicGeometryAssets[Idx] != nullptr &&
+                &OutBundle.DynamicGeometryAssets[Idx]->Pyramid == Pyramid)
+            {
+                AssetIndex = Idx;
+                break;
+            }
+        }
+        if (AssetIndex >= OutBundle.DynamicGeometryAssets.size())
+        {
+            continue;
+        }
+
+        ShowcaseWorldAssetEntry Kept = Object;
+        Kept.ClusterInstanceIndex    = static_cast<uint32_t>(KeptInstances.size());
+        KeptInstances.push_back(
+            { Pyramid, Kept.CenterWorld, Kept.CenterWorld, 1.0f, Kept.MaterialSlot, Kept.GlassShell });
+        KeptAssets.push_back(std::move(OutBundle.DynamicGeometryAssets[AssetIndex]));
+        KeptObjects.push_back(std::move(Kept));
+    }
+
+    OutBundle.Objects                 = std::move(KeptObjects);
+    OutBundle.DynamicGeometryAssets   = std::move(KeptAssets);
+    OutBundle.Scene.ClusterInstances  = std::move(KeptInstances);
+    OutBundle.Scene.GtxVehicleVolume  = {};
+
+    OutBundle.EditorCamera.CameraOrigin       = { 4.20f, -5.60f, 1.75f };
+    OutBundle.EditorCamera.TargetPoint        = { 0.00f,  0.00f, 0.10f };
+    OutBundle.EditorCamera.WorldUpAxis        = { 0.00f,  0.00f, 1.00f };
+    OutBundle.EditorCamera.VerticalFovRadians = 45.0f * Constants::DegToRadFloat;
+    OutBundle.EditorCamera.NearClipMeters     = 0.12f;
+    OutBundle.EditorCamera.FarClipMeters      = 500.0f;
+    OutBundle.EditorCamera.ViewportWidthPx    = std::max(1u, ViewportWidthPx);
+    OutBundle.EditorCamera.ViewportHeightPx   = std::max(1u, ViewportHeightPx);
+
+    RebuildShowcaseSceneAcceleration(OutBundle);
+}
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                           OUTLINER REGISTRATION & SYNC
 //------------------------------------------------------------------------------------------------------------------------
@@ -1411,9 +1478,9 @@ void RegisterShowcaseGalleryInOutliner(
     if (OutlinerRecordEntry* Folder = TargetOutliner.AccessEntry(InOutBundle.ShowcaseFolderToken))
     {
         Folder->FolderTint  = WorkspaceSurfaceColors::ShowcaseSage;
-        Folder->Subtitle    = (InOutBundle.Objects.size() == 2u)
-            ? "Default Scene · Vehicle & Ground Plane"
-            : "Cornell-Studio Gallery · 10 specimens";
+        Folder->Subtitle    = (InOutBundle.Objects.size() == 1u)
+            ? "Blank Scene · Ground Plane & Clear Sky"
+            : ((InOutBundle.Objects.size() == 2u) ? "Default Scene · Vehicle & Ground Plane" : "Authored Scene Geometry");
         Folder->AuthorNotes = "Scene geometry collection.";
         Folder->Expanded    = true;
     }
