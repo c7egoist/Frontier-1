@@ -159,6 +159,9 @@ struct RayHitReading
     uint   MaterialSlot;
     uint   LodLevel;       // Nanite debug: cluster hierarchy level of the hit triangle (packed in Corner0Pad.w)
     uint   ClusterOrdinal; // Nanite debug: global cluster ordinal of the hit triangle (packed in Edge01Pad.w)
+    uint   GroupOrdinal;   // Nanite debug: global simplification group ordinal (packed in Edge02Pad.w)
+    float  ErrorRatio;     // Nanite debug: selfProjectedPx / maxAllowedPx in [0..1] (packed in Normal0Pad.w)
+    float  EdgePixelDist;  // Nanite debug: approximate distance from hit point to nearest triangle edge in screen pixels
 };
 
 uint PcgNext(inout uint SeedVal)
@@ -220,8 +223,9 @@ float3 UnpackOctNormal32(uint Packed)
     return normalize(N);
 }
 
-bool IsReflectionsEnabled() { return (WorldUniforms.AtmosphereMaskPad.w & 2u) == 0u; }
-bool IsRaytracingEnabled()  { return (WorldUniforms.AtmosphereMaskPad.w & 8u) == 0u; }
+bool IsReflectionsEnabled()      { return (WorldUniforms.AtmosphereMaskPad.w & 2u) == 0u; }
+bool IsRaytracingEnabled()       { return (WorldUniforms.AtmosphereMaskPad.w & 8u) == 0u; }
+bool IsNaniteWireframeEnabled()  { return (WorldUniforms.AtmosphereMaskPad.w & 16u) != 0u; }
 
 float3 EvaluateSkyDome(float3 Dir)
 {
@@ -635,9 +639,12 @@ RayHitReading TraceSceneClosest(float3 Origin, float3 Dir, float MinT, float Max
     Res.Position      = Origin;
     Res.ShadingNormal = float3(0.0, 0.0, 1.0);
     Res.GeomNormal    = float3(0.0, 0.0, 1.0);
-    Res.MaterialSlot  = 0u;
-    Res.LodLevel      = 0u;
+    Res.MaterialSlot   = 0u;
+    Res.LodLevel       = 0u;
     Res.ClusterOrdinal = 0u;
+    Res.GroupOrdinal   = 0u;
+    Res.ErrorRatio     = 0.0;
+    Res.EdgePixelDist  = 1000.0;
 
     uint EntryCount = uint(WorldUniforms.SkyRadianceBvhCount.w + 0.5);
     if (EntryCount == 0u) return Res;
@@ -701,11 +708,24 @@ RayHitReading TraceSceneClosest(float3 Origin, float3 Dir, float MinT, float Max
                             RawGeom = -RawGeom;
                             SmoothN = -SmoothN;
                         }
-                        Res.GeomNormal    = RawGeom;
-                        Res.ShadingNormal = SmoothN;
-                        Res.MaterialSlot  = uint(N2Slot.w + 0.5);
-                        Res.LodLevel      = uint(SceneTriangles[TriIdx].Corner0Pad.w + 0.5);
+                        Res.GeomNormal     = RawGeom;
+                        Res.ShadingNormal  = SmoothN;
+                        Res.MaterialSlot   = uint(N2Slot.w + 0.5);
+                        Res.LodLevel       = uint(SceneTriangles[TriIdx].Corner0Pad.w + 0.5);
                         Res.ClusterOrdinal = uint(SceneTriangles[TriIdx].Edge01Pad.w + 0.5);
+                        Res.GroupOrdinal   = uint(SceneTriangles[TriIdx].Edge02Pad.w + 0.5);
+                        Res.ErrorRatio     = saturate(SceneTriangles[TriIdx].Normal0Pad.w);
+
+                        // Analytic screen-space edge distance in pixels (barycentric altitudes / pixel footprint)
+                        float3 Edge12      = Edge02 - Edge01;
+                        float  DoubleArea  = max(1.0e-10, length(cross(Edge01, Edge02)));
+                        float  DistSide0   = BaryUV.y * DoubleArea / max(1.0e-6, length(Edge01));
+                        float  DistSide1   = BaryUV.x * DoubleArea / max(1.0e-6, length(Edge02));
+                        float  DistSide2   = W0       * DoubleArea / max(1.0e-6, length(Edge12));
+                        float  WorldEdgeM  = min(DistSide0, min(DistSide1, DistSide2));
+                        float  VpHeight    = max(1.0, WorldUniforms.CameraForwardHeight.w);
+                        float  PixelSizeM  = max(1.0e-6, HitT * 2.0 * max(1.0e-4, WorldUniforms.CameraRightTanY.w) / VpHeight);
+                        Res.EdgePixelDist  = WorldEdgeM / PixelSizeM;
                     }
                 }
             }
@@ -2775,17 +2795,40 @@ void ComputeEntry(uint3 DispatchThreadID : SV_DispatchThreadID)
                 float FormShade = 0.30 + 0.70 * saturate(dot(PrimaryHit.GeomNormal, WorldUniforms.SunDirConeTan.xyz) * 0.5 + 0.5);
                 DbgHdr = LevelColor * FormShade;
             }
-            else if (DebugMode == 18u)
+            else if (DebugMode == 18u || DebugMode == 19u)
             {
-                // Nanite Cluster ID: one vivid colour per cluster so cluster granularity is visible
-                uint CId = PrimaryHit.ClusterOrdinal + 1u;
-                float H1 = frac(float(CId) * 0.3819660113);
-                float H2 = frac(float(CId) * 0.6180339887 + 0.27);
-                float H3 = frac(float(CId) * 0.7548776662 + 0.53);
-                float3 ClusterColor = float3(H1, H2, H3);
-                ClusterColor /= max(ClusterColor.r, max(ClusterColor.g, ClusterColor.b));
+                // Nanite Cluster ID (18) or Simplification Group ID (19): one vivid colour per cluster / group
+                uint SeedId = ((DebugMode == 19u) ? PrimaryHit.GroupOrdinal : PrimaryHit.ClusterOrdinal) + 1u;
+                float H1 = frac(float(SeedId) * 0.3819660113);
+                float H2 = frac(float(SeedId) * 0.6180339887 + 0.27);
+                float H3 = frac(float(SeedId) * 0.7548776662 + 0.53);
+                float3 KeyColor = float3(H1, H2, H3);
+                KeyColor /= max(KeyColor.r, max(KeyColor.g, KeyColor.b));
                 float FormShade = 0.35 + 0.65 * saturate(dot(PrimaryHit.GeomNormal, WorldUniforms.SunDirConeTan.xyz) * 0.5 + 0.5);
-                DbgHdr = ClusterColor * FormShade;
+                DbgHdr = KeyColor * FormShade;
+            }
+            else if (DebugMode == 20u)
+            {
+                // Nanite Error Budget (GeometryCompiler errorBudgetColor parity): cool green -> amber -> hot red
+                float U = saturate(PrimaryHit.ErrorRatio);
+                float3 RampColor;
+                if (U < 0.5)
+                {
+                    float K = U * 2.0;
+                    RampColor = float3(0.16 + 0.76 * K, 0.78 + 0.06 * K, 0.38 - 0.24 * K);
+                }
+                else
+                {
+                    float K = (U - 0.5) * 2.0;
+                    RampColor = float3(0.92, 0.84 - 0.58 * K, 0.14 + 0.06 * K);
+                }
+                float FormShade = 0.35 + 0.65 * saturate(dot(PrimaryHit.GeomNormal, WorldUniforms.SunDirConeTan.xyz) * 0.5 + 0.5);
+                DbgHdr = RampColor * FormShade;
+            }
+            if (IsNaniteWireframeEnabled())
+            {
+                float WireAlpha = 1.0 - smoothstep(0.45, 1.35, PrimaryHit.EdgePixelDist);
+                DbgHdr = lerp(DbgHdr, float3(0.03, 0.04, 0.06), WireAlpha * 0.82);
             }
         }
         GBufPosMask[PixelIdx]            = float4(0.0, 0.0, 0.0, 0.0);
@@ -2861,6 +2904,11 @@ void ComputeEntry(uint3 DispatchThreadID : SV_DispatchThreadID)
     if (EngineMode == 0u && DebugMode == 0u)
     {
         float3 MatCapHdr = EvaluateMatCapSurface(PrimaryHit);
+        if (IsNaniteWireframeEnabled())
+        {
+            float WireAlpha = 1.0 - smoothstep(0.45, 1.35, PrimaryHit.EdgePixelDist);
+            MatCapHdr = lerp(MatCapHdr, float3(0.02, 0.03, 0.05), WireAlpha * 0.80);
+        }
         GBufPosMask[PixelIdx]            = float4(0.0, 0.0, 0.0, 0.0);
         GBufNormAo[PixelIdx]             = float4(PrimaryHit.ShadingNormal, 1.0);
         GBufDirectBase[PixelIdx]         = float4(MatCapHdr, HitDistForClouds);
@@ -2894,8 +2942,19 @@ void ComputeEntry(uint3 DispatchThreadID : SV_DispatchThreadID)
         SpecRough,
         SpecAo);
 
+    float  WireFlag = 0.0;
+    if (IsNaniteWireframeEnabled() && PrimaryHit.EdgePixelDist < 1.25)
+    {
+        float WireAlpha = 1.0 - smoothstep(0.45, 1.25, PrimaryHit.EdgePixelDist);
+        DirectBaseHdr      *= (1.0 - WireAlpha * 0.85);
+        SpecReflHdr        *= (1.0 - WireAlpha * 0.85);
+        UnoccludedSunHdr   *= (1.0 - WireAlpha * 0.85);
+        DiffuseAlbedoMatte *= (1.0 - WireAlpha * 0.85);
+        WireFlag = WireAlpha;
+    }
+
     AccumulationHdrBuffer[PixelIdx]  = float4(SpecReflHdr, SpecRough);
-    GBufPosMask[PixelIdx]            = float4(PrimaryHit.Position, 1.0 + SpecRough);
+    GBufPosMask[PixelIdx]            = float4(PrimaryHit.Position, 1.0 + SpecRough + WireFlag * 0.0);
     GBufNormAo[PixelIdx]             = float4(PrimaryHit.ShadingNormal, DiffAo);
     GBufDirectBase[PixelIdx]         = float4(DirectBaseHdr, HitDistForClouds);
     GBufSunContrib[PixelIdx]         = float4(UnoccludedSunHdr, HitDistForFog);

@@ -12,6 +12,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <unordered_map>
 
 namespace
 {
@@ -37,7 +38,7 @@ namespace
     {
         for (uint32_t X = 0u; X <= Cells; ++X)
         {
-            Network.AppendVertex({ static_cast<float>(X) - 10.0f, static_cast<float>(Y) - 10.0f, 0.0f });
+            (void)Network.AppendVertex({ static_cast<float>(X) - 10.0f, static_cast<float>(Y) - 10.0f, 0.0f });
         }
     }
     const uint32_t Stride = Cells + 1u;
@@ -48,12 +49,104 @@ namespace
             const uint32_t V0 = Y * Stride + X;
             const uint32_t Loop[4] = { V0, V0 + 1u, V0 + 1u + Stride, V0 + Stride };
             const uint16_t Material = (X < Cells / 2u) ? 3u : 7u;
-            Network.AppendFace(Loop, {}, {}, 0u, Material);
+            (void)Network.AppendFace(Loop, {}, {}, 0u, Material);
         }
     }
     Network.LinkOppositeEdges();
     Network.RecomputeNormals();
     return Network;
+}
+
+// Closed watertight subdivided torus (~2048 triangles) matching GeometryCompilerValidation.mjs
+[[nodiscard]] Frontier::GeometrySpace::PolygonNetwork BuildClosedWatertightTorus(
+    uint32_t MajorRings = 32u,
+    uint32_t MinorRings = 32u,
+    float    MajorRadius = 2.4f,
+    float    MinorRadius = 0.85f) noexcept
+{
+    using namespace Frontier;
+    GeometrySpace::PolygonNetwork Network {};
+    Network.NetworkTitle = "ClosedWatertightTorus";
+    constexpr float TwoPi = 6.28318530717958647692f;
+
+    for (uint32_t Maj = 0u; Maj < MajorRings; ++Maj)
+    {
+        const float Phi  = TwoPi * static_cast<float>(Maj) / static_cast<float>(MajorRings);
+        const float CosP = std::cos(Phi);
+        const float SinP = std::sin(Phi);
+        for (uint32_t Min = 0u; Min < MinorRings; ++Min)
+        {
+            const float Theta = TwoPi * static_cast<float>(Min) / static_cast<float>(MinorRings);
+            const float RingR = MajorRadius + MinorRadius * std::cos(Theta);
+            (void)Network.AppendVertex({
+                RingR * CosP,
+                RingR * SinP,
+                MinorRadius * std::sin(Theta),
+            });
+        }
+    }
+
+    for (uint32_t Maj = 0u; Maj < MajorRings; ++Maj)
+    {
+        const uint32_t NextMaj = (Maj + 1u) % MajorRings;
+        for (uint32_t Min = 0u; Min < MinorRings; ++Min)
+        {
+            const uint32_t NextMin = (Min + 1u) % MinorRings;
+            const uint32_t V00 = Maj * MinorRings + Min;
+            const uint32_t V10 = NextMaj * MinorRings + Min;
+            const uint32_t V11 = NextMaj * MinorRings + NextMin;
+            const uint32_t V01 = Maj * MinorRings + NextMin;
+            const uint32_t Loop[4] = { V00, V10, V11, V01 };
+            (void)Network.AppendFace(Loop, {}, {}, 0u, 1u);
+        }
+    }
+    Network.LinkOppositeEdges();
+    Network.RecomputeNormals();
+    return Network;
+}
+
+struct CutManifoldDiagnostics
+{
+    uint32_t OpenEdgeCount        = 0u;
+    uint32_t NonManifoldEdgeCount = 0u;
+    uint32_t TotalEdges           = 0u;
+};
+
+[[nodiscard]] CutManifoldDiagnostics InspectActiveCutManifoldEdges(
+    const Frontier::SpatialAcceleration::ClusterPyramid& Pyramid,
+    std::span<const uint32_t>                            ActiveClusters)
+{
+    std::unordered_map<uint64_t, uint32_t> EdgeUses;
+    for (const uint32_t CIdx : ActiveClusters)
+    {
+        const auto& Header = Pyramid.Clusters[CIdx];
+        for (uint32_t Off = 0u; Off < Header.TriangleCount; ++Off)
+        {
+            const auto& Tri = Pyramid.Triangles[Header.TriangleStartOffset + Off];
+            const uint32_t V[3] = { Tri.VertexIndex0, Tri.VertexIndex1, Tri.VertexIndex2 };
+            for (std::size_t Side = 0u; Side < 3u; ++Side)
+            {
+                const uint64_t Lo = std::min(V[Side], V[(Side + 1u) % 3u]);
+                const uint64_t Hi = std::max(V[Side], V[(Side + 1u) % 3u]);
+                EdgeUses[(Lo << 32u) | Hi] += 1u;
+            }
+        }
+    }
+    CutManifoldDiagnostics Diag {};
+    Diag.TotalEdges = static_cast<uint32_t>(EdgeUses.size());
+    for (const auto& [Key, Uses] : EdgeUses)
+    {
+        (void)Key;
+        if (Uses == 1u)
+        {
+            ++Diag.OpenEdgeCount;
+        }
+        else if (Uses > 2u)
+        {
+            ++Diag.NonManifoldEdgeCount;
+        }
+    }
+    return Diag;
 }
 
 } // namespace
@@ -175,20 +268,152 @@ int main()
         return 1;
     }
 
-    // 4. Serialization round-trip keeps the cap (v2 format; v1 payloads still load)
+    // 4. Serialization round-trip keeps the cap & full v3 DAG structure
     const auto Bytes = CappedPyramid.SerializeToBinaryBytes();
     ClusterPyramid Restored {};
     if (!VerifyCheck(Restored.DeserializeFromBinaryBytes(Bytes), "pyramid serialization round-trip") ||
-        !VerifyCheck(Restored.CoarsestAllowedLevel == 0u, "coarsest allowed level survived serialization"))
+        !VerifyCheck(Restored.CoarsestAllowedLevel == 0u, "coarsest allowed level survived serialization") ||
+        !VerifyCheck(Restored.Groups.size() == CappedPyramid.Groups.size(), "DAG groups survived v3 serialization") ||
+        !VerifyCheck(Restored.RootClusterIndices == CappedPyramid.RootClusterIndices, "DAG roots survived v3 serialization"))
     {
         return 1;
     }
 
+    // 5. GeometryCompiler parity suite on closed watertight torus (2048 tris -> multi-level DAG):
+    //    - Monotone group error & enclosing group spheres
+    //    - Exact top-down DAG walk == brute-force per-cluster oracle across 10 camera views
+    //    - Zero open edges & zero non-manifold edges on EVERY mixed-level camera cut (seam-free proof!)
+    //    - Frustum culling & normal-cone backface culling reduce cluster count deterministically
+    const GeometrySpace::PolygonNetwork Torus = BuildClosedWatertightTorus(32u, 32u, 2.4f, 0.85f);
+    ClusterPyramid TorusDag {};
+    ClusterLodBakeConfiguration TorusBake {};
+    TorusBake.MaximumLevels       = 10u;
+    TorusBake.TargetGroupClusters = 4u;
+    TorusBake.SimplifyKeepRatio   = 0.50f;
+    TorusBake.RelativeErrorLimit  = 1.0f;
+    if (!VerifyCheck(TorusDag.BuildFromPolygonNetwork(Torus, TorusBake), "closed torus DAG bake succeeded") ||
+        !VerifyCheck(TorusDag.HierarchyDepth >= 4u, "closed torus DAG reached >= 4 levels") ||
+        !VerifyCheck(!TorusDag.Groups.empty() && !TorusDag.RootClusterIndices.empty(), "closed torus populated DAG groups & roots"))
+    {
+        return 1;
+    }
+
+    for (const ClusterHeaderEntry& Cls : TorusDag.Clusters)
+    {
+        if (Cls.EnclosingGroupOrdinal > 0u)
+        {
+            const ClusterGroupEntry& Enclosing = TorusDag.Groups[Cls.EnclosingGroupOrdinal - 1u];
+            if (!VerifyCheck(
+                    Enclosing.MonotonicErrorMeters + 1.0e-7f >= Cls.FinerSelfErrorMeters,
+                    "DAG monotone group error holds on every cluster transition"))
+            {
+                return 1;
+            }
+        }
+    }
+
+    const Mathematics::Axis3D CameraPoses[10] = {
+        {  0.0f,  0.0f,  4.2f },
+        {  3.8f,  0.5f,  1.2f },
+        { -5.2f,  2.8f,  2.1f },
+        {  0.0f, -8.5f,  3.0f },
+        {  7.0f,  7.0f,  1.5f },
+        { 14.0f, -3.0f,  6.0f },
+        { -2.1f,  1.4f,  2.9f },
+        {  0.2f,  0.1f, 22.0f },
+        { 36.0f,  0.0f,  4.0f },
+        {  4.9f, -4.4f, -2.5f },
+    };
+
+    bool SawMixedLevelCut = false;
+    for (std::size_t PoseIdx = 0u; PoseIdx < 10u; ++PoseIdx)
+    {
+        const Mathematics::Axis3D CamPos = CameraPoses[PoseIdx];
+        for (const float ErrBudget : { 1.25f, 3.5f })
+        {
+            const auto DagCut = TorusDag.SelectMonotonicCut(CamPos, 720.0f, ErrBudget, false);
+            const auto Brute  = TorusDag.SelectExhaustiveReferenceCut(CamPos, 720.0f, ErrBudget);
+            if (!VerifyCheck(DagCut.ActiveClusterIndices == Brute, "top-down DAG cut matches exhaustive per-cluster oracle"))
+            {
+                return 1;
+            }
+            const auto Manifold = InspectActiveCutManifoldEdges(TorusDag, DagCut.ActiveClusterIndices);
+            if (!VerifyCheck(
+                    Manifold.OpenEdgeCount == 0u && Manifold.NonManifoldEdgeCount == 0u && Manifold.TotalEdges > 0u,
+                    "active DAG cut is 100% watertight (zero cracks, zero T-junctions, zero non-manifold seams)"))
+            {
+                std::fprintf(
+                    stderr,
+                    "  pose %zu: open=%u nonManifold=%u activeClusters=%zu\n",
+                    PoseIdx, Manifold.OpenEdgeCount, Manifold.NonManifoldEdgeCount, DagCut.ActiveClusterIndices.size());
+                return 1;
+            }
+            uint8_t MinLvl = 255u, MaxLvl = 0u;
+            for (const uint32_t CIdx : DagCut.ActiveClusterIndices)
+            {
+                MinLvl = std::min(MinLvl, TorusDag.Clusters[CIdx].HierarchyLevel);
+                MaxLvl = std::max(MaxLvl, TorusDag.Clusters[CIdx].HierarchyLevel);
+            }
+            if (MaxLvl > MinLvl)
+            {
+                SawMixedLevelCut = true;
+            }
+        }
+    }
+    if (!VerifyCheck(SawMixedLevelCut, "camera sweep exercised mixed-LOD cross-level seam cuts"))
+    {
+        return 1;
+    }
+
+    // 6. Frustum + normal-cone backface culling & forced LOD level checks
+    const ClusterFrustumPlane OffscreenPlane { { 1.0f, 0.0f, 0.0f }, -50.0f }; // x >= 50 required -> rejects whole torus at origin
+    const auto CulledOffscreen = TorusDag.SelectMonotonicCut(
+        { 0.0f, 0.0f, 8.0f }, 720.0f, 1.25f, false, std::span<const ClusterFrustumPlane>(&OffscreenPlane, 1u));
+    if (!VerifyCheck(
+            CulledOffscreen.ActiveClusterIndices.empty() && CulledOffscreen.CulledFrustumCount > 0u,
+            "DAG frustum culling rejects off-frustum root/group spheres without traversing leaves"))
+    {
+        return 1;
+    }
+
+    // Verify normal-cone backface culling on both closed curved torus (64x64 = 8192 tris, 64 L0 clusters) and flat grid:
+    const GeometrySpace::PolygonNetwork FineTorus = BuildClosedWatertightTorus(64u, 64u, 2.4f, 0.85f);
+    ClusterPyramid FineTorusDag {};
+    if (!VerifyCheck(FineTorusDag.BuildFromPolygonNetwork(FineTorus, TorusBake), "64x64 torus DAG bake succeeded"))
+    {
+        return 1;
+    }
+    const auto UnculledNear = FineTorusDag.SelectMonotonicCut({ 12.0f, 0.0f, 0.0f }, 720.0f, 0.0f, false);
+    const auto ConeCulled   = FineTorusDag.SelectMonotonicCut({ 12.0f, 0.0f, 0.0f }, 720.0f, 0.0f, true);
+    const auto GridBackside = Pyramid.SelectMonotonicCut({ 0.0f, 0.0f, -30.0f }, 720.0f, 1.25f, true);
+    if (!VerifyCheck(
+            ConeCulled.ActiveClusterIndices.size() < UnculledNear.ActiveClusterIndices.size() &&
+                ConeCulled.CulledBackfaceCount > 0u &&
+                GridBackside.ActiveClusterIndices.empty() &&
+                GridBackside.CulledBackfaceCount == Pyramid.SelectMonotonicCut({ 0.0f, 0.0f, -30.0f }, 720.0f, 1.25f, false).ActiveClusterIndices.size(),
+            "cluster normal-cone backface culling rejects rear-facing clusters"))
+    {
+        return 1;
+    }
+
+    const auto ForcedL2 = TorusDag.SelectMonotonicCut({ 0.0f, 0.0f, 4.0f }, 720.0f, 1.25f, false, {}, 2);
+    for (const uint32_t CIdx : ForcedL2.ActiveClusterIndices)
+    {
+        if (!VerifyCheck(TorusDag.Clusters[CIdx].HierarchyLevel == 2u, "forced hierarchy level selects exact level 2"))
+        {
+            return 1;
+        }
+    }
+
+    const auto TorusSummaries = TorusDag.SummarizeLevels();
     std::printf(
-        "[ClusterLodBakeValidation] PASS — %u levels, L0 %u tris -> L%zu %u tris, materials {3,7} preserved, cap enforced.\n",
+        "[ClusterLodBakeValidation] PASS — Grid (%u lvls, %u->%u tris, materials {3,7}) | Torus DAG (%u lvls, %zu groups, %u->%u tris, 10/10 oracle & watertight cuts).\n",
         Pyramid.HierarchyDepth,
         Summaries.front().TriangleCount,
-        Summaries.size() - 1u,
-        Summaries.back().TriangleCount);
+        Summaries.back().TriangleCount,
+        TorusDag.HierarchyDepth,
+        TorusDag.Groups.size(),
+        TorusSummaries.front().TriangleCount,
+        TorusSummaries.back().TriangleCount);
     return 0;
 }

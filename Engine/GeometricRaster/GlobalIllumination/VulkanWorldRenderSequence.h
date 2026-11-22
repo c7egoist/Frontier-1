@@ -67,6 +67,10 @@ public:
     {
         bool     Enabled              = false; // [-]   - LOD cut drove the uploaded BVH
         uint32_t ActiveClusterCount   = 0u;    // [cnt] - Clusters in the current cut (all instances)
+        uint32_t TotalClusterCount    = 0u;    // [cnt] - Total baked DAG clusters across all active instances
+        uint32_t CulledBackfaceCount  = 0u;    // [cnt] - Clusters rejected by normal-cone backface test
+        uint32_t CulledFrustumCount   = 0u;    // [cnt] - Clusters / DAG branches rejected by 6-plane frustum
+        uint32_t TestedDagGroupCount  = 0u;    // [cnt] - DAG group / root evaluations executed across the cut
         uint32_t ActiveTriangleCount  = 0u;    // [cnt] - Triangles the GPU BVH held last frame
         uint32_t FullTriangleCount    = 0u;    // [cnt] - Full-resolution triangle count of the scene
         uint32_t LevelTriangleCount[8] {};     // [cnt] - Active triangles per hierarchy level (0 = finest)

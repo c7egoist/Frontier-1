@@ -2007,13 +2007,17 @@ void EditorLifecycle::RefreshShowcaseViewportRaster()
     RenderConfig.ReflectionSource = (DisplayCfg.ReflectionsEnabled && DisplayCfg.RaytracingEnabled && DisplayCfg.ReflectionSourceIndex == 0u)
         ? GeometricRaster::SpecularReflectionSource::WideTreeRaytrace
         : GeometricRaster::SpecularReflectionSource::SkyEnvironment;
-    RenderConfig.DebugChannel       = std::min(18u, DisplayCfg.DebugChannelIndex);
-    RenderConfig.XeGtaoEnabled      = DisplayCfg.XeGtaoEnabled;
-    RenderConfig.XeGtaoStrength     = DisplayCfg.XeGtaoStrength;
-    RenderConfig.PathTraceSamples   = std::clamp(DisplayCfg.PathTraceBatchSpp, 1u, 8u);
-    RenderConfig.PathTraceTargetSpp = DisplayCfg.PathTraceTargetSpp;
-    RenderConfig.NaniteLodEnabled   = DisplayCfg.ClusterLodEnabled;
-    RenderConfig.NanitePixelError   = DisplayCfg.ClusterLodPixelError;
+    RenderConfig.DebugChannel              = std::min(20u, DisplayCfg.DebugChannelIndex);
+    RenderConfig.XeGtaoEnabled             = DisplayCfg.XeGtaoEnabled;
+    RenderConfig.XeGtaoStrength            = DisplayCfg.XeGtaoStrength;
+    RenderConfig.PathTraceSamples          = std::clamp(DisplayCfg.PathTraceBatchSpp, 1u, 8u);
+    RenderConfig.PathTraceTargetSpp        = DisplayCfg.PathTraceTargetSpp;
+    RenderConfig.NaniteLodEnabled          = DisplayCfg.ClusterLodEnabled;
+    RenderConfig.NanitePixelError          = DisplayCfg.ClusterLodPixelError;
+    RenderConfig.NaniteFrustumCullEnabled  = DisplayCfg.ClusterFrustumCullEnabled;
+    RenderConfig.NaniteBackfaceConeEnabled = DisplayCfg.ClusterBackfaceConeEnabled;
+    RenderConfig.NaniteWireframeOverlay    = DisplayCfg.ClusterWireframeOverlay;
+    RenderConfig.NaniteForcedLevel         = DisplayCfg.ClusterForcedLevel;
     RenderConfig.QualityTier        = QTier;
     RenderConfig.ReflectionsEnabled = DisplayCfg.ReflectionsEnabled;
     RenderConfig.RaytracingEnabled  = DisplayCfg.RaytracingEnabled;
@@ -2133,12 +2137,29 @@ void EditorLifecycle::RefreshShowcaseViewportRaster()
     {
         // Live Nanite proof in the viewport footer: triangles actually traced vs full-res scene.
         const auto& LodStats = GpuWorldRenderer->QueryNaniteLodStats();
-        char LodReadout[128] {};
+        char LodReadout[160] {};
         if (LodStats.Enabled)
         {
-            std::snprintf(
-                LodReadout, sizeof(LodReadout), "Nanite LOD %u tris · %u clusters (full %u)",
-                LodStats.ActiveTriangleCount, LodStats.ActiveClusterCount, LodStats.FullTriangleCount);
+            const float Pct = (LodStats.FullTriangleCount > 0u)
+                ? (100.0f * static_cast<float>(LodStats.ActiveTriangleCount) / static_cast<float>(LodStats.FullTriangleCount))
+                : 100.0f;
+            const uint32_t CulledTotal = LodStats.CulledFrustumCount + LodStats.CulledBackfaceCount;
+            if (CulledTotal > 0u)
+            {
+                std::snprintf(
+                    LodReadout, sizeof(LodReadout),
+                    "Nanite DAG %u/%u clusters · %u tris (%.1f%%) · culled %u",
+                    LodStats.ActiveClusterCount, LodStats.TotalClusterCount,
+                    LodStats.ActiveTriangleCount, Pct, CulledTotal);
+            }
+            else
+            {
+                std::snprintf(
+                    LodReadout, sizeof(LodReadout),
+                    "Nanite DAG %u/%u clusters · %u tris (%.1f%% of %u)",
+                    LodStats.ActiveClusterCount, LodStats.TotalClusterCount,
+                    LodStats.ActiveTriangleCount, Pct, LodStats.FullTriangleCount);
+            }
         }
         else
         {

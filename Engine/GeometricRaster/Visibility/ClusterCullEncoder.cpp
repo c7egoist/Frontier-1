@@ -89,13 +89,36 @@ TwoPhaseCullReport ClusterCullEncoder::EncodePhaseOneVisibility(
 
         const float Scale = std::max(1.0e-4f, Inst.UniformScale);
         const Mathematics::Axis3D LocalCameraPos = (CurrentCamera.CameraOrigin - Inst.WorldTranslation) * (1.0f / Scale);
+        const float ScaledPixelsPerRadian = PixelsPerRadian * Scale;
+        std::array<SpatialAcceleration::ClusterFrustumPlane, 5u> LocalPlanes {};
+        std::span<const SpatialAcceleration::ClusterFrustumPlane> PlaneSpan {};
+        if (Settings.EnableDagFrustumCull)
+        {
+            const float NearLocal = std::max(1.0e-4f, CurBasis.NearClip / Scale);
+            const auto ConstructLocalPlane = [&](Mathematics::Axis3D WorldInwardNormal, float ExtraLocalOffset = 0.0f) noexcept
+                -> SpatialAcceleration::ClusterFrustumPlane
+            {
+                const Mathematics::Axis3D UnitN = Mathematics::NormalizeAxis(WorldInwardNormal);
+                const float Offset = -Mathematics::EvaluateDot(UnitN, LocalCameraPos) + ExtraLocalOffset;
+                return { UnitN, Offset };
+            };
+            LocalPlanes[0u] = ConstructLocalPlane(CurBasis.ForwardAxis, -NearLocal);
+            LocalPlanes[1u] = ConstructLocalPlane(CurBasis.ForwardAxis * CurBasis.TanHalfFovX + CurBasis.RightAxis);
+            LocalPlanes[2u] = ConstructLocalPlane(CurBasis.ForwardAxis * CurBasis.TanHalfFovX - CurBasis.RightAxis);
+            LocalPlanes[3u] = ConstructLocalPlane(CurBasis.ForwardAxis * CurBasis.TanHalfFovY + CurBasis.UpAxis);
+            LocalPlanes[4u] = ConstructLocalPlane(CurBasis.ForwardAxis * CurBasis.TanHalfFovY - CurBasis.UpAxis);
+            PlaneSpan = LocalPlanes;
+        }
         const auto CutSelection = Inst.PyramidAsset->SelectMonotonicCut(
             LocalCameraPos,
-            PixelsPerRadian,
+            ScaledPixelsPerRadian,
             Settings.MaxAllowedLodErrorPx,
-            false);
+            false,
+            PlaneSpan,
+            Settings.ForcedHierarchyLevel);
 
-        Report.TotalLodCutClusters += static_cast<uint32_t>(CutSelection.ActiveClusterIndices.size());
+        Report.TotalLodCutClusters  += static_cast<uint32_t>(CutSelection.ActiveClusterIndices.size());
+        Report.FrustumRejectedCount += CutSelection.CulledFrustumCount;
 
         for (uint32_t ClusterIdx : CutSelection.ActiveClusterIndices)
         {

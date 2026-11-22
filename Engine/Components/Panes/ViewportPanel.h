@@ -72,10 +72,14 @@ struct ViewportDisplaySettings
     bool     RaytracingEnabled     = true;   // [-]   - Hardware BVH4 raytracing toggle
     bool     XeGtaoEnabled         = false;  // [-]   - XeGTAO screen-space AO for direct PBR (no GI)
     float    XeGtaoStrength        = 1.0f;   // [x]   - XeGTAO occlusion strength [0..2]
-    uint32_t PathTraceTargetSpp    = 256u;   // [spp] - Progressive PT convergence target (0 = render continuously, no cap)
-    uint32_t PathTraceBatchSpp     = 1u;     // [spp] - PT samples accumulated per frame (1/2/4/8, HTML lab parity)
-    bool     ClusterLodEnabled     = true;   // [-]   - Nanite-like cluster LOD drives the viewport BVH
-    float    ClusterLodPixelError  = 1.25f;  // [px]  - Screen-space LOD error budget (0.5 quality / 1.25 balanced / 2.5 / 5 aggressive)
+    uint32_t PathTraceTargetSpp        = 256u;   // [spp] - Progressive PT convergence target (0 = render continuously, no cap)
+    uint32_t PathTraceBatchSpp         = 1u;     // [spp] - PT samples accumulated per frame (1/2/4/8, HTML lab parity)
+    bool     ClusterLodEnabled         = true;   // [-]   - Nanite-like cluster LOD drives the viewport BVH
+    float    ClusterLodPixelError      = 1.25f;  // [px]  - Screen-space LOD error budget (0.5 quality / 1.25 balanced / 2.5 / 5 aggressive)
+    bool     ClusterFrustumCullEnabled = false;  // [-]   - 6-plane DAG frustum culling for primary camera
+    bool     ClusterBackfaceConeEnabled = false; // [-]   - Tight cluster normal-cone backface culling
+    bool     ClusterWireframeOverlay   = false;  // [-]   - Overlay crisp screen-space triangle wireframe (GeometryCompiler parity)
+    int32_t  ClusterForcedLevel        = -1;     // [lvl] - -1 = automatic DAG cut; >= 0 forces exact hierarchy level
     bool     AtmosphereSkyEnabled  = true;   // [-]   - Physical Bruneton/Hillaire atmospheric sky toggle
     bool     VolumetricCloudsEnabled = false;// [-]   - Raymarched volumetric cloud deck toggle (default off for Clear Sky)
     bool     CloudShadowsEnabled   = false;  // [-]   - Volumetric cloud ground shadow casting toggle
@@ -138,7 +142,7 @@ public:
     void TogglePlayPause() noexcept;
     void ConfigureSplitViewport(bool SplitEnabled) noexcept;
     void ConfigureDiagnosticsVisible(bool Visible) noexcept;
-    void AdvanceDebugChannelCycle() noexcept { DisplaySettings.DebugChannelIndex = (DisplaySettings.DebugChannelIndex + 1u) % 19u; }
+    void AdvanceDebugChannelCycle() noexcept { DisplaySettings.DebugChannelIndex = (DisplaySettings.DebugChannelIndex + 1u) % 21u; }
     void ConfigureRenderSettingsSheetOpen(bool Open) noexcept;
     void ConfigureSdfPenumbraDropdownOpen(bool Open) noexcept { SdfPenumbraDropdownOpen = Open; }
     void ConfigureConstructSheetOpen(bool Open) noexcept;

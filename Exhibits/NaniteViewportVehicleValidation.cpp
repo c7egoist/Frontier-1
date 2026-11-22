@@ -241,7 +241,7 @@ int main()
 
     constexpr uint32_t ProofW = 640u;
     constexpr uint32_t ProofH = 400u;
-    const auto RenderFrom = [&](Mathematics::Axis3D Origin, bool LodEnabled, uint32_t DebugChannel)
+    const auto RenderFrom = [&](Mathematics::Axis3D Origin, bool LodEnabled, uint32_t DebugChannel, bool Wireframe = false)
     {
         PerspectiveCameraBasis Cam = Bundle.EditorCamera;
         Cam.CameraOrigin       = Origin;
@@ -249,10 +249,11 @@ int main()
         Cam.ViewportWidthPx    = ProofW;
         Cam.ViewportHeightPx   = ProofH;
         WorldRenderConfiguration Config {};
-        Config.Engine          = WorldRenderEngine::OpenPbrDirect;
-        Config.NaniteLodEnabled = LodEnabled;
-        Config.NanitePixelError = 1.25f;
-        Config.DebugChannel    = DebugChannel;
+        Config.Engine                 = WorldRenderEngine::OpenPbrDirect;
+        Config.NaniteLodEnabled       = LodEnabled;
+        Config.NanitePixelError       = 1.25f;
+        Config.NaniteWireframeOverlay = Wireframe;
+        Config.DebugChannel           = DebugChannel;
         std::vector<uint8_t> Rgba {};
         const bool Ok = GpuSeq.RenderWorldViewportWithEngine(Config, 0u, Cam, Bundle.Scene, Rgba);
         return std::pair<bool, std::vector<uint8_t>>{ Ok, std::move(Rgba) };
@@ -343,6 +344,25 @@ int main()
         Sheet.BlitRgbaRegion(ProofW * 2u, ProofH, ProofW, ProofH, FarLevelRgba.data());
         Sheet.BlitRgbaRegion(ProofW * 3u, ProofH, ProofW, ProofH, FarClusterRgba.data());
         Pass = VerifyCheck(Sheet.WritePngFile(OutDir / "VehicleLodContactSheet.png"), "wrote LOD contact sheet") && Pass;
+    }
+
+    // GeometryCompiler parity inspection sheet: Simplification Groups (19), Error Budget (20), and Wireframe Overlay.
+    {
+        auto [NearGroupOk, NearGroupRgba] = RenderFrom(NearOrigin, true, 19u, true);
+        auto [FarGroupOk, FarGroupRgba]   = RenderFrom(FarOrigin,  true, 19u, true);
+        auto [NearErrOk, NearErrRgba]     = RenderFrom(NearOrigin, true, 20u, false);
+        auto [FarErrOk, FarErrRgba]       = RenderFrom(FarOrigin,  true, 20u, true);
+        Pass = VerifyCheck(NearGroupOk && FarGroupOk && NearErrOk && FarErrOk, "GPU rendered Nanite Groups (19) & Error Budget (20)") && Pass;
+        const HueCounts FarGroupHue = AnalyzeDebugImage(FarGroupRgba);
+        std::printf("[NaniteViewportVehicleValidation] Far simplification-group view distinct colours: %u\n", FarGroupHue.DistinctColors);
+        Pass = VerifyCheck(FarGroupHue.DistinctColors > 25u, "far group view shows distinct simplification groups") && Pass;
+
+        Frontier::Exhibits::SoftwareRasterCanvas DagSheet(ProofW * 2u, ProofH * 2u, { 20u, 22u, 26u, 255u });
+        DagSheet.BlitRgbaRegion(0u,     0u,     ProofW, ProofH, NearGroupRgba.data());
+        DagSheet.BlitRgbaRegion(ProofW, 0u,     ProofW, ProofH, NearErrRgba.data());
+        DagSheet.BlitRgbaRegion(0u,     ProofH, ProofW, ProofH, FarGroupRgba.data());
+        DagSheet.BlitRgbaRegion(ProofW, ProofH, ProofW, ProofH, FarErrRgba.data());
+        Pass = VerifyCheck(DagSheet.WritePngFile(OutDir / "VehicleGeometryCompilerDagSheet.png"), "wrote GeometryCompiler DAG sheet") && Pass;
     }
 
     GpuSeq.TeardownSequence();

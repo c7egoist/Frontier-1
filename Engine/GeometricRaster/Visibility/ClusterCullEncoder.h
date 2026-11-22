@@ -62,9 +62,11 @@ struct TwoPhaseCullReport
 
 struct ClusterCullSettings
 {
-    float MaxAllowedLodErrorPx       = 1.25f; // [px] - Screen-space geometric simplification error threshold
-    float MicroClusterThresholdPx    = 4.0f;  // [px] - Clusters smaller than 4 px route to compute atomicMax64 raster
-    bool  EnableNormalConeBackface   = true;  // [-]  - Cull clusters whose entire normal cone faces away from camera
+    float   MaxAllowedLodErrorPx     = 1.25f; // [px]  - Screen-space geometric simplification error threshold
+    float   MicroClusterThresholdPx  = 4.0f;  // [px]  - Clusters smaller than 4 px route to compute atomicMax64 raster
+    bool    EnableNormalConeBackface = true;  // [-]   - Cull clusters whose entire normal cone faces away from camera
+    bool    EnableDagFrustumCull     = false; // [-]   - Prune off-frustum DAG groups & clusters during top-down cut walk
+    int32_t ForcedHierarchyLevel     = -1;    // [lvl] - -1 = automatic DAG cut; >= 0 forces exact hierarchy level
 };
 
 //------------------------------------------------------------------------------------------------------------------------

@@ -1194,7 +1194,13 @@ void BuildVehicleClearSkyDefaultScene(
             const std::array<uint32_t, 3u> Loop {{ V0, V1, V2 }};
             (void)VehicleGeom->Network.AppendFace(Loop, {}, {}, 0u, SlotMat);
         }
-        (void)VehicleGeom->Pyramid.BuildFromPolygonNetwork(VehicleGeom->Network, 5u);
+        SpatialAcceleration::ClusterLodBakeConfiguration VehicleBake {};
+        VehicleBake.MaximumLevels          = 8u;
+        VehicleBake.TargetGroupClusters    = 4u;
+        VehicleBake.SimplifyKeepRatio      = 0.50f;
+        VehicleBake.RelativeErrorLimit     = 1.25f;
+        VehicleBake.LockMaterialBoundaries = true;
+        (void)VehicleGeom->Pyramid.BuildFromPolygonNetwork(VehicleGeom->Network, VehicleBake);
         const uint16_t GlassSlot = VehicleSlots[static_cast<std::size_t>(Codecs::VehicleSurfaceSlot::VehicleGlass)];
         VehicleGeom->Pyramid.ConfigureMaterialCoarsestAllowedLevel(static_cast<uint8_t>(GlassSlot & 0xFFu), 2u);
         (void)BakeAssetSignedLocalSdfFromSmoothTriangles(

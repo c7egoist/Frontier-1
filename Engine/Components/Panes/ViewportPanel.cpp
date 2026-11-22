@@ -75,7 +75,7 @@ namespace
 
 [[nodiscard]] const char* QueryDebugChannelName(uint32_t Channel) noexcept
 {
-    constexpr std::array<const char*, 19> Names = {{
+    constexpr std::array<const char*, 21> Names = {{
         "Off",
         "Depth",
         "Albedo",
@@ -94,7 +94,9 @@ namespace
         "SDF AO Raw",
         "SDF Cascade",
         "Nanite LOD Level",
-        "Nanite Clusters"
+        "Nanite Clusters",
+        "Nanite Groups",
+        "Nanite Error Budget"
     }};
     return Names[std::min<std::size_t>(Channel, Names.size() - 1u)];
 }
@@ -1053,7 +1055,7 @@ void ViewportPanel::RenderSettingsSheet(
 {
     const float SheetW = 286.0f;
     // Dedicated Render Settings panel: height follows the active section.
-    constexpr std::array<float, 5> SectionHeights = {{ 560.0f, 220.0f, 240.0f, 200.0f, 380.0f }};
+    constexpr std::array<float, 5> SectionHeights = {{ 560.0f, 220.0f, 240.0f, 340.0f, 380.0f }};
     const float SheetH = std::min(
         SectionHeights[std::min(4u, RenderSettingsSection)],
         std::max(240.0f, Bounds.Height - 22.0f));
@@ -1340,6 +1342,60 @@ void ViewportPanel::RenderSettingsSheet(
                 }
             }
             RowY += 32.0f;
+
+            WorkspaceAppearance::ConstructWeightedText(
+                Overlay, FontWeightClass::Regular, { Sheet.X + 16.0f, RowY + 5.0f }, 11.5f,
+                WorkspaceSurfaceColors::SecondaryInk, "Force Level");
+            constexpr std::array<const char*, 5> ForceLabels = {{ "Auto", "L0", "L1", "L2", "L3" }};
+            constexpr std::array<int32_t, 5>     ForceLevels = {{ -1, 0, 1, 2, 3 }};
+            const float ForceGroupW   = 186.0f;
+            const float ForceCapsuleW = (ForceGroupW - 16.0f) / 5.0f;
+            const float ForceGroupX   = Sheet.Right() - 16.0f - ForceGroupW;
+            for (uint32_t Idx = 0u; Idx < 5u; ++Idx)
+            {
+                const Rectangle2D Capsule{ ForceGroupX + static_cast<float>(Idx) * (ForceCapsuleW + 4.0f), RowY + 1.0f, ForceCapsuleW, 22.0f };
+                const bool        Active = (DisplaySettings.ClusterForcedLevel == ForceLevels[Idx]);
+                Overlay.FillRectangle(Capsule, Active ? ColorRgba{ 62, 62, 62, 255 } : ColorRgba{ 36, 36, 36, 255 }, 11.0f);
+                Overlay.StrokeRectangle(Capsule, Active ? WorkspaceSurfaceColors::PreviewGoldInk : ColorRgba{ 255, 255, 255, 16 }, 11.0f, 1.0f);
+                const float TW = WorkspaceAppearance::MeasureWeightedTextWidth(Overlay, FontWeightClass::Regular, 8.5f, ForceLabels[Idx]);
+                WorkspaceAppearance::ConstructWeightedText(
+                    Overlay, FontWeightClass::Regular, { Capsule.Center().X - TW * 0.5f, Capsule.Y + 5.0f }, 8.5f,
+                    Active ? WorkspaceSurfaceColors::PrimaryInk : ColorRgba{ 162, 162, 162, 255 }, ForceLabels[Idx]);
+                if (!AnyDropdownOpen && Capsule.Contains(Cursor) && Input.PrimaryPointer.Pressed)
+                {
+                    DisplaySettings.ClusterForcedLevel = ForceLevels[Idx];
+                }
+            }
+            RowY += 32.0f;
+
+            ConstructToggleRow("DAG Frustum Cull",   DisplaySettings.ClusterFrustumCullEnabled);
+            ConstructToggleRow("Normal-Cone Cull",   DisplaySettings.ClusterBackfaceConeEnabled);
+            ConstructToggleRow("Triangle Wireframe", DisplaySettings.ClusterWireframeOverlay);
+
+            WorkspaceAppearance::ConstructWeightedText(
+                Overlay, FontWeightClass::Regular, { Sheet.X + 16.0f, RowY + 5.0f }, 11.5f,
+                WorkspaceSurfaceColors::SecondaryInk, "Inspect");
+            constexpr std::array<const char*, 5> InspectLabels = {{ "Lit", "LOD", "Cls", "Grp", "Err" }};
+            constexpr std::array<uint32_t, 5>    InspectModes  = {{ 0u, 17u, 18u, 19u, 20u }};
+            const float InspGroupW   = 204.0f;
+            const float InspCapsuleW = (InspGroupW - 16.0f) / 5.0f;
+            const float InspGroupX   = Sheet.Right() - 16.0f - InspGroupW;
+            for (uint32_t Idx = 0u; Idx < 5u; ++Idx)
+            {
+                const Rectangle2D Capsule{ InspGroupX + static_cast<float>(Idx) * (InspCapsuleW + 4.0f), RowY + 1.0f, InspCapsuleW, 22.0f };
+                const bool        Active = (DisplaySettings.DebugChannelIndex == InspectModes[Idx]);
+                Overlay.FillRectangle(Capsule, Active ? ColorRgba{ 62, 62, 62, 255 } : ColorRgba{ 36, 36, 36, 255 }, 11.0f);
+                Overlay.StrokeRectangle(Capsule, Active ? WorkspaceSurfaceColors::PreviewGoldInk : ColorRgba{ 255, 255, 255, 16 }, 11.0f, 1.0f);
+                const float TW = WorkspaceAppearance::MeasureWeightedTextWidth(Overlay, FontWeightClass::Regular, 8.5f, InspectLabels[Idx]);
+                WorkspaceAppearance::ConstructWeightedText(
+                    Overlay, FontWeightClass::Regular, { Capsule.Center().X - TW * 0.5f, Capsule.Y + 5.0f }, 8.5f,
+                    Active ? WorkspaceSurfaceColors::PrimaryInk : ColorRgba{ 162, 162, 162, 255 }, InspectLabels[Idx]);
+                if (!AnyDropdownOpen && Capsule.Contains(Cursor) && Input.PrimaryPointer.Pressed)
+                {
+                    DisplaySettings.DebugChannelIndex = InspectModes[Idx];
+                }
+            }
+            RowY += 32.0f;
         }
     }
 
@@ -1615,7 +1671,7 @@ void ViewportPanel::RenderSettingsSheet(
     }
     else if (DebugDropdownOpen)
     {
-        constexpr std::array<const char*, 19> DebugOptions = {{
+        constexpr std::array<const char*, 21> DebugOptions = {{
             "Debug View: Off",
             "Debug View: Depth",
             "Debug View: Albedo",
@@ -1635,9 +1691,11 @@ void ViewportPanel::RenderSettingsSheet(
             "Debug View: SDF Cascade",
             "Debug View: Nanite LOD Level",
             "Debug View: Nanite Clusters",
+            "Debug View: Nanite Groups",
+            "Debug View: Nanite Error Budget",
         }};
         const Rectangle2D DropBounds = DropdownSelector::QuerySheetBounds(DebugButtonBounds, static_cast<uint32_t>(DebugOptions.size()));
-        const uint32_t    CurrentIdx = DisplaySettings.DebugChannelIndex % 19u;
+        const uint32_t    CurrentIdx = DisplaySettings.DebugChannelIndex % 21u;
         uint32_t          ChosenIdx  = CurrentIdx;
         if (DropdownSelector::ConstructOptionSheet(
                 Overlay,
@@ -2092,7 +2150,7 @@ void ViewportPanel::Render(
 
     if (HeaderDebugDropdownOpen)
     {
-        constexpr std::array<const char*, 19> HeaderDebugOptions = {{
+        constexpr std::array<const char*, 21> HeaderDebugOptions = {{
             "00 · Lit (Off)",
             "01 · Depth",
             "02 · Albedo",
@@ -2112,10 +2170,12 @@ void ViewportPanel::Render(
             "16 · SDF Cascade",
             "17 · Nanite LOD Level",
             "18 · Nanite Clusters",
+            "19 · Nanite Groups",
+            "20 · Nanite Error Budget",
         }};
         const Rectangle2D DropSheet = DropdownSelector::QuerySheetBounds(
             HeaderDebugButtonBounds, static_cast<uint32_t>(HeaderDebugOptions.size()));
-        const uint32_t CurIdx    = DisplaySettings.DebugChannelIndex % 19u;
+        const uint32_t CurIdx    = DisplaySettings.DebugChannelIndex % 21u;
         uint32_t       ChosenIdx = CurIdx;
         if (DropdownSelector::ConstructOptionSheet(
                 ActiveOverlay, HeaderDebugButtonBounds, HeaderDebugOptions.data(),

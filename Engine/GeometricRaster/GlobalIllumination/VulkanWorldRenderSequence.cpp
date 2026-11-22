@@ -1181,11 +1181,12 @@ bool VulkanWorldRenderSequence::DispatchGpuScenePrecompute(const WorldSceneSpeci
     Mathematics::Axis3D UpAxis    {};
     GeometrySpace::ConstructDuffOrthonormalBasis(LightFwd, RightAxis, UpAxis);
 
+    const uint32_t CascadeRes = BoundDevice->QueryHardwareAccelerated() ? 1024u : 512u;
     auto InitCascadeBasis = [&](OrthographicShadowCascade& Cascade, float HalfSpanMeters)
     {
         Cascade.HalfSpanMeters    = HalfSpanMeters;
         Cascade.DepthExtentMeters = 28.0f;
-        Cascade.ResolutionTexels  = 1024u;
+        Cascade.ResolutionTexels  = CascadeRes;
         Cascade.LightRightAxis    = RightAxis;
         Cascade.LightUpAxis       = UpAxis;
         Cascade.LightForwardAxis  = LightFwd;
@@ -1198,7 +1199,7 @@ bool VulkanWorldRenderSequence::DispatchGpuScenePrecompute(const WorldSceneSpeci
     };
     InitCascadeBasis(CachedFineSunCascade, 2.85f);
     InitCascadeBasis(CachedSunCascade, 8.5f);
-    CoarseShadowOffsetTexels = 1024u * 1024u;
+    CoarseShadowOffsetTexels = CascadeRes * CascadeRes;
 
     const uint64_t ShadowDepthBytes = static_cast<uint64_t>(CoarseShadowOffsetTexels) * 2ull * sizeof(float);
     EnsureDeviceBufferCapacity(SolarShadowDepthBuffer, ShadowDepthBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
@@ -1395,8 +1396,9 @@ bool VulkanWorldRenderSequence::DispatchGpuScenePrecompute(const WorldSceneSpeci
     }
     else
     {
+        const uint32_t CascadeGroups = (CascadeRes + 7u) / 8u;
         const auto CascadeSlots = ConstructPrecomputeSlots(0ull);
-        if (!DispatchEncoder.EncodeComputeDispatch(Cmd, ShadowCascadeProgramHandle, CascadeSlots, 128u, 128u, 2u))
+        if (!DispatchEncoder.EncodeComputeDispatch(Cmd, ShadowCascadeProgramHandle, CascadeSlots, CascadeGroups, CascadeGroups, 2u))
         {
             BoundDevice->FreeCommandBuffer(Cmd);
             return false;
@@ -1800,8 +1802,9 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
 
     struct InstanceCut
     {
-        uint32_t InstanceIndex = 0u;
-        SpatialAcceleration::ClusterCutSelection Selection {};
+        uint32_t                                 InstanceIndex  = 0u;
+        Mathematics::Axis3D                      LocalCameraPos {};
+        SpatialAcceleration::ClusterCutSelection Selection      {};
     };
     std::vector<InstanceCut> Cuts;
     Cuts.reserve(Scene.ClusterInstances.size());
@@ -1811,9 +1814,17 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
     {
         Signature = (Signature ^ Value) * 1099511628211ull;
     };
-    MixSignature(static_cast<uint64_t>(std::lround(PixelError * 100.0f)));
+    if (Config.DebugChannel == 20u)
+    {
+        MixSignature(static_cast<uint64_t>(std::lround(PixelError * 100.0f)));
+    }
+    MixSignature(static_cast<uint64_t>(static_cast<uint32_t>(Config.NaniteForcedLevel + 2)));
 
-    uint32_t ActiveClusters  = 0u;
+    uint32_t ActiveClusters = 0u;
+    uint32_t TotalClusters  = 0u;
+    uint32_t CulledBackface = 0u;
+    uint32_t CulledFrustum  = 0u;
+    uint32_t TestedGroups   = 0u;
     uint32_t ActiveTriangles = 0u;
     for (uint32_t InstIdx = 0u; InstIdx < static_cast<uint32_t>(Scene.ClusterInstances.size()); ++InstIdx)
     {
@@ -1833,6 +1844,7 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
             NaniteLodStats.ActiveTriangleCount = NaniteLodStats.FullTriangleCount;
             return;
         }
+        TotalClusters += static_cast<uint32_t>(Inst.PyramidAsset->Clusters.size());
         const float ScaleU = std::max(1.0e-4f, Inst.UniformScale);
         const float ScaleX = (Inst.NonUniformScale.X > 1.0e-4f) ? Inst.NonUniformScale.X : ScaleU;
         const float ScaleY = (Inst.NonUniformScale.Y > 1.0e-4f) ? Inst.NonUniformScale.Y : ScaleU;
@@ -1846,10 +1858,51 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
             ? Mathematics::Axis3D{ RelWorld.X * CosZ + RelWorld.Y * SinZ, -RelWorld.X * SinZ + RelWorld.Y * CosZ, RelWorld.Z }
             : RelWorld;
         const Mathematics::Axis3D LocalCamera { Unrotated.X / ScaleX, Unrotated.Y / ScaleY, Unrotated.Z / ScaleZ };
+
+        std::array<SpatialAcceleration::ClusterFrustumPlane, 5u> LocalPlanes {};
+        std::span<const SpatialAcceleration::ClusterFrustumPlane> PlaneSpan {};
+        if (Config.NaniteFrustumCullEnabled)
+        {
+            const auto UnrotateDir = [YawRotated, CosZ, SinZ](Mathematics::Axis3D Dir) noexcept -> Mathematics::Axis3D
+            {
+                return YawRotated
+                    ? Mathematics::Axis3D{ Dir.X * CosZ + Dir.Y * SinZ, -Dir.X * SinZ + Dir.Y * CosZ, Dir.Z }
+                    : Dir;
+            };
+            const auto BuildLocalPlane = [&](Mathematics::Axis3D WorldInwardNormal, float WorldExtraOffset = 0.0f) noexcept
+                -> SpatialAcceleration::ClusterFrustumPlane
+            {
+                // World plane: dot(Nw, Pw - Cam) + WorldExtraOffset >= 0.
+                // With Pw = T + R * S * Pl: dot(S * R^T * Nw, Pl - LocalCam) + WorldExtraOffset >= 0.
+                const Mathematics::Axis3D UnrotN = UnrotateDir(WorldInwardNormal);
+                const Mathematics::Axis3D ScaledN { UnrotN.X * ScaleX, UnrotN.Y * ScaleY, UnrotN.Z * ScaleZ };
+                const float NormLen = std::max(1.0e-6f, Mathematics::EvaluateLength(ScaledN));
+                const Mathematics::Axis3D UnitLocalN = ScaledN * (1.0f / NormLen);
+                const float LocalOffset = -Mathematics::EvaluateDot(UnitLocalN, LocalCamera) + (WorldExtraOffset / NormLen);
+                return { UnitLocalN, LocalOffset };
+            };
+            LocalPlanes[0u] = BuildLocalPlane(Basis.ForwardAxis, -std::max(1.0e-3f, Basis.NearClip));
+            LocalPlanes[1u] = BuildLocalPlane(Basis.ForwardAxis * Basis.TanHalfFovX + Basis.RightAxis);
+            LocalPlanes[2u] = BuildLocalPlane(Basis.ForwardAxis * Basis.TanHalfFovX - Basis.RightAxis);
+            LocalPlanes[3u] = BuildLocalPlane(Basis.ForwardAxis * Basis.TanHalfFovY + Basis.UpAxis);
+            LocalPlanes[4u] = BuildLocalPlane(Basis.ForwardAxis * Basis.TanHalfFovY - Basis.UpAxis);
+            PlaneSpan = LocalPlanes;
+        }
+
         InstanceCut Cut {};
-        Cut.InstanceIndex = InstIdx;
-        Cut.Selection     = Inst.PyramidAsset->SelectMonotonicCut(LocalCamera, PixelsPerRadian, PixelError, false);
-        ActiveClusters += static_cast<uint32_t>(Cut.Selection.ActiveClusterIndices.size());
+        Cut.InstanceIndex  = InstIdx;
+        Cut.LocalCameraPos = LocalCamera;
+        Cut.Selection      = Inst.PyramidAsset->SelectMonotonicCut(
+            LocalCamera,
+            PixelsPerRadian,
+            PixelError,
+            Config.NaniteBackfaceConeEnabled,
+            PlaneSpan,
+            Config.NaniteForcedLevel);
+        ActiveClusters  += static_cast<uint32_t>(Cut.Selection.ActiveClusterIndices.size());
+        CulledBackface  += Cut.Selection.CulledBackfaceCount;
+        CulledFrustum   += Cut.Selection.CulledFrustumCount;
+        TestedGroups    += Cut.Selection.TestedGroupCount;
         ActiveTriangles += Cut.Selection.ActiveTriangleCount;
         MixSignature(InstIdx + 1u);
         MixSignature(static_cast<uint64_t>(std::lround(Inst.RotationZDegrees * 100.0f)));
@@ -1863,10 +1916,20 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
         {
             MixSignature(ClusterIdx + 1u);
         }
+        if (Config.DebugChannel == 20u)
+        {
+            MixSignature(static_cast<uint64_t>(std::lround(LocalCamera.X * 50.0f)));
+            MixSignature(static_cast<uint64_t>(std::lround(LocalCamera.Y * 50.0f)));
+            MixSignature(static_cast<uint64_t>(std::lround(LocalCamera.Z * 50.0f)));
+        }
         Cuts.push_back(std::move(Cut));
     }
 
     NaniteLodStats.ActiveClusterCount  = ActiveClusters;
+    NaniteLodStats.TotalClusterCount   = TotalClusters;
+    NaniteLodStats.CulledBackfaceCount = CulledBackface;
+    NaniteLodStats.CulledFrustumCount  = CulledFrustum;
+    NaniteLodStats.TestedDagGroupCount = TestedGroups;
     NaniteLodStats.ActiveTriangleCount = ActiveTriangles;
     if (Signature == CachedNaniteCutSignature && NaniteLodBuffersActive)
     {
@@ -1877,16 +1940,21 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
     // Emit world-space triangles for the active cut only.
     std::vector<SpatialAcceleration::RayTrianglePrimitive>  LodPrims;
     std::vector<SpatialAcceleration::TriangleSmoothNormals> LodNormals;
-    std::vector<uint32_t> LodPrimLevel;   // per PrimitiveOrdinal: hierarchy level (debug channel 17)
-    std::vector<uint32_t> LodPrimCluster; // per PrimitiveOrdinal: global cluster ordinal (debug channel 18)
+    std::vector<uint32_t> LodPrimLevel;      // per PrimitiveOrdinal: hierarchy level (debug channel 17)
+    std::vector<uint32_t> LodPrimCluster;    // per PrimitiveOrdinal: global cluster ordinal (debug channel 18)
+    std::vector<uint32_t> LodPrimGroup;      // per PrimitiveOrdinal: global simplification group ordinal (debug channel 19)
+    std::vector<float>    LodPrimErrorRatio; // per PrimitiveOrdinal: projected selfError / pixelError ratio (debug channel 20)
     LodPrims.reserve(std::max(1u, ActiveTriangles));
     LodNormals.reserve(std::max(1u, ActiveTriangles));
     LodPrimLevel.reserve(std::max(1u, ActiveTriangles));
     LodPrimCluster.reserve(std::max(1u, ActiveTriangles));
+    LodPrimGroup.reserve(std::max(1u, ActiveTriangles));
+    LodPrimErrorRatio.reserve(std::max(1u, ActiveTriangles));
     uint32_t LevelTriangles[8] {};
     uint32_t LevelClusters[8] {};
     uint32_t PrimOrdinal = 0u;
     uint32_t GlobalClusterOrdinal = 0u;
+    uint32_t GlobalGroupBaseOrdinal = 0u;
     for (const InstanceCut& Cut : Cuts)
     {
         const RigidClusterInstance& Inst = Scene.ClusterInstances[Cut.InstanceIndex];
@@ -1925,6 +1993,14 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
             LevelClusters[Level] += 1u;
             LevelTriangles[Level] += Cluster.TriangleCount;
             const uint32_t ThisClusterOrdinal = GlobalClusterOrdinal++;
+            const uint32_t LocalGroupOrd = (Cluster.OriginGroupOrdinal > 0u)
+                ? Cluster.OriginGroupOrdinal
+                : Cluster.EnclosingGroupOrdinal;
+            const uint32_t ThisGroupOrdinal = GlobalGroupBaseOrdinal + LocalGroupOrd;
+            const float SelfPx = (Cluster.OriginGroupOrdinal > 0u)
+                ? Pyramid->EvaluateGroupProjectedPixelError(Cluster.OriginGroupOrdinal, Cut.LocalCameraPos, PixelsPerRadian)
+                : 0.0f;
+            const float ErrorRatio = std::clamp(SelfPx / std::max(1.0e-4f, PixelError), 0.0f, 1.0f);
             for (uint32_t TriOff = 0u; TriOff < Cluster.TriangleCount; ++TriOff)
             {
                 const auto& Tri = Pyramid->Triangles[Cluster.TriangleStartOffset + TriOff];
@@ -1944,6 +2020,8 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
                 Prim.PrimitiveOrdinal = PrimOrdinal++;
                 LodPrimLevel.push_back(Level);
                 LodPrimCluster.push_back(ThisClusterOrdinal);
+                LodPrimGroup.push_back(ThisGroupOrdinal);
+                LodPrimErrorRatio.push_back(ErrorRatio);
                 LodPrims.push_back(Prim);
                 SpatialAcceleration::TriangleSmoothNormals Smooth {};
                 const Mathematics::Axis3D N0 = GeometrySpace::UnpackOctahedralDirection32(Tri.PackedNormal0);
@@ -1955,10 +2033,30 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
                 LodNormals.push_back(Smooth);
             }
         }
+        GlobalGroupBaseOrdinal += static_cast<uint32_t>(Pyramid->Groups.size()) + 4u;
     }
     if (LodPrims.empty())
     {
-        NaniteLodStats.Enabled = false;
+        // All clusters were frustum/backface culled for this camera view: upload an empty sentinel BVH entry.
+        const SpatialAcceleration::WideTreeEntry EmptyEntry = []() noexcept
+        {
+            SpatialAcceleration::WideTreeEntry Entry {};
+            Entry.BranchReference.fill(SpatialAcceleration::EmptyBranchReference);
+            return Entry;
+        }();
+        (void)UploadToDeviceBuffer(BvhEntryBuffer, &EmptyEntry, sizeof(EmptyEntry), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        UploadedBvhCount = 0u;
+        const uint32_t PreviousRebuilds = NaniteLodStats.GeometryRebuildCount;
+        NaniteLodStats = {};
+        NaniteLodStats.Enabled              = true;
+        NaniteLodStats.TotalClusterCount    = TotalClusters;
+        NaniteLodStats.CulledBackfaceCount  = CulledBackface;
+        NaniteLodStats.CulledFrustumCount   = CulledFrustum;
+        NaniteLodStats.TestedDagGroupCount  = TestedGroups;
+        NaniteLodStats.FullTriangleCount    = static_cast<uint32_t>(Scene.SceneTree.Primitives.size());
+        NaniteLodStats.GeometryRebuildCount = PreviousRebuilds + 1u;
+        CachedNaniteCutSignature            = Signature;
+        NaniteLodBuffersActive              = true;
         return;
     }
 
@@ -2005,11 +2103,14 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
         OutTri.Normal2Slot[1] = N2.Y;
         OutTri.Normal2Slot[2] = N2.Z;
         OutTri.Normal2Slot[3] = static_cast<float>(Prim.MaterialOrdinal);
-        // Nanite debug packing in spare pad lanes: level in Corner0Pad.w, cluster in Edge01Pad.w
+        // Nanite debug packing in spare pad lanes:
+        //   Corner0Pad.w = hierarchy level, Edge01Pad.w = cluster ordinal, Edge02Pad.w = group ordinal, Normal0Pad.w = error ratio
         const uint32_t Ord = Prim.PrimitiveOrdinal;
         OutTri.Corner0Pad[3] = (Ord < LodPrimLevel.size()) ? static_cast<float>(LodPrimLevel[Ord]) : 0.0f;
         OutTri.Edge01Pad[3]  = (Ord < LodPrimCluster.size()) ? static_cast<float>(LodPrimCluster[Ord]) : 0.0f;
-        ShadedTris[Idx]       = OutTri;
+        OutTri.Edge02Pad[3]  = (Ord < LodPrimGroup.size()) ? static_cast<float>(LodPrimGroup[Ord]) : 0.0f;
+        OutTri.Normal0Pad[3] = (Ord < LodPrimErrorRatio.size()) ? LodPrimErrorRatio[Ord] : 0.0f;
+        ShadedTris[Idx]      = OutTri;
     }
     const uint64_t TriBytes = ShadedTris.size() * sizeof(GpuShadedTriangle96);
     if (!UploadToDeviceBuffer(ShadedTriangleBuffer, ShadedTris.data(), TriBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT))
@@ -2022,6 +2123,10 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
     NaniteLodStats = {};
     NaniteLodStats.Enabled              = true;
     NaniteLodStats.ActiveClusterCount   = ActiveClusters;
+    NaniteLodStats.TotalClusterCount    = TotalClusters;
+    NaniteLodStats.CulledBackfaceCount  = CulledBackface;
+    NaniteLodStats.CulledFrustumCount   = CulledFrustum;
+    NaniteLodStats.TestedDagGroupCount  = TestedGroups;
     NaniteLodStats.ActiveTriangleCount  = static_cast<uint32_t>(LodPrims.size());
     NaniteLodStats.FullTriangleCount    = static_cast<uint32_t>(Scene.SceneTree.Primitives.size());
     NaniteLodStats.GeometryRebuildCount = PreviousRebuilds + 1u;
@@ -2597,8 +2702,9 @@ bool VulkanWorldRenderSequence::ExecuteWorldRenderDispatch(
     Uniforms.AtmosphereMaskPad[1] = AtmosphericSkySequence::SkyViewWidthPx;
     Uniforms.AtmosphereMaskPad[2] = AtmosphericSkySequence::SkyViewHeightPx;
     Uniforms.AtmosphereMaskPad[3] =
-        (Config.ReflectionsEnabled ? 0u : 2u) |
-        (Config.RaytracingEnabled  ? 0u : 8u) |
+        (Config.ReflectionsEnabled    ? 0u : 2u) |
+        (Config.RaytracingEnabled     ? 0u : 8u) |
+        (Config.NaniteWireframeOverlay ? 16u : 0u) |
         ((static_cast<uint32_t>(Config.SdfPenumbraMode) & 0x7u) << 16u) |
         ((static_cast<uint32_t>(Config.GiCandidate) & 0x3u) << 20u);
 

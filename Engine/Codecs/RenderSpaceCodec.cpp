@@ -41,6 +41,12 @@ SpaceContainerPayload RenderSpaceEncoder::BuildPayload(
     ConfigTbl.insert_or_assign("RenderScalePercent", static_cast<double>(Model.RenderScalePercent));
     ConfigTbl.insert_or_assign("CheapMatCapTwoByTwoShadow", Model.CheapMatCapTwoByTwoShadow);
     ConfigTbl.insert_or_assign("StaticCloudRenderScale", static_cast<double>(Model.StaticCloudRenderScale));
+    ConfigTbl.insert_or_assign("NaniteLodEnabled", Model.RenderConfiguration.NaniteLodEnabled);
+    ConfigTbl.insert_or_assign("NanitePixelError", static_cast<double>(Model.RenderConfiguration.NanitePixelError));
+    ConfigTbl.insert_or_assign("NaniteFrustumCullEnabled", Model.RenderConfiguration.NaniteFrustumCullEnabled);
+    ConfigTbl.insert_or_assign("NaniteBackfaceConeEnabled", Model.RenderConfiguration.NaniteBackfaceConeEnabled);
+    ConfigTbl.insert_or_assign("NaniteWireframeOverlay", Model.RenderConfiguration.NaniteWireframeOverlay);
+    ConfigTbl.insert_or_assign("NaniteForcedLevel", static_cast<int64_t>(Model.RenderConfiguration.NaniteForcedLevel));
     Payload.DomainManifest.insert_or_assign(".RenderConfiguration", std::move(ConfigTbl));
 
     toml::table CascadeTbl{};
@@ -127,6 +133,12 @@ bool RenderSpaceDecoder::ExtractModel(
         OutModel.RenderScalePercent                     = static_cast<float>((*ConfigTbl)["RenderScalePercent"].value_or(100.0));
         OutModel.CheapMatCapTwoByTwoShadow              = (*ConfigTbl)["CheapMatCapTwoByTwoShadow"].value_or(true);
         OutModel.StaticCloudRenderScale                 = static_cast<float>((*ConfigTbl)["StaticCloudRenderScale"].value_or(1.0));
+        OutModel.RenderConfiguration.NaniteLodEnabled          = (*ConfigTbl)["NaniteLodEnabled"].value_or(true);
+        OutModel.RenderConfiguration.NanitePixelError          = static_cast<float>((*ConfigTbl)["NanitePixelError"].value_or(1.25));
+        OutModel.RenderConfiguration.NaniteFrustumCullEnabled  = (*ConfigTbl)["NaniteFrustumCullEnabled"].value_or(false);
+        OutModel.RenderConfiguration.NaniteBackfaceConeEnabled = (*ConfigTbl)["NaniteBackfaceConeEnabled"].value_or(false);
+        OutModel.RenderConfiguration.NaniteWireframeOverlay    = (*ConfigTbl)["NaniteWireframeOverlay"].value_or(false);
+        OutModel.RenderConfiguration.NaniteForcedLevel         = static_cast<int32_t>((*ConfigTbl)["NaniteForcedLevel"].value_or(int64_t{ -1 }));
     }
 
     if (const auto* CascadeTbl = Payload.DomainManifest[".ShadowCascades"].as_table())

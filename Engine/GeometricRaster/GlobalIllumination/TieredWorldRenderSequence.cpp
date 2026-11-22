@@ -357,13 +357,61 @@ struct CpuDownsampledCloudField
     return static_cast<uint32_t>(Pyramid->Clusters[Hit.ClusterOrdinal].HierarchyLevel);
 }
 
+[[nodiscard]] uint32_t ResolveHitGroupKey(
+    const WorldSceneSpecification&       Scene,
+    const AnalyticResolvedSurfaceSample& Hit) noexcept
+{
+    if (Hit.InstanceOrdinal >= Scene.ClusterInstances.size())
+    {
+        return 0u;
+    }
+    const auto* Pyramid = Scene.ClusterInstances[Hit.InstanceOrdinal].PyramidAsset;
+    if (Pyramid == nullptr || Hit.ClusterOrdinal >= Pyramid->Clusters.size())
+    {
+        return 0u;
+    }
+    const auto& Cluster = Pyramid->Clusters[Hit.ClusterOrdinal];
+    const uint32_t GroupOrd = (Cluster.OriginGroupOrdinal > 0u) ? Cluster.OriginGroupOrdinal : Cluster.EnclosingGroupOrdinal;
+    return Hit.InstanceOrdinal * 4096u + GroupOrd;
+}
+
+[[nodiscard]] float ResolveHitErrorBudgetRatio(
+    const WorldSceneSpecification&       Scene,
+    const OrthonormalCameraBasis&        CameraBasis,
+    float                                MaxAllowedPixelError,
+    const AnalyticResolvedSurfaceSample& Hit) noexcept
+{
+    if (Hit.InstanceOrdinal >= Scene.ClusterInstances.size())
+    {
+        return 0.0f;
+    }
+    const auto& Inst    = Scene.ClusterInstances[Hit.InstanceOrdinal];
+    const auto* Pyramid = Inst.PyramidAsset;
+    if (Pyramid == nullptr || Hit.ClusterOrdinal >= Pyramid->Clusters.size())
+    {
+        return 0.0f;
+    }
+    const auto& Cluster = Pyramid->Clusters[Hit.ClusterOrdinal];
+    if (Cluster.OriginGroupOrdinal == 0u)
+    {
+        return 0.0f;
+    }
+    const float Scale = std::max(1.0e-4f, Inst.UniformScale);
+    const Mathematics::Axis3D LocalCamera = (CameraBasis.CameraOrigin - Inst.WorldTranslation) * (1.0f / Scale);
+    const float PixelsPerRadian = static_cast<float>(CameraBasis.HeightPx) / std::max(1.0e-5f, 2.0f * CameraBasis.TanHalfFovY);
+    const float SelfPx = Pyramid->EvaluateGroupProjectedPixelError(Cluster.OriginGroupOrdinal, LocalCamera, PixelsPerRadian);
+    return std::clamp(SelfPx / std::max(1.0e-4f, MaxAllowedPixelError), 0.0f, 1.0f);
+}
+
 [[nodiscard]] Mathematics::LinearRGB EvaluateDebugChannelColor(
     uint32_t                              DebugChannel,
     Mathematics::Axis3D                   CameraOrigin,
     const AnalyticResolvedSurfaceSample&  Hit,
     const MaterialSpace::SurfaceMaterial& Mat,
     uint32_t                              HitLodLevel     = 0u,
-    uint32_t                              HitClusterKey   = 0u) noexcept
+    uint32_t                              HitClusterKey   = 0u,
+    uint32_t                              HitGroupKey     = 0u,
+    float                                 HitErrorRatio   = 0.0f) noexcept
 {
     if (DebugChannel == 17u)
     {
@@ -376,23 +424,41 @@ struct CpuDownsampledCloudField
         const float FormShade = 0.30f + 0.70f * std::clamp(Hit.TangentFrame.NormalZ.Z * 0.5f + 0.5f, 0.0f, 1.0f);
         return LevelColor * FormShade;
     }
-    if (DebugChannel == 18u)
+    if (DebugChannel == 18u || DebugChannel == 19u)
     {
-        // Nanite Cluster ID: one vivid colour per cluster
-        const uint32_t CId = HitClusterKey + 1u;
+        // Nanite Cluster ID (18) or Simplification Group ID (19): one vivid deterministic colour per key
+        const uint32_t SeedId = ((DebugChannel == 19u) ? HitGroupKey : HitClusterKey) + 1u;
         const auto Frac = [](float V) noexcept { return V - std::floor(V); };
-        Mathematics::LinearRGB ClusterColor {
-            Frac(static_cast<float>(CId) * 0.3819660113f),
-            Frac(static_cast<float>(CId) * 0.6180339887f + 0.27f),
-            Frac(static_cast<float>(CId) * 0.7548776662f + 0.53f),
+        Mathematics::LinearRGB KeyColor {
+            Frac(static_cast<float>(SeedId) * 0.3819660113f),
+            Frac(static_cast<float>(SeedId) * 0.6180339887f + 0.27f),
+            Frac(static_cast<float>(SeedId) * 0.7548776662f + 0.53f),
         };
-        const float MaxComp = std::max(ClusterColor.R, std::max(ClusterColor.G, ClusterColor.B));
+        const float MaxComp = std::max(KeyColor.R, std::max(KeyColor.G, KeyColor.B));
         if (MaxComp > 1.0e-5f)
         {
-            ClusterColor = ClusterColor * (1.0f / MaxComp);
+            KeyColor = KeyColor * (1.0f / MaxComp);
         }
         const float FormShade = 0.35f + 0.65f * std::clamp(Hit.TangentFrame.NormalZ.Z * 0.5f + 0.5f, 0.0f, 1.0f);
-        return ClusterColor * FormShade;
+        return KeyColor * FormShade;
+    }
+    if (DebugChannel == 20u)
+    {
+        // Nanite Error Budget (GeometryCompiler errorBudgetColor parity): cool green -> amber -> hot red
+        const float U = std::clamp(HitErrorRatio, 0.0f, 1.0f);
+        Mathematics::LinearRGB RampColor {};
+        if (U < 0.5f)
+        {
+            const float K = U * 2.0f;
+            RampColor = { 0.16f + 0.76f * K, 0.78f + 0.06f * K, 0.38f - 0.24f * K };
+        }
+        else
+        {
+            const float K = (U - 0.5f) * 2.0f;
+            RampColor = { 0.92f, 0.84f - 0.58f * K, 0.14f + 0.06f * K };
+        }
+        const float FormShade = 0.35f + 0.65f * std::clamp(Hit.TangentFrame.NormalZ.Z * 0.5f + 0.5f, 0.0f, 1.0f);
+        return RampColor * FormShade;
     }
     if (DebugChannel == 1u)
     {
@@ -642,8 +708,14 @@ WorldRenderOutput TieredWorldRenderSequence::RenderWorldFrameWithEngine(
             ? &PreviousHiZ
             : nullptr;
 
+    ClusterCullSettings CullCfg {};
+    CullCfg.MaxAllowedLodErrorPx     = Config.NaniteLodEnabled ? Config.NanitePixelError : 0.0f;
+    CullCfg.EnableNormalConeBackface = Config.NaniteBackfaceConeEnabled;
+    CullCfg.EnableDagFrustumCull     = Config.NaniteFrustumCullEnabled;
+    CullCfg.ForcedHierarchyLevel     = Config.NaniteLodEnabled ? Config.NaniteForcedLevel : 0;
+
     Result.VisibilityCull = ClusterCullEncoder::EncodePhaseOneVisibility(
-        CurrentCamera, PreparedScene.ClusterInstances, PrevHiZPtr, &PreviousCamera);
+        CurrentCamera, PreparedScene.ClusterInstances, PrevHiZPtr, &PreviousCamera, CullCfg);
 
     VisibilityBufferTargets VisTargets {};
     VisTargets.AllocateClearedImage(Result.WidthPx, Result.HeightPx);
@@ -659,7 +731,7 @@ WorldRenderOutput TieredWorldRenderSequence::RenderWorldFrameWithEngine(
     if (!Result.VisibilityCull.PhaseOneDeferredQueue.empty())
     {
         ClusterCullEncoder::ResolvePhaseTwoDisocclusions(
-            CurrentCamera, PreparedScene.ClusterInstances, CurrentHiZ, Result.VisibilityCull);
+            CurrentCamera, PreparedScene.ClusterInstances, CurrentHiZ, Result.VisibilityCull, CullCfg);
         VisTargets.AllocateClearedImage(Result.WidthPx, Result.HeightPx);
         VisibilityClusterRasterization::RasterizeOpaqueClusters(
             CurrentCamera, PreparedScene.ClusterInstances,
@@ -737,7 +809,15 @@ WorldRenderOutput TieredWorldRenderSequence::RenderWorldFrameWithEngine(
                         ? CheapShadow.RawVisibility[Off]
                         : 1.0f;
                     OutHdr = (Config.DebugChannel != 0u)
-                        ? EvaluateDebugChannelColor(Config.DebugChannel, CurBasis.CameraOrigin, Hit, Mat, ResolveHitLodLevel(PreparedScene, Hit), Hit.InstanceOrdinal * 4096u + Hit.ClusterOrdinal)
+                        ? EvaluateDebugChannelColor(
+                              Config.DebugChannel,
+                              CurBasis.CameraOrigin,
+                              Hit,
+                              Mat,
+                              ResolveHitLodLevel(PreparedScene, Hit),
+                              Hit.InstanceOrdinal * 4096u + Hit.ClusterOrdinal,
+                              ResolveHitGroupKey(PreparedScene, Hit),
+                              ResolveHitErrorBudgetRatio(PreparedScene, CurBasis, Config.NanitePixelError, Hit))
                         : EvaluateMatCapShading(CurBasis, Hit.TangentFrame.NormalZ, Mat, SunVis);
                 }
                 else if (PreparedScene.Atmosphere.Medium.AtmosphereEnabled && Config.DebugChannel == 0u)
@@ -988,7 +1068,15 @@ WorldRenderOutput TieredWorldRenderSequence::RenderWorldFrameWithEngine(
                 }
                 else
                 {
-                    Dbg = EvaluateDebugChannelColor(Config.DebugChannel, CurBasis.CameraOrigin, Hit, Mat, ResolveHitLodLevel(PreparedScene, Hit), Hit.InstanceOrdinal * 4096u + Hit.ClusterOrdinal);
+                    Dbg = EvaluateDebugChannelColor(
+                        Config.DebugChannel,
+                        CurBasis.CameraOrigin,
+                        Hit,
+                        Mat,
+                        ResolveHitLodLevel(PreparedScene, Hit),
+                        Hit.InstanceOrdinal * 4096u + Hit.ClusterOrdinal,
+                        ResolveHitGroupKey(PreparedScene, Hit),
+                        ResolveHitErrorBudgetRatio(PreparedScene, CurBasis, Config.NanitePixelError, Hit));
                 }
                 Result.CompositeLinearHdr[Off] = Dbg;
                 Result.DisplayRgba8[Off * 4u + 0u] = static_cast<uint8_t>(std::round(EncodeLinearToSrgb(Dbg.R) * 255.0f));
