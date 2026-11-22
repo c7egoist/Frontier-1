@@ -236,6 +236,10 @@ private:
     bool                                                             PendingInteractionGizmoRefresh = false;
     bool                                                             PendingInteractionSceneSync    = false;
     bool                                                             PendingInteractionFastDrag     = false;
+    bool                                                             MarqueePressCandidate          = false;
+    bool                                                             MarqueeBoxActive               = false;
+    Point2D                                                          MarqueeStartLogicalPos         {};
+    Point2D                                                          MarqueeStartUv                 {};
     std::function<void()>                                            ReturnToBrowserCallback {};
     std::string                                                      ActiveProjectTitle   {};
     std::vector<ComponentClass::ComponentClassDefinition> ComponentDefinitions {}; // [-] - Loaded .ComponentSpace definitions

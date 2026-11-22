@@ -632,6 +632,13 @@ void ViewportPanel::RenderCanvasPane(
     // Bottom-right 3D X/Y/Z orientation triad sign
     WorkspaceAppearance::ConstructOrientationAxesSign(Surface, PaneBounds, Projection);
 
+    if (MarqueeSelectionActive && MarqueeSelectionBounds.Width >= 2.0f && MarqueeSelectionBounds.Height >= 2.0f &&
+        (!SplitViewportEnabled || ActivePaneIndex == PaneIndex))
+    {
+        Surface.FillRectangle(MarqueeSelectionBounds, ColorRgba{ 232, 182, 92, 34 }, 3.0f);
+        Surface.StrokeRectangle(MarqueeSelectionBounds, WorkspaceSurfaceColors::SelectionAmber, 3.0f, 1.25f);
+    }
+
     Surface.PopClip();
 }
 

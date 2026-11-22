@@ -36,6 +36,7 @@ struct RigidClusterInstance
     Mathematics::Axis3D                                  NonUniformScale     { 1.0f, 1.0f, 1.0f }; // [-] - Full 3-axis rigid scale
     Mathematics::Axis3D                                  LocalHalfExtents    { 0.5f, 0.5f, 0.5f }; // [m] - Unscaled local half-extents / shape radii
     uint32_t                                             AnalyticalShapeCode = 0u;      // [id]  - 0=SignedVolume, 1=Box, 2=Sphere, 3=Cylinder, 4=Cone, 5=Torus
+    bool                                                 DedicatedMaterialOverride = false; // [-] - Override per-face material slot with MaterialSlot
     const DistanceFieldSpace::LocalSignedDistanceVolume* LocalSdfVolume      = nullptr; // [-]   - Optional per-asset signed local SDF volume
 };
 

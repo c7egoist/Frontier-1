@@ -42,9 +42,10 @@ enum class ShowcasePrimitiveShape : uint8_t
 
 struct ShowcaseGeometryAsset
 {
-    GeometrySpace::PolygonNetwork                  Network  {}; // [-] - Authored polygon network primitive
-    SpatialAcceleration::ClusterPyramid            Pyramid  {}; // [-] - Built 3-level cluster pyramid
-    DistanceFieldSpace::LocalSignedDistanceVolume  LocalSdf {}; // [-] - Optional per-asset signed local SDF volume
+    GeometrySpace::PolygonNetwork                  Network   {}; // [-] - Authored polygon network primitive
+    SpatialAcceleration::ClusterPyramid            Pyramid   {}; // [-] - Built 3-level cluster pyramid
+    DistanceFieldSpace::LocalSignedDistanceVolume  LocalSdf  {}; // [-] - Optional per-asset signed local SDF volume
+    SpatialAcceleration::WideBoundingTree          LocalTree {}; // [-] - Per-asset local BVH4 BLAS for exact ray picking
 };
 
 struct CachedLocalSmoothTriangle
@@ -76,7 +77,8 @@ struct ShowcaseWorldAssetEntry
     bool                   DedicatedMaterial    = false;                     // [-]   - True once given an isolated material slot
     ShowcasePrimitiveShape PrimitiveShape       = ShowcasePrimitiveShape::Box; // [-] - Underlying analytical primitive shape
     OutlinerSlotToken      SlotToken            {};                          // [id]  - Registered OutlinerPanel slot token
-    std::vector<CachedLocalSmoothTriangle> LocalSmoothTriangles {};          // [-]   - Cached local triangles & 49-deg smooth normals
+    std::vector<CachedLocalSmoothTriangle>        LocalSmoothTriangles {};   // [-]   - Cached local triangles & 49-deg smooth normals
+    mutable SpatialAcceleration::WideBoundingTree FallbackPickTree     {};   // [-]   - Lazy local BVH4 BLAS for exact picking
 };
 
 struct ShowcaseAreaLightLink
@@ -191,12 +193,21 @@ OutlinerSlotToken ConstructShowcaseModelInOutliner(
     Mathematics::Axis3D       WorldPosition,
     OutlinerSlotToken         ExplicitEnclosure = {});
 
-// Analytical 3D ray pick against visible Showcase geometry and area lights for NormalizedU/V in [0, 1]
+// Exact BVH4 BLAS + analytical 3D ray pick against visible Showcase geometry and area lights for NormalizedU/V in [0, 1]
 [[nodiscard]] OutlinerSlotToken PickShowcaseGalleryEntryAtUv(
     const OutlinerPanel&            SourceOutliner,
     const ShowcaseWorldSceneBundle& Bundle,
     float                           NormalizedU,
     float                           NormalizedV) noexcept;
+
+// Screen-space marquee box selection across visible Showcase geometry and area lights for Normalized [MinU..MaxU, MinV..MaxV]
+[[nodiscard]] std::vector<OutlinerSlotToken> PickShowcaseGalleryEntriesInUvBox(
+    const OutlinerPanel&            SourceOutliner,
+    const ShowcaseWorldSceneBundle& Bundle,
+    float                           MinNormalizedU,
+    float                           MinNormalizedV,
+    float                           MaxNormalizedU,
+    float                           MaxNormalizedV);
 
 // Raycasts the gallery floor / scene surfaces at NormalizedU/V in [0, 1] for Z-up (+Z) surface placement
 [[nodiscard]] Mathematics::Axis3D RaycastShowcasePlacementAtUv(

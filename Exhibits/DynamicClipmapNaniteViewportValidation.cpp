@@ -201,9 +201,10 @@ int main()
         WorldRenderConfiguration Config {};
         Config.Engine           = EngineMode;
         Config.ShadowAlgorithm  = SolarShadowAlgorithm::ContactPcss;
-        Config.NaniteLodEnabled = true;
-        Config.NanitePixelError = PixelError;
-        Config.DebugChannel     = DebugChannel;
+        Config.NaniteLodEnabled        = true;
+        Config.NanitePixelError        = PixelError;
+        Config.DynamicClipmapScrolling = true;
+        Config.DebugChannel            = DebugChannel;
         std::vector<uint8_t> Pixels {};
         const bool Ok = GpuSeq.RenderWorldViewportWithEngine(Config, 0u, Cam, SceneBundle.Scene, Pixels);
         return std::pair<bool, std::vector<uint8_t>>{ Ok, std::move(Pixels) };

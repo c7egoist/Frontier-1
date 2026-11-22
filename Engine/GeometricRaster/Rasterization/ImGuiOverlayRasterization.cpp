@@ -171,11 +171,13 @@ bool ImGuiOverlayRasterization::InitializeOverlay(
     SemSpec.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
     if (Stats.LiveWindowSwapchain)
     {
-        (void)vkCreateSemaphore(LogicalVk, &SemSpec, nullptr, &ImageAcquireSemaphore);
-        (void)vkCreateSemaphore(LogicalVk, &SemSpec, nullptr, &RenderDoneSemaphore);
-        VkFenceCreateInfo FenceSpec {};
-        FenceSpec.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        (void)vkCreateFence(LogicalVk, &FenceSpec, nullptr, &PresentFence);
+        VkFenceCreateInfo SignalSpec {};
+        SignalSpec.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        for (std::size_t Slot = 0u; Slot < kPresentSlotsInFlight; ++Slot)
+        {
+            (void)vkCreateSemaphore(LogicalVk, &SemSpec, nullptr, &ImageAcquireSemaphores[Slot]);
+            (void)vkCreateFence(LogicalVk, &SignalSpec, nullptr, &PresentCompletionSignals[Slot]);
+        }
     }
 
     if (!ConstructRasterResources(ActiveColorFormat, OptionalDiagnostic))
@@ -554,6 +556,7 @@ bool ImGuiOverlayRasterization::ConstructRasterResources(VkFormat TargetFormat, 
 
         const uint64_t SyncPoint = BoundDevice->DispatchCommandBufferAsync(Cmd);
         (void)BoundDevice->AwaitTimelineTick(SyncPoint);
+        BoundDevice->FreeCommandBuffer(Cmd);
     }
 
     VkDescriptorSetAllocateInfo SetAlloc {};
@@ -594,17 +597,30 @@ void ImGuiOverlayRasterization::DestroyTargetAttachments() noexcept
         return;
     }
     const VkDevice LogicalVk = BoundDevice->AccessDevice();
-    if (PreviousPresentCommandBuffer != VK_NULL_HANDLE)
+    for (std::size_t Slot = 0u; Slot < kPresentSlotsInFlight; ++Slot)
     {
-        if (PresentFence != VK_NULL_HANDLE)
+        if (InFlightCommandBuffers[Slot] != VK_NULL_HANDLE)
         {
-            (void)vkWaitForFences(LogicalVk, 1u, &PresentFence, VK_TRUE, 5000000000ull);
-            (void)vkResetFences(LogicalVk, 1u, &PresentFence);
+            if (PresentCompletionSignals[Slot] != VK_NULL_HANDLE)
+            {
+                (void)vkWaitForFences(LogicalVk, 1u, &PresentCompletionSignals[Slot], VK_TRUE, 5000000000ull);
+                (void)vkResetFences(LogicalVk, 1u, &PresentCompletionSignals[Slot]);
+            }
+            vkFreeCommandBuffers(LogicalVk, BoundDevice->AccessCommandAllocator(), 1u, &InFlightCommandBuffers[Slot]);
+            InFlightCommandBuffers[Slot] = VK_NULL_HANDLE;
         }
-        vkFreeCommandBuffers(LogicalVk, BoundDevice->AccessCommandAllocator(), 1u, &PreviousPresentCommandBuffer);
-        PreviousPresentCommandBuffer = VK_NULL_HANDLE;
     }
+    SwapchainImageSignals.clear();
     vkDeviceWaitIdle(LogicalVk);
+
+    for (VkSemaphore Sem : RenderCompleteSemaphores)
+    {
+        if (Sem != VK_NULL_HANDLE)
+        {
+            vkDestroySemaphore(LogicalVk, Sem, nullptr);
+        }
+    }
+    RenderCompleteSemaphores.clear();
 
     for (VkFramebuffer TargetFb : TargetAttachments)
     {
@@ -722,8 +738,17 @@ bool ImGuiOverlayRasterization::RebuildSwapchainOrOffscreenTarget(uint32_t Width
 
         SwapchainViews.resize(RetrievedCount, VK_NULL_HANDLE);
         TargetAttachments.resize(RetrievedCount, VK_NULL_HANDLE);
+        RenderCompleteSemaphores.resize(RetrievedCount, VK_NULL_HANDLE);
+        SwapchainImageSignals.assign(RetrievedCount, VK_NULL_HANDLE);
+        VkSemaphoreCreateInfo CompleteSemSpec {};
+        CompleteSemSpec.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
         for (uint32_t Idx = 0u; Idx < RetrievedCount; ++Idx)
         {
+            if (vkCreateSemaphore(LogicalVk, &CompleteSemSpec, nullptr, &RenderCompleteSemaphores[Idx]) != VK_SUCCESS)
+            {
+                return false;
+            }
+
             VkImageViewCreateInfo ViewSpec {};
             ViewSpec.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
             ViewSpec.image            = SwapchainImages[Idx];
@@ -964,7 +989,9 @@ VkDescriptorSet ImGuiOverlayRasterization::EnsureTextureUploaded(ImTextureData* 
     vkCmdPipelineBarrier(Cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0u, 0u, nullptr, 0u, nullptr, 1u, &ToRead);
 
     const uint64_t SyncPoint = BoundDevice->DispatchCommandBufferAsync(Cmd);
-    if (!BoundDevice->AwaitTimelineTick(SyncPoint))
+    const bool Reached = BoundDevice->AwaitTimelineTick(SyncPoint);
+    BoundDevice->FreeCommandBuffer(Cmd);
+    if (!Reached)
     {
         return FallbackDescriptor;
     }
@@ -1134,23 +1161,31 @@ bool ImGuiOverlayRasterization::PresentImGuiBatches(
     }
 
     uint32_t ImageIndex = 0u;
+    const std::size_t PresentSlot = static_cast<std::size_t>(PresentSlotCursor % kPresentSlotsInFlight);
     if (Stats.LiveWindowSwapchain)
     {
-        if (PreviousPresentCommandBuffer != VK_NULL_HANDLE)
+        if (InFlightCommandBuffers[PresentSlot] != VK_NULL_HANDLE)
         {
-            if (PresentFence != VK_NULL_HANDLE)
+            if (PresentCompletionSignals[PresentSlot] != VK_NULL_HANDLE)
             {
-                (void)vkWaitForFences(BoundDevice->AccessDevice(), 1u, &PresentFence, VK_TRUE, 5000000000ull);
-                (void)vkResetFences(BoundDevice->AccessDevice(), 1u, &PresentFence);
+                (void)vkWaitForFences(BoundDevice->AccessDevice(), 1u, &PresentCompletionSignals[PresentSlot], VK_TRUE, 5000000000ull);
+                for (VkFence& ImgSignal : SwapchainImageSignals)
+                {
+                    if (ImgSignal == PresentCompletionSignals[PresentSlot])
+                    {
+                        ImgSignal = VK_NULL_HANDLE;
+                    }
+                }
+                (void)vkResetFences(BoundDevice->AccessDevice(), 1u, &PresentCompletionSignals[PresentSlot]);
             }
-            vkFreeCommandBuffers(BoundDevice->AccessDevice(), BoundDevice->AccessCommandAllocator(), 1u, &PreviousPresentCommandBuffer);
-            PreviousPresentCommandBuffer = VK_NULL_HANDLE;
+            vkFreeCommandBuffers(BoundDevice->AccessDevice(), BoundDevice->AccessCommandAllocator(), 1u, &InFlightCommandBuffers[PresentSlot]);
+            InFlightCommandBuffers[PresentSlot] = VK_NULL_HANDLE;
         }
         const VkResult AcquireResult = vkAcquireNextImageKHR(
             BoundDevice->AccessDevice(),
             SwapchainHandle,
             1000000000ull,
-            ImageAcquireSemaphore,
+            ImageAcquireSemaphores[PresentSlot],
             VK_NULL_HANDLE,
             &ImageIndex);
         if (AcquireResult == VK_ERROR_OUT_OF_DATE_KHR)
@@ -1166,6 +1201,12 @@ bool ImGuiOverlayRasterization::PresentImGuiBatches(
         {
             return ReportPresentationFailure(
                 "vkAcquireNextImageKHR failed with VkResult " + std::to_string(static_cast<int32_t>(AcquireResult)) + ".");
+        }
+        if (ImageIndex < SwapchainImageSignals.size() &&
+            SwapchainImageSignals[ImageIndex] != VK_NULL_HANDLE &&
+            SwapchainImageSignals[ImageIndex] != PresentCompletionSignals[PresentSlot])
+        {
+            (void)vkWaitForFences(BoundDevice->AccessDevice(), 1u, &SwapchainImageSignals[ImageIndex], VK_TRUE, 5000000000ull);
         }
     }
 
@@ -1205,17 +1246,18 @@ bool ImGuiOverlayRasterization::PresentImGuiBatches(
                 "vkEndCommandBuffer failed with VkResult " + std::to_string(static_cast<int32_t>(EndResult)) + ".");
         }
 
+        const VkSemaphore SignalRenderDone = RenderCompleteSemaphores[ImageIndex];
         const VkPipelineStageFlags WaitMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         VkSubmitInfo SubmitInfo {};
         SubmitInfo.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         SubmitInfo.waitSemaphoreCount   = 1u;
-        SubmitInfo.pWaitSemaphores      = &ImageAcquireSemaphore;
+        SubmitInfo.pWaitSemaphores      = &ImageAcquireSemaphores[PresentSlot];
         SubmitInfo.pWaitDstStageMask    = &WaitMask;
         SubmitInfo.commandBufferCount   = 1u;
         SubmitInfo.pCommandBuffers      = &CommandBuffer;
         SubmitInfo.signalSemaphoreCount = 1u;
-        SubmitInfo.pSignalSemaphores    = &RenderDoneSemaphore;
-        const VkResult SubmitResult = vkQueueSubmit(BoundDevice->AccessQueue(), 1u, &SubmitInfo, PresentFence);
+        SubmitInfo.pSignalSemaphores    = &SignalRenderDone;
+        const VkResult SubmitResult = vkQueueSubmit(BoundDevice->AccessQueue(), 1u, &SubmitInfo, PresentCompletionSignals[PresentSlot]);
         if (SubmitResult != VK_SUCCESS)
         {
             vkFreeCommandBuffers(BoundDevice->AccessDevice(), BoundDevice->AccessCommandAllocator(), 1u, &CommandBuffer);
@@ -1223,18 +1265,25 @@ bool ImGuiOverlayRasterization::PresentImGuiBatches(
                 "vkQueueSubmit failed with VkResult " + std::to_string(static_cast<int32_t>(SubmitResult)) + ".");
         }
 
+        if (ImageIndex < SwapchainImageSignals.size())
+        {
+            SwapchainImageSignals[ImageIndex] = PresentCompletionSignals[PresentSlot];
+        }
+        LastPresentedImageIndex = ImageIndex;
+
         VkPresentInfoKHR PresentInfo {};
         PresentInfo.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         PresentInfo.waitSemaphoreCount = 1u;
-        PresentInfo.pWaitSemaphores    = &RenderDoneSemaphore;
+        PresentInfo.pWaitSemaphores    = &SignalRenderDone;
         PresentInfo.swapchainCount     = 1u;
         PresentInfo.pSwapchains        = &SwapchainHandle;
         PresentInfo.pImageIndices      = &ImageIndex;
         const VkResult PresentResult = vkQueuePresentKHR(BoundDevice->AccessQueue(), &PresentInfo);
 
-        if (PresentFence != VK_NULL_HANDLE)
+        if (PresentCompletionSignals[PresentSlot] != VK_NULL_HANDLE)
         {
-            PreviousPresentCommandBuffer = CommandBuffer;
+            InFlightCommandBuffers[PresentSlot] = CommandBuffer;
+            ++PresentSlotCursor;
         }
         else
         {
@@ -1262,7 +1311,9 @@ bool ImGuiOverlayRasterization::PresentImGuiBatches(
     else
     {
         const uint64_t SyncPoint = BoundDevice->DispatchCommandBufferAsync(CommandBuffer);
-        if (!BoundDevice->AwaitTimelineTick(SyncPoint))
+        const bool Reached = BoundDevice->AwaitTimelineTick(SyncPoint);
+        BoundDevice->FreeCommandBuffer(CommandBuffer);
+        if (!Reached)
         {
             return ReportPresentationFailure("The offscreen Vulkan frame did not reach its timeline synchronization point.");
         }
@@ -1289,21 +1340,26 @@ bool ImGuiOverlayRasterization::ReadbackLastPresentedRgba(
         return false;
     }
 
-    if (PreviousPresentCommandBuffer != VK_NULL_HANDLE)
+    for (std::size_t Slot = 0u; Slot < kPresentSlotsInFlight; ++Slot)
     {
-        if (PresentFence != VK_NULL_HANDLE)
+        if (InFlightCommandBuffers[Slot] != VK_NULL_HANDLE)
         {
-            (void)vkWaitForFences(BoundDevice->AccessDevice(), 1u, &PresentFence, VK_TRUE, 5000000000ull);
-            (void)vkResetFences(BoundDevice->AccessDevice(), 1u, &PresentFence);
+            if (PresentCompletionSignals[Slot] != VK_NULL_HANDLE)
+            {
+                (void)vkWaitForFences(BoundDevice->AccessDevice(), 1u, &PresentCompletionSignals[Slot], VK_TRUE, 5000000000ull);
+                (void)vkResetFences(BoundDevice->AccessDevice(), 1u, &PresentCompletionSignals[Slot]);
+            }
+            vkFreeCommandBuffers(BoundDevice->AccessDevice(), BoundDevice->AccessCommandAllocator(), 1u, &InFlightCommandBuffers[Slot]);
+            InFlightCommandBuffers[Slot] = VK_NULL_HANDLE;
         }
-        vkFreeCommandBuffers(BoundDevice->AccessDevice(), BoundDevice->AccessCommandAllocator(), 1u, &PreviousPresentCommandBuffer);
-        PreviousPresentCommandBuffer = VK_NULL_HANDLE;
     }
+    SwapchainImageSignals.assign(SwapchainImages.size(), VK_NULL_HANDLE);
 
     VkImage SourceImage = OffscreenTarget.ImageHandle;
     if (Stats.LiveWindowSwapchain && !SwapchainImages.empty())
     {
-        SourceImage = SwapchainImages.front();
+        const uint32_t SafeIdx = std::min(LastPresentedImageIndex, static_cast<uint32_t>(SwapchainImages.size() - 1u));
+        SourceImage = SwapchainImages[SafeIdx];
     }
     if (SourceImage == VK_NULL_HANDLE)
     {
@@ -1345,7 +1401,9 @@ bool ImGuiOverlayRasterization::ReadbackLastPresentedRgba(
     vkCmdCopyImageToBuffer(Cmd, SourceImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, UploadStagingBuffer.BufferHandle, 1u, &CopyRegion);
 
     const uint64_t SyncPoint = BoundDevice->DispatchCommandBufferAsync(Cmd);
-    if (!BoundDevice->AwaitTimelineTick(SyncPoint))
+    const bool Reached = BoundDevice->AwaitTimelineTick(SyncPoint);
+    BoundDevice->FreeCommandBuffer(Cmd);
+    if (!Reached)
     {
         return false;
     }
@@ -1422,20 +1480,18 @@ void ImGuiOverlayRasterization::TeardownOverlay() noexcept
         vkDestroySampler(LogicalVk, LinearSampler, nullptr);
         LinearSampler = VK_NULL_HANDLE;
     }
-    if (ImageAcquireSemaphore != VK_NULL_HANDLE)
+    for (std::size_t Slot = 0u; Slot < kPresentSlotsInFlight; ++Slot)
     {
-        vkDestroySemaphore(LogicalVk, ImageAcquireSemaphore, nullptr);
-        ImageAcquireSemaphore = VK_NULL_HANDLE;
-    }
-    if (RenderDoneSemaphore != VK_NULL_HANDLE)
-    {
-        vkDestroySemaphore(LogicalVk, RenderDoneSemaphore, nullptr);
-        RenderDoneSemaphore = VK_NULL_HANDLE;
-    }
-    if (PresentFence != VK_NULL_HANDLE)
-    {
-        vkDestroyFence(LogicalVk, PresentFence, nullptr);
-        PresentFence = VK_NULL_HANDLE;
+        if (ImageAcquireSemaphores[Slot] != VK_NULL_HANDLE)
+        {
+            vkDestroySemaphore(LogicalVk, ImageAcquireSemaphores[Slot], nullptr);
+            ImageAcquireSemaphores[Slot] = VK_NULL_HANDLE;
+        }
+        if (PresentCompletionSignals[Slot] != VK_NULL_HANDLE)
+        {
+            vkDestroyFence(LogicalVk, PresentCompletionSignals[Slot], nullptr);
+            PresentCompletionSignals[Slot] = VK_NULL_HANDLE;
+        }
     }
     if (WindowSurface != VK_NULL_HANDLE && vkDestroySurfaceKHR != nullptr)
     {

@@ -619,16 +619,19 @@ bool IntersectTriangleShadowMT(float3 Origin, float3 Dir, float MinT, float MaxT
 
 float4 IntersectFourBoxes(float3 Origin, float3 InvDir, float MinT, float MaxT, uint EntryIndex)
 {
-    float4 TX0 = (SceneBvhEntries[EntryIndex].BranchBoundsMinX - Origin.xxxx) * InvDir.xxxx;
-    float4 TX1 = (SceneBvhEntries[EntryIndex].BranchBoundsMaxX - Origin.xxxx) * InvDir.xxxx;
+    float4 BMinX = SceneBvhEntries[EntryIndex].BranchBoundsMinX;
+    float4 BMaxX = SceneBvhEntries[EntryIndex].BranchBoundsMaxX;
+    float4 TX0 = (BMinX - Origin.xxxx) * InvDir.xxxx;
+    float4 TX1 = (BMaxX - Origin.xxxx) * InvDir.xxxx;
     float4 TY0 = (SceneBvhEntries[EntryIndex].BranchBoundsMinY - Origin.yyyy) * InvDir.yyyy;
     float4 TY1 = (SceneBvhEntries[EntryIndex].BranchBoundsMaxY - Origin.yyyy) * InvDir.yyyy;
     float4 TZ0 = (SceneBvhEntries[EntryIndex].BranchBoundsMinZ - Origin.zzzz) * InvDir.zzzz;
     float4 TZ1 = (SceneBvhEntries[EntryIndex].BranchBoundsMaxZ - Origin.zzzz) * InvDir.zzzz;
 
-    float4 NearT = max(max(min(TX0, TX1), min(TY0, TY1)), max(min(TZ0, TZ1), float4(MinT)));
-    float4 FarT  = min(min(max(TX0, TX1), max(TY0, TY1)), min(max(TZ0, TZ1), float4(MaxT)));
-    return select(NearT <= FarT, NearT, float4(1.0e30));
+    float4 NearT   = max(max(min(TX0, TX1), min(TY0, TY1)), max(min(TZ0, TZ1), float4(MinT)));
+    float4 FarT    = min(min(max(TX0, TX1), max(TY0, TY1)), min(max(TZ0, TZ1), float4(MaxT)));
+    float4 HitNear = select(NearT <= FarT, NearT, float4(1.0e30));
+    return select(BMinX <= BMaxX, HitNear, float4(1.0e30));
 }
 
 RayHitReading TraceSceneClosest(float3 Origin, float3 Dir, float MinT, float MaxT)
@@ -1004,7 +1007,11 @@ float EvaluateGlobalDistanceAmbientOcclusion(float3 Pos, float3 N, float3 GeomN)
         WeightSum += 0.67;
     }
     float Ao = VisSum / WeightSum;
-    return clamp(1.0 - (1.0 - Ao) * 1.32, 0.04, 1.0);
+    float RawAo = clamp(1.0 - (1.0 - Ao) * 1.32, 0.04, 1.0);
+    float CoarseHalf = max(0.5, WorldUniforms.GlobalDistanceCoarseCenterSpan.w);
+    float3 CoarseRel = abs(Pos - WorldUniforms.GlobalDistanceCoarseCenterSpan.xyz) / CoarseHalf;
+    float CoarseFade = 1.0 - smoothstep(0.76, 0.96, max(CoarseRel.x, max(CoarseRel.y, CoarseRel.z)));
+    return lerp(1.0, RawAo, CoarseFade);
 }
 
 // Central-difference gradient of the Global Distance Field: the SDF surface normal at any point.
@@ -1117,11 +1124,32 @@ float4 SampleRadiosityPyramidMip(float3 WorldPos, float MipLevel, out bool OutIn
     return In1 ? lerp(V0, V1, FracMip) : V0;
 }
 
-float3 TraceSingleRadiosityCone(float3 StartP, float3 ConeDir, float TanHalfAngle, uint MaxSteps)
+float3 EvaluateAmbientEnvironmentFallback(float3 ConeDir)
+{
+    float3 SkyCol = EvaluateSkyDome(ConeDir) * 0.34;
+    if (ConeDir.z >= 0.0)
+    {
+        return SkyCol;
+    }
+    float3 SunDir       = normalize(WorldUniforms.SunDirConeTan.xyz);
+    float3 SunIrr       = WorldUniforms.SolarIrradiancePad.xyz;
+    float3 SkyZen       = EvaluateSkyDome(float3(0.0, 0.0, 1.0));
+    float3 GroundBounce = (SunIrr * max(0.0, SunDir.z) * 0.31830989 + SkyZen * 0.25) * float3(0.24, 0.23, 0.22);
+    return lerp(SkyCol, GroundBounce, saturate(-ConeDir.z));
+}
+
+float3 TraceSingleRadiosityCone(
+    float3 ReceiverPos,
+    float3 ReceiverGeomN,
+    float3 StartP,
+    float3 ConeDir,
+    float  TanHalfAngle,
+    uint   MaxSteps)
 {
     float  Vox0     = QueryFineGdfVoxelSize();
-    float  MaxTrace = max(1.2, WorldUniforms.GlobalDistanceFineCenterSpan.w * 2.15);
-    float  T        = Vox0 * 1.10;
+    float  FineHalf = max(0.5, WorldUniforms.GlobalDistanceFineCenterSpan.w);
+    float  MaxTrace = max(1.2, FineHalf * 2.15);
+    float  T        = Vox0 * 1.15;
     float3 AccumRad = float3(0.0);
     float  AccumOcc = 0.0;
 
@@ -1138,27 +1166,46 @@ float3 TraceSingleRadiosityCone(float3 StartP, float3 ConeDir, float TanHalfAngl
         {
             break;
         }
+
+        // Prevent coplanar receiver self-bleed from 2x2x2 radiosity mip dilation on flat ground/walls,
+        // and smoothly attenuate voxel contribution near the fine clipmap boundary so zero box seam appears.
+        float  MipVox         = Vox0 * float(1u << MipIdx);
+        float  PlaneClearance = dot(SampleP - ReceiverPos, ReceiverGeomN);
+        float  SelfClearGate  = smoothstep(MipVox * 0.42, MipVox * 1.25, PlaneClearance);
+        float3 FineRel        = abs(SampleP - WorldUniforms.GlobalDistanceFineCenterSpan.xyz) / FineHalf;
+        float  BoxEdgeWeight  = 1.0 - smoothstep(0.76, 0.96, max(FineRel.x, max(FineRel.y, FineRel.z)));
+        float  VoxelWeight    = SelfClearGate * BoxEdgeWeight;
+
         float Trans = 1.0 - AccumOcc;
-        AccumRad   += Trans * VoxPrem.rgb;
-        AccumOcc    = saturate(AccumOcc + Trans * saturate(VoxPrem.a));
+        AccumRad   += Trans * VoxPrem.rgb * VoxelWeight;
+        AccumOcc    = saturate(AccumOcc + Trans * saturate(VoxPrem.a * VoxelWeight));
 
         float SdfD    = SampleGlobalDistanceCascade(0u, SampleP, InBounds);
         float StepAdv = max(Diameter * 0.72, InBounds ? max(Vox0 * 0.85, SdfD * 0.62) : Diameter);
         T += StepAdv;
     }
 
-    if (AccumOcc < 0.99)
+    if (AccumOcc < 0.999)
     {
-        AccumRad += (1.0 - AccumOcc) * EvaluateSkyDome(ConeDir) * 0.34;
+        AccumRad += (1.0 - AccumOcc) * EvaluateAmbientEnvironmentFallback(ConeDir);
     }
     return AccumRad;
 }
 
 float3 EvaluateGdfVoxelConeGi(float3 Pos, float3 N, float3 GeomN, float3 TAxis, float3 BAxis)
 {
+    float3 FallbackIrr = EvaluateAmbientEnvironmentFallback(N);
     if (!IsGlobalDistanceFieldReady())
     {
-        return EvaluateSkyDome(N) * 0.25;
+        return FallbackIrr;
+    }
+
+    float  FineHalf = max(0.5, WorldUniforms.GlobalDistanceFineCenterSpan.w);
+    float3 RecRel   = abs(Pos - WorldUniforms.GlobalDistanceFineCenterSpan.xyz) / FineHalf;
+    float  RecFade  = 1.0 - smoothstep(0.76, 0.96, max(RecRel.x, max(RecRel.y, RecRel.z)));
+    if (RecFade <= 1.0e-3)
+    {
+        return FallbackIrr;
     }
 
     float  Vox0   = QueryFineGdfVoxelSize();
@@ -1178,21 +1225,21 @@ float3 EvaluateGdfVoxelConeGi(float3 Pos, float3 N, float3 GeomN, float3 TAxis, 
         else if (ConeIdx == 2u) { ConeDir = normalize(N * CosTilt - TAxis * SinTilt); ConeWt = 0.18; Steps = 5u; }
         else if (ConeIdx == 3u) { ConeDir = normalize(N * CosTilt + BAxis * SinTilt); ConeWt = 0.18; Steps = 5u; }
         else if (ConeIdx == 4u) { ConeDir = normalize(N * CosTilt - BAxis * SinTilt); ConeWt = 0.18; Steps = 5u; }
-        GiIrr += ConeWt * TraceSingleRadiosityCone(StartP, ConeDir, 0.577, Steps);
+        GiIrr += ConeWt * TraceSingleRadiosityCone(Pos, GeomN, StartP, ConeDir, 0.577, Steps);
     }
-    return max(float3(0.0), GiIrr);
+    return lerp(FallbackIrr, max(float3(0.0), GiIrr), RecFade);
 }
 
 float3 EvaluateGdfGlossyCone(float3 Pos, float3 GeomN, float3 ReflDir, float Roughness)
 {
     if (!IsGlobalDistanceFieldReady())
     {
-        return EvaluateSkyDome(ReflDir);
+        return EvaluateAmbientEnvironmentFallback(ReflDir);
     }
     float  Vox0    = QueryFineGdfVoxelSize();
     float3 StartP  = Pos + GeomN * (Vox0 * 0.90);
     float  ConeTan = clamp(Roughness * Roughness * 0.85 + 0.045, 0.045, 0.65);
-    return TraceSingleRadiosityCone(StartP, ReflDir, ConeTan, 6u);
+    return TraceSingleRadiosityCone(Pos, GeomN, StartP, ReflDir, ConeTan, 6u);
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -2019,23 +2066,28 @@ float3 ShadeSecondaryBounce(float3 RayOrigin, float3 RayDir)
     }
 
     float3 Albedo = Mat.DiffuseAlbedoRoughness.xyz * (1.0 - saturate(Mat.SpecParams.y)) * (1.0 - saturate(Mat.CoatRoughnessOptics.y));
+    float3 SkyAmb = EvaluateSkyDome(N) * 0.22;
     if (IsGlobalDistanceFieldReady())
     {
+        float  FineHalf = max(0.5, WorldUniforms.GlobalDistanceFineCenterSpan.w);
+        float3 FineRel  = abs(Hit.Position - WorldUniforms.GlobalDistanceFineCenterSpan.xyz) / FineHalf;
+        float  EdgeFade = 1.0 - smoothstep(0.74, 0.95, max(FineRel.x, max(FineRel.y, FineRel.z)));
         float  Vox0     = QueryFineGdfVoxelSize();
         bool   InRad    = false;
-        float4 RadFetch = SampleRadiosityPyramidMip(Hit.Position + Hit.GeomNormal * (Vox0 * 1.15), 1.0, InRad);
-        if (InRad && RadFetch.a > 0.01)
+        float4 RadFetch = SampleRadiosityPyramidMip(Hit.Position + Hit.GeomNormal * (Vox0 * 1.45), 1.0, InRad);
+        if (InRad && RadFetch.a > 0.02 && EdgeFade > 1.0e-3)
         {
-            ColorHdr += Albedo * (RadFetch.rgb / max(0.22, RadFetch.a)) * 0.55;
+            float3 RadBounce = (RadFetch.rgb / max(0.24, RadFetch.a)) * 0.55;
+            ColorHdr += Albedo * lerp(SkyAmb, RadBounce, EdgeFade * saturate(RadFetch.a * 2.5));
         }
         else
         {
-            ColorHdr += Albedo * EvaluateSkyDome(N) * 0.22;
+            ColorHdr += Albedo * SkyAmb;
         }
     }
     else
     {
-        ColorHdr += Albedo * EvaluateSkyDome(N) * 0.22;
+        ColorHdr += Albedo * SkyAmb;
     }
     return ColorHdr;
 }
@@ -3851,7 +3903,7 @@ void GlobalRadiosityBakeEntry(uint3 DispatchThreadID : SV_DispatchThreadID)
         {
             float3 TangentDir = (ConeIdx == 0u) ? TAxis : ((ConeIdx == 1u) ? -TAxis : ((ConeIdx == 2u) ? BAxis : -BAxis));
             float3 ConeDir    = normalize(SurfN * 0.7071 + TangentDir * 0.7071);
-            Bounce1Irr += 0.25 * TraceSingleRadiosityCone(StartP, ConeDir, 0.72, 4u);
+            Bounce1Irr += 0.25 * TraceSingleRadiosityCone(SurfPos, SurfN, StartP, ConeDir, 0.72, 4u);
         }
 
         float4 PrevPrem = UnpackHalf4(GlobalRadiosityFieldBuffer[RadMip0Off + LinearIdx]);

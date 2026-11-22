@@ -14,6 +14,7 @@
 #include "Engine/GeometricRaster/GlobalIllumination/TieredWorldRenderSequence.h"
 
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <span>
 #include <string_view>
@@ -80,6 +81,15 @@ public:
     [[nodiscard]] const NaniteViewportLodStats&   QueryNaniteLodStats() const noexcept { return NaniteLodStats; }
     [[nodiscard]] const GlobalDistanceFieldStats& QueryGlobalDistanceFieldStats() const noexcept { return DistanceFieldStats; }
     [[nodiscard]] const ViewportTimingBreakdown&  QueryLastTimingBreakdown() const noexcept { return LastViewportTiming; }
+    [[nodiscard]] uint32_t                        QueryCloudLayerDispatchCount() const noexcept { return CloudLayerDispatchCount; }
+
+    // Explicit C++ cache invalidation & bake triggers (invoked by Inspector / Render menu / CLI tools).
+    void RequestStaticGiBake() noexcept;
+    void RequestSdfVolumeBake() noexcept;
+    void RequestClusterLodRebuild() noexcept;
+    void RequestSkyCloudCacheRefresh() noexcept;
+
+    void SynchronizeMaterialEntriesOnly(const WorldSceneSpecification& Scene);
 
     void SynchronizeSceneResources(
         const WorldSceneSpecification& Scene,
@@ -217,7 +227,11 @@ private:
     float                  CachedFineGdfCenterSpan[4]      { 0.0f, 0.0f, 0.0f, 3.4f };
     float                  CachedCoarseGdfCenterSpan[4]    { 0.0f, 0.0f, 0.0f, 10.2f };
     bool                   GlobalDistanceFieldReady        = false;
+    bool                   StaticGiBakePending             = false;
     bool                   SkyViewLutValid                 = false;
+    bool                   CloudLayerCacheValid            = false;
+    uint64_t               LastCloudPassSignature          = 0ull;
+    uint32_t               CloudLayerDispatchCount         = 0u;
     std::array<uint8_t, 128u> LastSkyViewUniformSnapshot   {};
     uint64_t               LastRadiosityLightingSignature  = 0ull;
     uint64_t               CachedLocalSdfAssetSignature    = 0ull;
@@ -234,10 +248,24 @@ private:
     uint32_t               UploadedMaterialCount         = 0u;
     uint32_t               UploadedCatalogStarCount      = 0u;
     bool                   SceneUploadedOnce             = false;
+    struct CachedAssetCutBlas
+    {
+        uint64_t                               Key          = 0ull;
+        uint32_t                               LevelTri[8]  {};
+        uint32_t                               LevelClus[8] {};
+        uint32_t                               ClusterCount = 0u;
+        SpatialAcceleration::WideBoundingTree  LocalTree    {};
+        std::vector<uint32_t>                  PrimLevel    {};
+        std::vector<uint32_t>                  PrimCluster  {};
+        std::vector<uint32_t>                  PrimGroup    {};
+        std::vector<uint32_t>                  PrimOrigGroup{};
+    };
+
     NaniteViewportLodStats   NaniteLodStats              {};
     GlobalDistanceFieldStats DistanceFieldStats          {};
     uint64_t               CachedNaniteCutSignature      = 0u;
     bool                   NaniteLodBuffersActive        = false;
+    std::deque<CachedAssetCutBlas> AssetCutBlasCache    {};
     uint32_t               FrameSequenceIndex            = 0u;
     uint32_t               ProgressiveSampleCount        = 0u;
     uint32_t               LastEngineOrdinal             = UINT32_MAX;

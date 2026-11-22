@@ -82,6 +82,7 @@ struct WorldRenderConfiguration
     bool                                  NaniteBackfaceConeEnabled = false; // [-] - Cull primary-invisible clusters using tight normal cones
     bool                                  NaniteWireframeOverlay    = false; // [-] - Overlay crisp screen-space barycentric triangle wireframe (GeometryCompiler parity)
     int32_t                               NaniteForcedLevel         = -1;    // [lvl] - -1 = automatic DAG cut; >= 0 forces exact hierarchy level inspection
+    bool                                  DynamicClipmapScrolling   = false; // [-] - false = bake-once static GDF/radiosity over scene; true = camera-following clipmap scroll
 };
 
 struct WorldSceneSpecification

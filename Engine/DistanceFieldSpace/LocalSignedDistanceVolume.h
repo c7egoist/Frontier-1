@@ -92,6 +92,9 @@ public:
     {
         return HalfDistanceSamples.size() * sizeof(uint16_t);
     }
+
+    [[nodiscard]] bool SerializeToBinaryBytes(std::vector<uint8_t>& OutBytes) const;
+    [[nodiscard]] bool DeserializeFromBinaryBytes(std::span<const uint8_t> InBytes);
 };
 
 } // namespace Frontier::DistanceFieldSpace

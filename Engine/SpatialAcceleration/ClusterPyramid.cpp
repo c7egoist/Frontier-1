@@ -24,7 +24,7 @@ namespace
 {
 
 constexpr uint32_t ClusterBinaryMagic   = 0x31595043u; // 'CPY1'
-constexpr uint32_t ClusterBinaryVersion = 3u; // v3 appends DAG Groups, GroupFinerClusterIndices, and RootClusterIndices
+constexpr uint32_t ClusterBinaryVersion = 4u; // v4 appends per-material coarsest-allowed LOD caps (MaterialCoarsestAllowedLevels)
 
 enum class SimplificationVertexConstraint : uint8_t
 {
@@ -2037,7 +2037,8 @@ std::vector<std::byte> ClusterPyramid::SerializeToBinaryBytes() const
         Triangles.size() * sizeof(ClusterTriangleEntry) +
         Clusters.size() * sizeof(ClusterHeaderEntry) +
         Groups.size() * sizeof(ClusterGroupEntry) +
-        (GroupFinerClusterIndices.size() + RootClusterIndices.size()) * sizeof(uint32_t));
+        (GroupFinerClusterIndices.size() + RootClusterIndices.size()) * sizeof(uint32_t) +
+        MaterialCoarsestAllowedLevels.size() * sizeof(uint32_t));
 
     AppendPodBytes(Bytes, ClusterBinaryMagic);
     AppendPodBytes(Bytes, ClusterBinaryVersion);
@@ -2082,6 +2083,14 @@ std::vector<std::byte> ClusterPyramid::SerializeToBinaryBytes() const
     for (const uint32_t RootIdx : RootClusterIndices)
     {
         AppendPodBytes(Bytes, RootIdx);
+    }
+
+    // v4 per-material coarsest-allowed LOD cap trailer
+    const auto MatCapCount = static_cast<uint32_t>(MaterialCoarsestAllowedLevels.size());
+    AppendPodBytes(Bytes, MatCapCount);
+    for (const uint32_t CapLevel : MaterialCoarsestAllowedLevels)
+    {
+        AppendPodBytes(Bytes, CapLevel);
     }
     return Bytes;
 }
@@ -2162,6 +2171,32 @@ bool ClusterPyramid::DeserializeFromBinaryBytes(std::span<const std::byte> RawBy
         for (uint32_t Idx = 0u; Idx < RootCount; ++Idx)
         {
             (void)ReadPodBytes(Cursor, RootClusterIndices[Idx]);
+        }
+    }
+
+    // v4 per-material coarsest-allowed LOD cap trailer
+    if (Version < 4u)
+    {
+        Reset();
+        return false;
+    }
+    uint32_t MatCapCount = 0u;
+    if (!ReadPodBytes(Cursor, MatCapCount) ||
+        Cursor.size() < static_cast<std::size_t>(MatCapCount) * sizeof(uint32_t))
+    {
+        Reset();
+        return false;
+    }
+    const uint32_t CopyCount = std::min<uint32_t>(
+        MatCapCount,
+        static_cast<uint32_t>(MaterialCoarsestAllowedLevels.size()));
+    for (uint32_t Idx = 0u; Idx < MatCapCount; ++Idx)
+    {
+        uint32_t CapVal = 0xFFFFFFFFu;
+        (void)ReadPodBytes(Cursor, CapVal);
+        if (Idx < CopyCount)
+        {
+            MaterialCoarsestAllowedLevels[Idx] = CapVal;
         }
     }
     return true;

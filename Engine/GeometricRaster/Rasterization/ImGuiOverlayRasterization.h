@@ -15,6 +15,7 @@
 #include <imgui.h>
 #include <backends/imgui_impl_vulkan.h>
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -122,10 +123,14 @@ private:
     std::vector<VkImageView>                                  SwapchainViews        {};
     std::vector<VkFramebuffer>                                TargetAttachments     {};
     DeviceImageResource                                       OffscreenTarget       {};
-    VkSemaphore                                               ImageAcquireSemaphore = VK_NULL_HANDLE;
-    VkSemaphore                                               RenderDoneSemaphore   = VK_NULL_HANDLE;
-    VkFence                                                   PresentFence          = VK_NULL_HANDLE;
-    VkCommandBuffer                                           PreviousPresentCommandBuffer = VK_NULL_HANDLE;
+    static constexpr std::size_t                              kPresentSlotsInFlight = 2u;
+    std::array<VkSemaphore, kPresentSlotsInFlight>            ImageAcquireSemaphores { VK_NULL_HANDLE, VK_NULL_HANDLE };
+    std::array<VkFence, kPresentSlotsInFlight>                PresentCompletionSignals { VK_NULL_HANDLE, VK_NULL_HANDLE };
+    std::array<VkCommandBuffer, kPresentSlotsInFlight>        InFlightCommandBuffers { VK_NULL_HANDLE, VK_NULL_HANDLE };
+    std::vector<VkSemaphore>                                  RenderCompleteSemaphores {};
+    std::vector<VkFence>                                      SwapchainImageSignals {};
+    uint64_t                                                  PresentSlotCursor     = 0ull;
+    uint32_t                                                  LastPresentedImageIndex = 0u;
 
     VkSampler                                                 LinearSampler         = VK_NULL_HANDLE;
     VkRenderPass                                              OverlayRenderUnit     = VK_NULL_HANDLE;

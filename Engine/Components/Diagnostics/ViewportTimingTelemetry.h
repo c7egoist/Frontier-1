@@ -9,11 +9,13 @@
 //                                                        INCLUDES
 //------------------------------------------------------------------------------------------------------------------------
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 
 namespace Frontier
 {
@@ -81,28 +83,93 @@ struct ViewportTimingBreakdown
     }
 }
 
+class TimingLogBufferedWriter
+{
+public:
+    TimingLogBufferedWriter() = default;
+    ~TimingLogBufferedWriter() noexcept
+    {
+        Flush();
+    }
+
+    void Initialize(const std::filesystem::path& LogPath, std::string_view AdapterName, bool HwGpu)
+    {
+        if (Stream.is_open())
+        {
+            Stream.close();
+        }
+        ActivePath = LogPath;
+        Stream.open(ActivePath, std::ios::out | std::ios::trunc);
+        if (!Stream)
+        {
+            return;
+        }
+        Buffer.clear();
+        Buffer.reserve(65536u);
+        Buffer += "# Frontier Per-Stage Timing Log\n";
+        Buffer += "# Adapter: ";
+        Buffer.append(AdapterName.data(), AdapterName.size());
+        Buffer += " | HardwareGPU: ";
+        Buffer += (HwGpu ? "YES\n" : "NO\n");
+        Buffer += "# Columns: Frame | FPS | TotalMs | Engine | Shadow | Res | WorldGpuTotalMs | SkyLutMs | CloudsMs | TraceMs | DenoiseMs | CopyMs | HostWaitMs | SceneSyncMs | TickMs | GizmoMs | UiBuildMs | PresentMs\n";
+        Flush();
+    }
+
+    void Append(const std::filesystem::path& LogPath, std::string_view FormattedLine)
+    {
+        if (!Stream.is_open() || ActivePath != LogPath)
+        {
+            ActivePath = LogPath;
+            Stream.open(ActivePath, std::ios::out | std::ios::app);
+        }
+        if (!Stream)
+        {
+            return;
+        }
+        Buffer.append(FormattedLine.data(), FormattedLine.size());
+        if (Buffer.size() >= 32768u)
+        {
+            Flush();
+        }
+    }
+
+    void Flush() noexcept
+    {
+        if (Stream.is_open() && !Buffer.empty())
+        {
+            Stream.write(Buffer.data(), static_cast<std::streamsize>(Buffer.size()));
+            Stream.flush();
+            Buffer.clear();
+        }
+    }
+
+private:
+    std::filesystem::path ActivePath {};
+    std::ofstream         Stream     {};
+    std::string           Buffer     {};
+};
+
+[[nodiscard]] inline TimingLogBufferedWriter& AccessTimingLogWriter() noexcept
+{
+    static TimingLogBufferedWriter Writer {};
+    return Writer;
+}
+
 inline void InitializeTimingLogFile(const std::filesystem::path& LogPath, std::string_view AdapterName, bool HwGpu)
 {
-    std::ofstream Out(LogPath, std::ios::trunc);
-    if (!Out)
-    {
-        return;
-    }
-    Out << "# Frontier Per-Stage Timing Log\n";
-    Out << "# Adapter: " << AdapterName << " | HardwareGPU: " << (HwGpu ? "YES" : "NO") << "\n";
-    Out << "# Columns: Frame | FPS | TotalMs | Engine | Shadow | Res | WorldGpuTotalMs | SkyLutMs | CloudsMs | TraceMs | DenoiseMs | CopyMs | HostWaitMs | SceneSyncMs | TickMs | GizmoMs | UiBuildMs | PresentMs\n";
+    AccessTimingLogWriter().Initialize(LogPath, AdapterName, HwGpu);
+}
+
+inline void FlushTimingLogFile() noexcept
+{
+    AccessTimingLogWriter().Flush();
 }
 
 inline void AppendTimingLogLine(const std::filesystem::path& LogPath, const ViewportTimingBreakdown& T, const char* ReasonTag = "SAMPLE")
 {
-    std::ofstream Out(LogPath, std::ios::app);
-    if (!Out)
-    {
-        return;
-    }
     const float Fps = (T.TotalFrameMs > 0.01f) ? (1000.0f / T.TotalFrameMs) : 0.0f;
     char Line[512]{};
-    std::snprintf(
+    const int Written = std::snprintf(
         Line,
         sizeof(Line),
         "[%s] F=%llu | %5.1f fps | Total=%6.2f ms | %s/%s Q%u | %ux%u | "
@@ -129,7 +196,12 @@ inline void AppendTimingLogLine(const std::filesystem::path& LogPath, const View
         T.GizmoOverlayMs,
         T.DesktopPollAndUiMs,
         T.SwapchainPresentMs);
-    Out << Line;
+    if (Written > 0)
+    {
+        AccessTimingLogWriter().Append(
+            LogPath,
+            std::string_view(Line, static_cast<std::size_t>(std::min<int>(Written, static_cast<int>(sizeof(Line) - 1)))));
+    }
 }
 
 } // namespace Frontier

@@ -592,4 +592,94 @@ float LocalSignedDistanceVolume::SampleSmoothWorldDistance(
     return (BoxD > 0.0f) ? std::hypot(BoundaryD, BoxD) : BoundaryD;
 }
 
+namespace
+{
+
+struct PackedLocalSdfBinaryHeader
+{
+    uint32_t Magic       = 0x31564453u; // "SDV1"
+    uint32_t Version     = 1u;
+    uint32_t ResolutionX = 0u;
+    uint32_t ResolutionY = 0u;
+    uint32_t ResolutionZ = 0u;
+    uint32_t SampleCount = 0u;
+    float    LocalMin[3] {};
+    float    LocalMax[3] {};
+    float    Spacing[3]  {};
+};
+
+} // namespace
+
+bool LocalSignedDistanceVolume::SerializeToBinaryBytes(std::vector<uint8_t>& OutBytes) const
+{
+    const std::size_t ExpectedCount =
+        static_cast<std::size_t>(ResolutionX) * static_cast<std::size_t>(ResolutionY) * static_cast<std::size_t>(ResolutionZ);
+    if (ExpectedCount == 0u || HalfDistanceSamples.size() != ExpectedCount)
+    {
+        return false;
+    }
+
+    PackedLocalSdfBinaryHeader Header {};
+    Header.ResolutionX = ResolutionX;
+    Header.ResolutionY = ResolutionY;
+    Header.ResolutionZ = ResolutionZ;
+    Header.SampleCount = static_cast<uint32_t>(ExpectedCount);
+    Header.LocalMin[0] = LocalMin.X;
+    Header.LocalMin[1] = LocalMin.Y;
+    Header.LocalMin[2] = LocalMin.Z;
+    Header.LocalMax[0] = LocalMax.X;
+    Header.LocalMax[1] = LocalMax.Y;
+    Header.LocalMax[2] = LocalMax.Z;
+    Header.Spacing[0]  = VoxelSpacing.X;
+    Header.Spacing[1]  = VoxelSpacing.Y;
+    Header.Spacing[2]  = VoxelSpacing.Z;
+
+    const std::size_t PayloadBytes = ExpectedCount * sizeof(uint16_t);
+    OutBytes.resize(sizeof(Header) + PayloadBytes);
+    std::memcpy(OutBytes.data(), &Header, sizeof(Header));
+    std::memcpy(OutBytes.data() + sizeof(Header), HalfDistanceSamples.data(), PayloadBytes);
+    return true;
+}
+
+bool LocalSignedDistanceVolume::DeserializeFromBinaryBytes(std::span<const uint8_t> InBytes)
+{
+    if (InBytes.size() < sizeof(PackedLocalSdfBinaryHeader))
+    {
+        return false;
+    }
+
+    PackedLocalSdfBinaryHeader Header {};
+    std::memcpy(&Header, InBytes.data(), sizeof(Header));
+    if (Header.Magic != 0x31564453u || Header.Version != 1u ||
+        Header.ResolutionX < 2u || Header.ResolutionY < 2u || Header.ResolutionZ < 2u)
+    {
+        return false;
+    }
+
+    const std::size_t ExpectedCount =
+        static_cast<std::size_t>(Header.ResolutionX) * static_cast<std::size_t>(Header.ResolutionY) * static_cast<std::size_t>(Header.ResolutionZ);
+    const std::size_t PayloadBytes = ExpectedCount * sizeof(uint16_t);
+    if (Header.SampleCount != ExpectedCount || InBytes.size() != sizeof(Header) + PayloadBytes)
+    {
+        return false;
+    }
+
+    ResolutionX    = Header.ResolutionX;
+    ResolutionY    = Header.ResolutionY;
+    ResolutionZ    = Header.ResolutionZ;
+    LocalMin       = { Header.LocalMin[0], Header.LocalMin[1], Header.LocalMin[2] };
+    LocalMax       = { Header.LocalMax[0], Header.LocalMax[1], Header.LocalMax[2] };
+    VoxelSpacing   = { Header.Spacing[0], Header.Spacing[1], Header.Spacing[2] };
+
+    HalfDistanceSamples.resize(ExpectedCount);
+    std::memcpy(HalfDistanceSamples.data(), InBytes.data() + sizeof(Header), PayloadBytes);
+
+    DistanceSamples.resize(ExpectedCount);
+    for (std::size_t Idx = 0u; Idx < ExpectedCount; ++Idx)
+    {
+        DistanceSamples[Idx] = UnpackHalf16ToFloat32(HalfDistanceSamples[Idx]);
+    }
+    return true;
+}
+
 } // namespace Frontier::DistanceFieldSpace

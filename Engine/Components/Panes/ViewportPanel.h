@@ -149,6 +149,11 @@ public:
     void ConfigureProjectionDropdownOpen(bool Open) noexcept;
     void ConfigurePrimaryProjection(ViewportProjectionPreset Preset) noexcept;
     void ConfigureSecondaryProjection(ViewportProjectionPreset Preset) noexcept;
+    void ConfigureMarqueeSelectionRect(bool Active, Rectangle2D LogicalRect = {}) noexcept
+    {
+        MarqueeSelectionActive = Active;
+        MarqueeSelectionBounds = LogicalRect;
+    }
 
     void Render(
         PixelSpace&             Surface,
@@ -262,6 +267,8 @@ private:
     uint64_t                        CanvasGpuTextureHandle  = 0ull;                                    // [-]   - GPU-resident ImTextureID (zero-copy viewport)
     uint32_t                        CanvasGpuWidthPx        = 0u;                                      // [px]  - GPU-resident viewport width
     uint32_t                        CanvasGpuHeightPx       = 0u;                                      // [px]  - GPU-resident viewport height
+    bool                            MarqueeSelectionActive  = false;                                   // [-]   - Active LMB drag box selection overlay
+    Rectangle2D                     MarqueeSelectionBounds  {};                                        // [px]  - Logical screen rectangle of active marquee
 };
 
 //------------------------------------------------------------------------------------------------------------------------

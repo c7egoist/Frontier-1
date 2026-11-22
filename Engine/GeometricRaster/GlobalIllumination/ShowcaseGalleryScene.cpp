@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <unordered_map>
 
@@ -29,11 +30,58 @@ namespace Frontier::GeometricRaster
 namespace
 {
 
+[[nodiscard]] std::filesystem::path QueryDerivedAssetCacheDirectory()
+{
+    std::error_code Ec {};
+    std::filesystem::path Root(FRONTIER_REPO_ROOT_DIR);
+    std::filesystem::path Dir = Root / "build" / "AssetCache";
+    std::filesystem::create_directories(Dir, Ec);
+    return Dir;
+}
+
+[[nodiscard]] bool ReadBinaryFileBytes(const std::filesystem::path& FilePath, std::vector<uint8_t>& OutBytes)
+{
+    std::ifstream Stream(FilePath, std::ios::binary | std::ios::ate);
+    if (!Stream)
+    {
+        return false;
+    }
+    const std::streamsize Size = Stream.tellg();
+    if (Size <= 0)
+    {
+        return false;
+    }
+    Stream.seekg(0, std::ios::beg);
+    OutBytes.resize(static_cast<std::size_t>(Size));
+    return static_cast<bool>(Stream.read(reinterpret_cast<char*>(OutBytes.data()), Size));
+}
+
+void WriteBinaryFileBytes(const std::filesystem::path& FilePath, std::span<const uint8_t> InBytes)
+{
+    if (InBytes.empty())
+    {
+        return;
+    }
+    std::ofstream Stream(FilePath, std::ios::binary | std::ios::trunc);
+    if (Stream)
+    {
+        Stream.write(reinterpret_cast<const char*>(InBytes.data()), static_cast<std::streamsize>(InBytes.size()));
+    }
+}
+
+[[nodiscard]] std::string FormatHexCacheTag(uint64_t HashVal)
+{
+    char Buf[24] {};
+    std::snprintf(Buf, sizeof(Buf), "%016llx", static_cast<unsigned long long>(HashVal));
+    return std::string(Buf);
+}
+
 void BuildBoxGeometryAsset(ShowcaseGeometryAsset& OutAsset, Mathematics::Scalar3D HalfExtents)
 {
     OutAsset = {};
     GeometrySpace::AppendBoxPrimitive(OutAsset.Network, { 0.0f, 0.0f, 0.0f }, HalfExtents, {}, {});
     (void)OutAsset.Pyramid.BuildFromPolygonNetwork(OutAsset.Network, 3u);
+    (void)OutAsset.LocalTree.BuildFromPolygonNetwork(OutAsset.Network);
 }
 
 void BuildShapeGeometryAsset(
@@ -109,6 +157,7 @@ void BuildShapeGeometryAsset(
     OutAsset.Network.LinkOppositeEdges();
     OutAsset.Network.RecomputeNormals();
     (void)OutAsset.Pyramid.BuildFromPolygonNetwork(OutAsset.Network, 3u);
+    (void)OutAsset.LocalTree.BuildFromPolygonNetwork(OutAsset.Network);
 }
 
 struct LocalQuantizedKey
@@ -466,6 +515,106 @@ void EnsureObjectLocalSmoothTriangles(ShowcaseWorldAssetEntry& Obj)
     return OutVolume.BakeSignedFromTrianglesAspect(LocalPrims, ResX, ResY, ResZ, Margin);
 }
 
+[[nodiscard]] uint64_t HashSmoothTriangleGeometry(
+    std::span<const CachedLocalSmoothTriangle> LocalTriangles,
+    Mathematics::Scalar3D                      DimensionsMeters,
+    uint32_t                                   ExtraSalt = 0u) noexcept
+{
+    uint64_t HashVal = 14695981039346656037ull;
+    const auto MixWord = [&HashVal](uint64_t Word) noexcept
+    {
+        HashVal = (HashVal ^ Word) * 1099511628211ull;
+    };
+    MixWord(static_cast<uint64_t>(LocalTriangles.size()));
+    MixWord(static_cast<uint64_t>(std::lround(DimensionsMeters.X * 10000.0f)));
+    MixWord(static_cast<uint64_t>(std::lround(DimensionsMeters.Y * 10000.0f)));
+    MixWord(static_cast<uint64_t>(std::lround(DimensionsMeters.Z * 10000.0f)));
+    MixWord(ExtraSalt);
+    const std::size_t Step = std::max<std::size_t>(1u, LocalTriangles.size() / 512u);
+    for (std::size_t Idx = 0u; Idx < LocalTriangles.size(); Idx += Step)
+    {
+        const auto& T = LocalTriangles[Idx];
+        MixWord(static_cast<uint64_t>(std::lround(T.Corner0.X * 10000.0f)));
+        MixWord(static_cast<uint64_t>(std::lround(T.Corner1.Y * 10000.0f)));
+        MixWord(static_cast<uint64_t>(std::lround(T.Corner2.Z * 10000.0f)));
+        MixWord(T.MaterialSlotOverride);
+    }
+    return HashVal;
+}
+
+void BuildOrLoadCachedLocalTreeFromSmoothTriangles(
+    std::span<const CachedLocalSmoothTriangle> LocalTriangles,
+    uint64_t                                   CacheKey,
+    SpatialAcceleration::WideBoundingTree&     OutTree)
+{
+    if (LocalTriangles.empty())
+    {
+        return;
+    }
+    const std::filesystem::path CacheFile =
+        QueryDerivedAssetCacheDirectory() / ("Blas_" + FormatHexCacheTag(CacheKey) + ".wbvh4");
+    std::vector<uint8_t> RawBytes {};
+    if (ReadBinaryFileBytes(CacheFile, RawBytes))
+    {
+        const std::span<const std::byte> ByteSpan(
+            reinterpret_cast<const std::byte*>(RawBytes.data()), RawBytes.size());
+        if (OutTree.DeserializeFromBinaryBytes(ByteSpan) && !OutTree.WideEntries.empty())
+        {
+            return;
+        }
+    }
+
+    std::vector<SpatialAcceleration::RayTrianglePrimitive> LocalPrims;
+    LocalPrims.reserve(LocalTriangles.size());
+    for (uint32_t Idx = 0u; Idx < static_cast<uint32_t>(LocalTriangles.size()); ++Idx)
+    {
+        const auto& Tri = LocalTriangles[Idx];
+        SpatialAcceleration::RayTrianglePrimitive Prim {};
+        Prim.Corner0          = Tri.Corner0;
+        Prim.Edge01           = Tri.Corner1 - Tri.Corner0;
+        Prim.Edge02           = Tri.Corner2 - Tri.Corner0;
+        Prim.SourceFaceIndex  = Idx;
+        Prim.MaterialOrdinal  = (Tri.MaterialSlotOverride != 0xFFFFu) ? Tri.MaterialSlotOverride : 0u;
+        Prim.OpaqueMask       = 1u;
+        Prim.PrimitiveOrdinal = Idx;
+        LocalPrims.push_back(Prim);
+    }
+    if (OutTree.BuildFromTrianglePrimitives(LocalPrims))
+    {
+        const std::vector<std::byte> Encoded = OutTree.SerializeToBinaryBytes();
+        WriteBinaryFileBytes(
+            CacheFile,
+            std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(Encoded.data()), Encoded.size()));
+    }
+}
+
+void BakeOrLoadCachedAssetLocalSdf(
+    std::span<const CachedLocalSmoothTriangle>    LocalTriangles,
+    Mathematics::Scalar3D                         DimensionsMeters,
+    uint64_t                                      CacheKey,
+    DistanceFieldSpace::LocalSignedDistanceVolume& OutVolume)
+{
+    if (LocalTriangles.empty())
+    {
+        return;
+    }
+    const std::filesystem::path CacheFile =
+        QueryDerivedAssetCacheDirectory() / ("Sdf_" + FormatHexCacheTag(CacheKey) + ".sdv1");
+    std::vector<uint8_t> RawBytes {};
+    if (ReadBinaryFileBytes(CacheFile, RawBytes) && OutVolume.DeserializeFromBinaryBytes(RawBytes))
+    {
+        return;
+    }
+    if (BakeAssetSignedLocalSdfFromSmoothTriangles(LocalTriangles, DimensionsMeters, OutVolume))
+    {
+        std::vector<uint8_t> Encoded {};
+        if (OutVolume.SerializeToBinaryBytes(Encoded))
+        {
+            WriteBinaryFileBytes(CacheFile, Encoded);
+        }
+    }
+}
+
 void BuildCameraRay(
     const PerspectiveCameraBasis& Cam,
     float                         NormalizedU,
@@ -729,30 +878,49 @@ bool LoadWorldSceneFromSpaceFile(
             }
             // Nanite-like per-asset LOD bake: glass keeps LOD 1 as its last level (silhouette
             // protection); every asset locks material boundaries so face material slots survive.
-            SpatialAcceleration::ClusterLodBakeConfiguration LodBake {};
-            LodBake.MaximumLevels          = 3u;
-            LodBake.CoarsestAllowedLevel   = Entry.GlassShell ? 1u : 0xFFFFFFFFu;
-            LodBake.LockMaterialBoundaries = true;
-            (void)GeomAsset->Pyramid.BuildFromPolygonNetwork(GeomAsset->Network, LodBake);
-            for (const Codecs::GeometrySurfaceSlotLink& SlotLink : GeoDoc.SurfaceSlots)
+            const uint64_t GeomCacheKey = HashSmoothTriangleGeometry(
+                Entry.LocalSmoothTriangles,
+                Entry.AuthoredDimensions,
+                Entry.GlassShell ? 0x91A55u : 0x31A50u);
+            const std::filesystem::path PyrCacheFile =
+                QueryDerivedAssetCacheDirectory() / ("Pyr_" + FormatHexCacheTag(GeomCacheKey) + ".cpy1");
+            std::vector<uint8_t> PyrCacheBytes {};
+            if (!ReadBinaryFileBytes(PyrCacheFile, PyrCacheBytes) ||
+                !GeomAsset->Pyramid.DeserializeFromBinaryBytes(
+                    std::span<const std::byte>(reinterpret_cast<const std::byte*>(PyrCacheBytes.data()), PyrCacheBytes.size())) ||
+                GeomAsset->Pyramid.Clusters.empty())
             {
-                if (ContainsCaseInsensitive(SlotLink.SlotTitle, "glass") ||
-                    ContainsCaseInsensitive(SlotLink.MaterialPath, "windshield") ||
-                    ContainsCaseInsensitive(SlotLink.MaterialPath, "glass"))
+                SpatialAcceleration::ClusterLodBakeConfiguration LodBake {};
+                LodBake.MaximumLevels          = 3u;
+                LodBake.CoarsestAllowedLevel   = Entry.GlassShell ? 1u : 0xFFFFFFFFu;
+                LodBake.LockMaterialBoundaries = true;
+                (void)GeomAsset->Pyramid.BuildFromPolygonNetwork(GeomAsset->Network, LodBake);
+                for (const Codecs::GeometrySurfaceSlotLink& SlotLink : GeoDoc.SurfaceSlots)
                 {
-                    if (const auto FoundSlot = SubSlotRemap.find(SlotLink.PartGroupOrdinal); FoundSlot != SubSlotRemap.end())
+                    if (ContainsCaseInsensitive(SlotLink.SlotTitle, "glass") ||
+                        ContainsCaseInsensitive(SlotLink.MaterialPath, "windshield") ||
+                        ContainsCaseInsensitive(SlotLink.MaterialPath, "glass"))
                     {
-                        GeomAsset->Pyramid.ConfigureMaterialCoarsestAllowedLevel(
-                            static_cast<uint8_t>(FoundSlot->second & 0xFFu),
-                            1u);
+                        if (const auto FoundSlot = SubSlotRemap.find(SlotLink.PartGroupOrdinal); FoundSlot != SubSlotRemap.end())
+                        {
+                            GeomAsset->Pyramid.ConfigureMaterialCoarsestAllowedLevel(
+                                static_cast<uint8_t>(FoundSlot->second & 0xFFu),
+                                1u);
+                        }
                     }
                 }
+                const std::vector<std::byte> EncodedPyr = GeomAsset->Pyramid.SerializeToBinaryBytes();
+                WriteBinaryFileBytes(
+                    PyrCacheFile,
+                    std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(EncodedPyr.data()), EncodedPyr.size()));
             }
+            BuildOrLoadCachedLocalTreeFromSmoothTriangles(Entry.LocalSmoothTriangles, GeomCacheKey, GeomAsset->LocalTree);
             if (FaceCount > 64u && !Entry.GlassShell)
             {
-                (void)BakeAssetSignedLocalSdfFromSmoothTriangles(
+                BakeOrLoadCachedAssetLocalSdf(
                     Entry.LocalSmoothTriangles,
                     Entry.AuthoredDimensions,
+                    GeomCacheKey,
                     GeomAsset->LocalSdf);
             }
         }
@@ -1194,18 +1362,37 @@ void BuildVehicleClearSkyDefaultScene(
             const std::array<uint32_t, 3u> Loop {{ V0, V1, V2 }};
             (void)VehicleGeom->Network.AppendFace(Loop, {}, {}, 0u, SlotMat);
         }
-        SpatialAcceleration::ClusterLodBakeConfiguration VehicleBake {};
-        VehicleBake.MaximumLevels          = 8u;
-        VehicleBake.TargetGroupClusters    = 4u;
-        VehicleBake.SimplifyKeepRatio      = 0.50f;
-        VehicleBake.RelativeErrorLimit     = 1.25f;
-        VehicleBake.LockMaterialBoundaries = true;
-        (void)VehicleGeom->Pyramid.BuildFromPolygonNetwork(VehicleGeom->Network, VehicleBake);
-        const uint16_t GlassSlot = VehicleSlots[static_cast<std::size_t>(Codecs::VehicleSurfaceSlot::VehicleGlass)];
-        VehicleGeom->Pyramid.ConfigureMaterialCoarsestAllowedLevel(static_cast<uint8_t>(GlassSlot & 0xFFu), 2u);
-        (void)BakeAssetSignedLocalSdfFromSmoothTriangles(
+        const uint64_t VehicleCacheKey = HashSmoothTriangleGeometry(
             VehicleEntry.LocalSmoothTriangles,
             VehicleEntry.AuthoredDimensions,
+            0xC047DE1Cu);
+        const std::filesystem::path VehiclePyrFile =
+            QueryDerivedAssetCacheDirectory() / ("Pyr_" + FormatHexCacheTag(VehicleCacheKey) + ".cpy1");
+        std::vector<uint8_t> VehiclePyrBytes {};
+        if (!ReadBinaryFileBytes(VehiclePyrFile, VehiclePyrBytes) ||
+            !VehicleGeom->Pyramid.DeserializeFromBinaryBytes(
+                std::span<const std::byte>(reinterpret_cast<const std::byte*>(VehiclePyrBytes.data()), VehiclePyrBytes.size())) ||
+            VehicleGeom->Pyramid.Clusters.empty())
+        {
+            SpatialAcceleration::ClusterLodBakeConfiguration VehicleBake {};
+            VehicleBake.MaximumLevels          = 8u;
+            VehicleBake.TargetGroupClusters    = 4u;
+            VehicleBake.SimplifyKeepRatio      = 0.50f;
+            VehicleBake.RelativeErrorLimit     = 1.25f;
+            VehicleBake.LockMaterialBoundaries = true;
+            (void)VehicleGeom->Pyramid.BuildFromPolygonNetwork(VehicleGeom->Network, VehicleBake);
+            const uint16_t GlassSlot = VehicleSlots[static_cast<std::size_t>(Codecs::VehicleSurfaceSlot::VehicleGlass)];
+            VehicleGeom->Pyramid.ConfigureMaterialCoarsestAllowedLevel(static_cast<uint8_t>(GlassSlot & 0xFFu), 2u);
+            const std::vector<std::byte> EncodedVehiclePyr = VehicleGeom->Pyramid.SerializeToBinaryBytes();
+            WriteBinaryFileBytes(
+                VehiclePyrFile,
+                std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(EncodedVehiclePyr.data()), EncodedVehiclePyr.size()));
+        }
+        BuildOrLoadCachedLocalTreeFromSmoothTriangles(VehicleEntry.LocalSmoothTriangles, VehicleCacheKey, VehicleGeom->LocalTree);
+        BakeOrLoadCachedAssetLocalSdf(
+            VehicleEntry.LocalSmoothTriangles,
+            VehicleEntry.AuthoredDimensions,
+            VehicleCacheKey,
             VehicleGeom->LocalSdf);
     }
     else
@@ -2223,18 +2410,21 @@ bool AssignShowcaseEntryMaterial(
         {
             Obj.MaterialSlot      = InOutBundle.Scene.MaterialRegister.RegisterMaterial(Authored);
             Obj.DedicatedMaterial = true;
-            if (Obj.ClusterInstanceIndex < InOutBundle.Scene.ClusterInstances.size())
-            {
-                InOutBundle.Scene.ClusterInstances[Obj.ClusterInstanceIndex].MaterialSlot = Obj.MaterialSlot;
-            }
         }
         else
         {
             (void)InOutBundle.Scene.MaterialRegister.UpdateMaterialSlot(Obj.MaterialSlot, Authored);
         }
+        if (Obj.ClusterInstanceIndex < InOutBundle.Scene.ClusterInstances.size())
+        {
+            auto& Inst = InOutBundle.Scene.ClusterInstances[Obj.ClusterInstanceIndex];
+            Inst.MaterialSlot              = Obj.MaterialSlot;
+            Inst.DedicatedMaterialOverride = true;
+        }
 
         const bool IsGlass = (Authored.Transmission.TransmissionWeight > 0.25f);
-        Obj.GlassShell     = IsGlass;
+        const bool GlassChanged = (Obj.GlassShell != IsGlass);
+        Obj.GlassShell = IsGlass;
         if (Obj.ClusterInstanceIndex < InOutBundle.Scene.ClusterInstances.size())
         {
             InOutBundle.Scene.ClusterInstances[Obj.ClusterInstanceIndex].TransparentGlass = IsGlass;
@@ -2245,7 +2435,17 @@ bool AssignShowcaseEntryMaterial(
         {
             Entry->CategoryLabel = "Geometry · " + Obj.MaterialTitle;
         }
-        RebuildShowcaseSceneAcceleration(InOutBundle);
+        if (GlassChanged)
+        {
+            RebuildShowcaseSceneAcceleration(InOutBundle);
+        }
+        else
+        {
+            for (auto& Prim : InOutBundle.Scene.SceneTree.Primitives)
+            {
+                (void)Prim;
+            }
+        }
         return true;
     }
 
@@ -2514,14 +2714,16 @@ bool AssignShowcaseEntryBaseColor(
         {
             Obj.MaterialSlot      = InOutBundle.Scene.MaterialRegister.RegisterMaterial(Updated);
             Obj.DedicatedMaterial = true;
-            if (Obj.ClusterInstanceIndex < InOutBundle.Scene.ClusterInstances.size())
-            {
-                InOutBundle.Scene.ClusterInstances[Obj.ClusterInstanceIndex].MaterialSlot = Obj.MaterialSlot;
-            }
         }
         else
         {
             (void)InOutBundle.Scene.MaterialRegister.UpdateMaterialSlot(Obj.MaterialSlot, Updated);
+        }
+        if (Obj.ClusterInstanceIndex < InOutBundle.Scene.ClusterInstances.size())
+        {
+            auto& Inst = InOutBundle.Scene.ClusterInstances[Obj.ClusterInstanceIndex];
+            Inst.MaterialSlot              = Obj.MaterialSlot;
+            Inst.DedicatedMaterialOverride = true;
         }
 
         if (!SwatchAlias.empty())
@@ -2532,12 +2734,100 @@ bool AssignShowcaseEntryBaseColor(
                 Entry->CategoryLabel = "Geometry · " + Obj.MaterialTitle;
             }
         }
-        RebuildShowcaseSceneAcceleration(InOutBundle);
         return true;
     }
 
     return false;
 }
+
+namespace
+{
+
+[[nodiscard]] const SpatialAcceleration::WideBoundingTree* FindOrBuildAssetPickTree(
+    const ShowcaseWorldSceneBundle& Bundle,
+    const ShowcaseWorldAssetEntry&  Obj) noexcept
+{
+    if (Obj.ClusterInstanceIndex < Bundle.Scene.ClusterInstances.size())
+    {
+        const SpatialAcceleration::ClusterPyramid* Pyr =
+            Bundle.Scene.ClusterInstances[Obj.ClusterInstanceIndex].PyramidAsset;
+        if (Pyr != nullptr)
+        {
+            for (const ShowcaseGeometryAsset& StaticAsset : Bundle.GeometryAssets)
+            {
+                if (&StaticAsset.Pyramid == Pyr && !StaticAsset.LocalTree.WideEntries.empty())
+                {
+                    return &StaticAsset.LocalTree;
+                }
+            }
+            for (const auto& DynAsset : Bundle.DynamicGeometryAssets)
+            {
+                if (DynAsset != nullptr && &DynAsset->Pyramid == Pyr && !DynAsset->LocalTree.WideEntries.empty())
+                {
+                    return &DynAsset->LocalTree;
+                }
+            }
+        }
+    }
+
+    if (!Obj.FallbackPickTree.WideEntries.empty())
+    {
+        return &Obj.FallbackPickTree;
+    }
+
+    if (!Obj.LocalSmoothTriangles.empty())
+    {
+        std::vector<SpatialAcceleration::RayTrianglePrimitive> LocalPrims;
+        LocalPrims.reserve(Obj.LocalSmoothTriangles.size());
+        for (uint32_t Idx = 0u; Idx < static_cast<uint32_t>(Obj.LocalSmoothTriangles.size()); ++Idx)
+        {
+            const auto& Tri = Obj.LocalSmoothTriangles[Idx];
+            SpatialAcceleration::RayTrianglePrimitive Prim {};
+            Prim.Corner0          = Tri.Corner0;
+            Prim.Edge01           = Tri.Corner1 - Tri.Corner0;
+            Prim.Edge02           = Tri.Corner2 - Tri.Corner0;
+            Prim.SourceFaceIndex  = Idx;
+            Prim.MaterialOrdinal  = (Tri.MaterialSlotOverride != 0xFFFFu) ? Tri.MaterialSlotOverride : 0u;
+            Prim.OpaqueMask       = 1u;
+            Prim.PrimitiveOrdinal = Idx;
+            LocalPrims.push_back(Prim);
+        }
+        if (Obj.FallbackPickTree.BuildFromTrianglePrimitives(LocalPrims) && !Obj.FallbackPickTree.WideEntries.empty())
+        {
+            return &Obj.FallbackPickTree;
+        }
+    }
+    return nullptr;
+}
+
+[[nodiscard]] bool ProjectWorldPointToCameraUv(
+    const PerspectiveCameraBasis& Cam,
+    Mathematics::Axis3D           WorldPos,
+    float&                        OutU,
+    float&                        OutV) noexcept
+{
+    const Mathematics::Axis3D Fwd   = Mathematics::NormalizeAxis(Cam.TargetPoint - Cam.CameraOrigin, { 0.0f, 1.0f, 0.0f });
+    const Mathematics::Axis3D Right = Mathematics::NormalizeAxis(Mathematics::EvaluateCross(Fwd, Cam.WorldUpAxis), { 1.0f, 0.0f, 0.0f });
+    const Mathematics::Axis3D Up    = Mathematics::NormalizeAxis(Mathematics::EvaluateCross(Right, Fwd), { 0.0f, 0.0f, 1.0f });
+
+    const Mathematics::Axis3D Rel  = WorldPos - Cam.CameraOrigin;
+    const float               Depth = Mathematics::EvaluateDot(Rel, Fwd);
+    if (Depth <= 1.0e-3f)
+    {
+        return false;
+    }
+
+    const float Aspect  = static_cast<float>(std::max(1u, Cam.ViewportWidthPx)) /
+                          static_cast<float>(std::max(1u, Cam.ViewportHeightPx));
+    const float TanHalf = std::tan(std::clamp(Cam.VerticalFovRadians, 0.10f, 2.60f) * 0.5f);
+    const float NdcX    = Mathematics::EvaluateDot(Rel, Right) / (Depth * std::max(1.0e-5f, Aspect * TanHalf));
+    const float NdcY    = Mathematics::EvaluateDot(Rel, Up) / (Depth * std::max(1.0e-5f, TanHalf));
+    OutU = 0.5f * (NdcX + 1.0f);
+    OutV = 0.5f * (1.0f - NdcY);
+    return true;
+}
+
+} // namespace
 
 OutlinerSlotToken PickShowcaseGalleryEntryAtUv(
     const OutlinerPanel&            SourceOutliner,
@@ -2561,15 +2851,48 @@ OutlinerSlotToken PickShowcaseGalleryEntryAtUv(
         {
             continue;
         }
-        const float Scale = Bundle.Scene.ClusterInstances[Obj.ClusterInstanceIndex].UniformScale;
+        const auto& Inst  = Bundle.Scene.ClusterInstances[Obj.ClusterInstanceIndex];
+        const float Scale = Inst.UniformScale;
         if (Scale <= 1.0e-4f)
         {
             continue;
         }
 
+        const float ScaleX = (Inst.NonUniformScale.X > 1.0e-4f) ? Inst.NonUniformScale.X : Scale;
+        const float ScaleY = (Inst.NonUniformScale.Y > 1.0e-4f) ? Inst.NonUniformScale.Y : Scale;
+        const float ScaleZ = (Inst.NonUniformScale.Z > 1.0e-4f) ? Inst.NonUniformScale.Z : Scale;
+        const float YawRad = Obj.RotationZDegrees * 0.01745329252f;
+        const bool  HasYaw = std::fabs(YawRad) > 1.0e-5f;
+        const float CosZ   = HasYaw ? std::cos(YawRad) : 1.0f;
+        const float SinZ   = HasYaw ? std::sin(YawRad) : 0.0f;
+
+        const Mathematics::Axis3D RelOrig = RayOrigin - Obj.CenterWorld;
+        const Mathematics::Axis3D UnrotO  = HasYaw ? RotateAroundZ(RelOrig, CosZ, -SinZ) : RelOrig;
+        const Mathematics::Axis3D UnrotD  = HasYaw ? RotateAroundZ(RayDir, CosZ, -SinZ) : RayDir;
+
         float HitDist = 0.0f;
         bool  Hit     = false;
-        if (Obj.PrimitiveShape == ShowcasePrimitiveShape::Sphere)
+        if (const auto* PickTree = FindOrBuildAssetPickTree(Bundle, Obj))
+        {
+            const Mathematics::Axis3D LocalO { UnrotO.X / ScaleX, UnrotO.Y / ScaleY, UnrotO.Z / ScaleZ };
+            const Mathematics::Axis3D ScaledD { UnrotD.X / ScaleX, UnrotD.Y / ScaleY, UnrotD.Z / ScaleZ };
+            const float DirLen = Mathematics::EvaluateLength(ScaledD);
+            if (DirLen > 1.0e-7f)
+            {
+                SpatialAcceleration::RaySegmentQuery LocalQuery {};
+                LocalQuery.Origin          = LocalO;
+                LocalQuery.UnitDirection   = ScaledD * (1.0f / DirLen);
+                LocalQuery.MinimumDistance = 1.0e-4f;
+                LocalQuery.MaximumDistance = ClosestDistance * DirLen;
+                const auto HitRes = PickTree->TraceClosestRay(LocalQuery, false);
+                if (HitRes.HitConfirmed)
+                {
+                    Hit     = true;
+                    HitDist = HitRes.HitDistanceMeters / DirLen;
+                }
+            }
+        }
+        else if (Obj.PrimitiveShape == ShowcasePrimitiveShape::Sphere)
         {
             const float Radius = std::max(0.04f, 0.5f * Obj.DimensionsMeters.X * Scale);
             Hit                = IntersectRaySphere(RayOrigin, RayDir, Obj.CenterWorld, Radius, HitDist);
@@ -2581,19 +2904,7 @@ OutlinerSlotToken PickShowcaseGalleryEntryAtUv(
                 std::max(0.04f, 0.5f * Obj.DimensionsMeters.Y * Scale),
                 std::max(0.04f, 0.5f * Obj.DimensionsMeters.Z * Scale),
             };
-            const float YawRad = Obj.RotationZDegrees * 0.01745329252f;
-            if (std::fabs(YawRad) > 1.0e-5f)
-            {
-                const float CosZ = std::cos(YawRad);
-                const float SinZ = std::sin(YawRad);
-                const Mathematics::Axis3D LocalOrig = RotateAroundZ(RayOrigin - Obj.CenterWorld, CosZ, -SinZ);
-                const Mathematics::Axis3D LocalDir  = RotateAroundZ(RayDir, CosZ, -SinZ);
-                Hit = IntersectRayAabb(LocalOrig, LocalDir, { 0.0f, 0.0f, 0.0f }, HalfExt, HitDist);
-            }
-            else
-            {
-                Hit = IntersectRayAabb(RayOrigin, RayDir, Obj.CenterWorld, HalfExt, HitDist);
-            }
+            Hit = IntersectRayAabb(UnrotO, UnrotD, { 0.0f, 0.0f, 0.0f }, HalfExt, HitDist);
         }
 
         if (Hit && HitDist < ClosestDistance)
@@ -2627,6 +2938,111 @@ OutlinerSlotToken PickShowcaseGalleryEntryAtUv(
     }
 
     return ClosestToken;
+}
+
+std::vector<OutlinerSlotToken> PickShowcaseGalleryEntriesInUvBox(
+    const OutlinerPanel&            SourceOutliner,
+    const ShowcaseWorldSceneBundle& Bundle,
+    float                           MinNormalizedU,
+    float                           MinNormalizedV,
+    float                           MaxNormalizedU,
+    float                           MaxNormalizedV)
+{
+    const float U0 = std::clamp(std::min(MinNormalizedU, MaxNormalizedU), 0.0f, 1.0f);
+    const float V0 = std::clamp(std::min(MinNormalizedV, MaxNormalizedV), 0.0f, 1.0f);
+    const float U1 = std::clamp(std::max(MinNormalizedU, MaxNormalizedU), 0.0f, 1.0f);
+    const float V1 = std::clamp(std::max(MinNormalizedV, MaxNormalizedV), 0.0f, 1.0f);
+
+    std::vector<OutlinerSlotToken> Selected {};
+    Selected.reserve(Bundle.Objects.size());
+
+    for (const ShowcaseWorldAssetEntry& Obj : Bundle.Objects)
+    {
+        if (!Obj.SlotToken.Valid() || !SourceOutliner.QueryEffectiveVisibility(Obj.SlotToken))
+        {
+            continue;
+        }
+        if (Obj.ClusterInstanceIndex >= Bundle.Scene.ClusterInstances.size())
+        {
+            continue;
+        }
+        const auto& Inst  = Bundle.Scene.ClusterInstances[Obj.ClusterInstanceIndex];
+        const float Scale = Inst.UniformScale;
+        if (Scale <= 1.0e-4f)
+        {
+            continue;
+        }
+        // Exclude giant architectural floor/room slabs (>10 m span) from accidental marquee sweep unless their center is inside the box.
+        const float MaxSpan = std::max({ Obj.DimensionsMeters.X, Obj.DimensionsMeters.Y, Obj.DimensionsMeters.Z }) * Scale;
+        if (MaxSpan > 10.0f)
+        {
+            float CenterU = 0.0f, CenterV = 0.0f;
+            if (ProjectWorldPointToCameraUv(Bundle.EditorCamera, Obj.CenterWorld, CenterU, CenterV) &&
+                CenterU >= U0 && CenterU <= U1 && CenterV >= V0 && CenterV <= V1)
+            {
+                Selected.push_back(Obj.SlotToken);
+            }
+            continue;
+        }
+
+        const Mathematics::Scalar3D HalfExt {
+            std::max(0.04f, 0.5f * Obj.DimensionsMeters.X * Scale),
+            std::max(0.04f, 0.5f * Obj.DimensionsMeters.Y * Scale),
+            std::max(0.04f, 0.5f * Obj.DimensionsMeters.Z * Scale),
+        };
+        const float YawRad = Obj.RotationZDegrees * 0.01745329252f;
+        const float CosZ   = std::cos(YawRad);
+        const float SinZ   = std::sin(YawRad);
+
+        float ProjMinU =  1.0e9f, ProjMinV =  1.0e9f;
+        float ProjMaxU = -1.0e9f, ProjMaxV = -1.0e9f;
+        uint32_t FrontCorners = 0u;
+
+        for (uint32_t CornerBits = 0u; CornerBits < 8u; ++CornerBits)
+        {
+            const Mathematics::Axis3D LocalC {
+                ((CornerBits & 1u) != 0u) ? HalfExt.X : -HalfExt.X,
+                ((CornerBits & 2u) != 0u) ? HalfExt.Y : -HalfExt.Y,
+                ((CornerBits & 4u) != 0u) ? HalfExt.Z : -HalfExt.Z,
+            };
+            const Mathematics::Axis3D WorldC = Obj.CenterWorld + RotateAroundZ(LocalC, CosZ, SinZ);
+            float CU = 0.0f, CV = 0.0f;
+            if (ProjectWorldPointToCameraUv(Bundle.EditorCamera, WorldC, CU, CV))
+            {
+                ProjMinU = std::min(ProjMinU, CU);
+                ProjMinV = std::min(ProjMinV, CV);
+                ProjMaxU = std::max(ProjMaxU, CU);
+                ProjMaxV = std::max(ProjMaxV, CV);
+                ++FrontCorners;
+            }
+        }
+
+        if (FrontCorners > 0u &&
+            ProjMaxU >= U0 && ProjMinU <= U1 &&
+            ProjMaxV >= V0 && ProjMinV <= V1)
+        {
+            Selected.push_back(Obj.SlotToken);
+        }
+    }
+
+    for (const ShowcaseAreaLightLink& LightBind : Bundle.AreaLightBindings)
+    {
+        if (!LightBind.SlotToken.Valid() ||
+            LightBind.AreaLightIndex >= Bundle.Scene.AreaLights.size() ||
+            !SourceOutliner.QueryEffectiveVisibility(LightBind.SlotToken))
+        {
+            continue;
+        }
+        const auto& Quad = Bundle.Scene.AreaLights[LightBind.AreaLightIndex];
+        float CU = 0.0f, CV = 0.0f;
+        if (ProjectWorldPointToCameraUv(Bundle.EditorCamera, Quad.CenterWorld, CU, CV) &&
+            CU >= U0 && CU <= U1 && CV >= V0 && CV <= V1)
+        {
+            Selected.push_back(LightBind.SlotToken);
+        }
+    }
+
+    return Selected;
 }
 
 Mathematics::Axis3D RaycastShowcasePlacementAtUv(

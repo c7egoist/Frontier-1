@@ -670,15 +670,54 @@ void VulkanWorldRenderSequence::TeardownSequence() noexcept
     ActiveClipFocusInitialized      = false;
     DistanceFieldStats              = {};
     CachedLocalSdfOffsets.clear();
+    AssetCutBlasCache.clear();
     FrameSequenceIndex              = 0u;
     BoundDevice                     = nullptr;
     SceneUploadedOnce               = false;
     GlobalDistanceFieldReady        = false;
+    StaticGiBakePending             = false;
     SkyViewLutValid                 = false;
+    CloudLayerCacheValid            = false;
+    LastCloudPassSignature          = 0ull;
+    CloudLayerDispatchCount         = 0u;
     LastSkyViewUniformSnapshot.fill(0u);
     LastRadiosityLightingSignature  = 0ull;
     UploadedBvhCount                = 0u;
     UploadedMaterialCount           = 0u;
+}
+
+void VulkanWorldRenderSequence::RequestStaticGiBake() noexcept
+{
+    StaticGiBakePending            = true;
+    LastRadiosityLightingSignature = 0ull;
+    ProgressiveSampleCount         = 0u;
+}
+
+void VulkanWorldRenderSequence::RequestSdfVolumeBake() noexcept
+{
+    GlobalDistanceFieldReady       = false;
+    CachedLocalSdfAssetSignature   = 0ull;
+    CachedDynamicSdfSignature      = 0ull;
+    StaticGiBakePending            = true;
+    LastRadiosityLightingSignature = 0ull;
+    ProgressiveSampleCount         = 0u;
+}
+
+void VulkanWorldRenderSequence::RequestClusterLodRebuild() noexcept
+{
+    CachedNaniteCutSignature = 0u;
+    NaniteLodBuffersActive   = false;
+    AssetCutBlasCache.clear();
+    ProgressiveSampleCount   = 0u;
+}
+
+void VulkanWorldRenderSequence::RequestSkyCloudCacheRefresh() noexcept
+{
+    SkyViewLutValid        = false;
+    CloudLayerCacheValid   = false;
+    LastCloudPassSignature = 0ull;
+    LastSkyViewUniformSnapshot.fill(0u);
+    ProgressiveSampleCount = 0u;
 }
 
 bool VulkanWorldRenderSequence::QueryReady() const noexcept
@@ -836,7 +875,9 @@ bool VulkanWorldRenderSequence::UploadToDeviceBuffer(
         0u,
         nullptr);
     const uint64_t SyncPoint = BoundDevice->DispatchCommandBufferAsync(Cmd);
-    return BoundDevice->AwaitTimelineTick(SyncPoint);
+    const bool Reached = BoundDevice->AwaitTimelineTick(SyncPoint);
+    BoundDevice->FreeCommandBuffer(Cmd);
+    return Reached;
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -1510,6 +1551,58 @@ void VulkanWorldRenderSequence::UploadSolarCascadeDepth(const WorldSceneSpecific
     }
 }
 
+void VulkanWorldRenderSequence::SynchronizeMaterialEntriesOnly(const WorldSceneSpecification& Scene)
+{
+    if (!QueryReady())
+    {
+        return;
+    }
+    const auto SyncStart = std::chrono::steady_clock::now();
+
+    const uint32_t MatCount = std::max(1u, Scene.MaterialRegister.QuerySlotCount());
+    std::vector<GpuWorldMaterial80> GpuMats(MatCount);
+    for (uint32_t Slot = 0u; Slot < Scene.MaterialRegister.QuerySlotCount(); ++Slot)
+    {
+        const auto& Src = Scene.MaterialRegister.InspectAuthoredMaterial(static_cast<uint16_t>(Slot));
+        const Mathematics::LinearRGB Emis = MaterialSpace::Scattering::EvaluatePlanckianBlackbodyRadiance(Src.PorosityLight);
+        GpuWorldMaterial80 Dst {};
+        Dst.DiffuseAlbedoRoughness[0] = Src.Diffuse.BaseColor.R * Src.Diffuse.BaseWeight;
+        Dst.DiffuseAlbedoRoughness[1] = Src.Diffuse.BaseColor.G * Src.Diffuse.BaseWeight;
+        Dst.DiffuseAlbedoRoughness[2] = Src.Diffuse.BaseColor.B * Src.Diffuse.BaseWeight;
+        Dst.DiffuseAlbedoRoughness[3] = Src.Diffuse.DiffuseRoughness;
+        Dst.SpecParams[0]             = Src.Specular.Roughness;
+        Dst.SpecParams[1]             = Src.Specular.Metalness;
+        Dst.SpecParams[2]             = Src.Specular.DielectricIOR;
+        Dst.SpecParams[3]             = Src.Specular.Anisotropy;
+        Dst.EdgeTintCoatWeight[0]     = Src.Specular.EdgeTintF82.R;
+        Dst.EdgeTintCoatWeight[1]     = Src.Specular.EdgeTintF82.G;
+        Dst.EdgeTintCoatWeight[2]     = Src.Specular.EdgeTintF82.B;
+        Dst.EdgeTintCoatWeight[3]     = Src.Clearcoat.CoatWeight;
+        Dst.CoatRoughnessOptics[0]    = Src.Clearcoat.CoatRoughness;
+        Dst.CoatRoughnessOptics[1]    = Src.Transmission.TransmissionWeight;
+        Dst.CoatRoughnessOptics[2]    = Src.Transmission.AbbeDispersionNumber;
+        Dst.CoatRoughnessOptics[3]    = 0.0f;
+        Dst.EmissiveRadiancePad[0]    = Emis.R;
+        Dst.EmissiveRadiancePad[1]    = Emis.G;
+        Dst.EmissiveRadiancePad[2]    = Emis.B;
+        Dst.EmissiveRadiancePad[3]    = 0.0f;
+        GpuMats[Slot]                 = Dst;
+    }
+    const uint64_t MatBytes = GpuMats.size() * sizeof(GpuWorldMaterial80);
+    UploadToDeviceBuffer(MaterialEntryBuffer, GpuMats.data(), MatBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    UploadedMaterialCount = MatCount;
+
+    if (GlobalDistanceFieldReady)
+    {
+        (void)DispatchGpuScenePrecompute(Scene, false);
+    }
+    LastRadiosityLightingSignature = 0ull;
+    ProgressiveSampleCount         = 0u;
+
+    const auto SyncEnd = std::chrono::steady_clock::now();
+    LastSceneSyncMilliseconds += static_cast<float>(std::chrono::duration<double, std::milli>(SyncEnd - SyncStart).count());
+}
+
 void VulkanWorldRenderSequence::SynchronizeSceneResources(
     const WorldSceneSpecification& Scene,
     bool                           RebuildShadows)
@@ -1804,6 +1897,7 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
     {
         uint32_t                                 InstanceIndex  = 0u;
         Mathematics::Axis3D                      LocalCameraPos {};
+        uint64_t                                 AssetCutKey    = 0ull;
         SpatialAcceleration::ClusterCutSelection Selection      {};
     };
     std::vector<InstanceCut> Cuts;
@@ -1905,6 +1999,7 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
         TestedGroups    += Cut.Selection.TestedGroupCount;
         ActiveTriangles += Cut.Selection.ActiveTriangleCount;
         MixSignature(InstIdx + 1u);
+        MixSignature(static_cast<uint64_t>(Inst.MaterialSlot) | (Inst.DedicatedMaterialOverride ? 0x10000ull : 0ull));
         MixSignature(static_cast<uint64_t>(std::lround(Inst.RotationZDegrees * 100.0f)));
         MixSignature(static_cast<uint64_t>(std::lround(ScaleX * 1000.0f)));
         MixSignature(static_cast<uint64_t>(std::lround(ScaleY * 1000.0f)));
@@ -1912,10 +2007,20 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
         MixSignature(static_cast<uint64_t>(std::lround(Inst.WorldTranslation.X * 1000.0f)));
         MixSignature(static_cast<uint64_t>(std::lround(Inst.WorldTranslation.Y * 1000.0f)));
         MixSignature(static_cast<uint64_t>(std::lround(Inst.WorldTranslation.Z * 1000.0f)));
+
+        uint64_t AssetCutKey = 1469598103934665603ull;
+        const auto MixAssetCut = [&AssetCutKey](uint64_t Val) noexcept
+        {
+            AssetCutKey = (AssetCutKey ^ Val) * 1099511628211ull;
+        };
+        MixAssetCut(reinterpret_cast<uintptr_t>(Inst.PyramidAsset));
+        MixAssetCut(static_cast<uint64_t>(Inst.PyramidAsset->Triangles.size()));
         for (const uint32_t ClusterIdx : Cut.Selection.ActiveClusterIndices)
         {
             MixSignature(ClusterIdx + 1u);
+            MixAssetCut(ClusterIdx + 1u);
         }
+        Cut.AssetCutKey = AssetCutKey;
         if (Config.DebugChannel == 20u)
         {
             MixSignature(static_cast<uint64_t>(std::lround(LocalCamera.X * 50.0f)));
@@ -1937,107 +2042,147 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
         return;
     }
 
-    // Emit world-space triangles for the active cut only.
-    std::vector<SpatialAcceleration::RayTrianglePrimitive>  LodPrims;
-    std::vector<SpatialAcceleration::TriangleSmoothNormals> LodNormals;
-    std::vector<uint32_t> LodPrimLevel;      // per PrimitiveOrdinal: hierarchy level (debug channel 17)
-    std::vector<uint32_t> LodPrimCluster;    // per PrimitiveOrdinal: global cluster ordinal (debug channel 18)
-    std::vector<uint32_t> LodPrimGroup;      // per PrimitiveOrdinal: global simplification group ordinal (debug channel 19)
-    std::vector<float>    LodPrimErrorRatio; // per PrimitiveOrdinal: projected selfError / pixelError ratio (debug channel 20)
-    LodPrims.reserve(std::max(1u, ActiveTriangles));
-    LodNormals.reserve(std::max(1u, ActiveTriangles));
-    LodPrimLevel.reserve(std::max(1u, ActiveTriangles));
-    LodPrimCluster.reserve(std::max(1u, ActiveTriangles));
-    LodPrimGroup.reserve(std::max(1u, ActiveTriangles));
-    LodPrimErrorRatio.reserve(std::max(1u, ActiveTriangles));
-    uint32_t LevelTriangles[8] {};
-    uint32_t LevelClusters[8] {};
-    uint32_t PrimOrdinal = 0u;
-    uint32_t GlobalClusterOrdinal = 0u;
-    uint32_t GlobalGroupBaseOrdinal = 0u;
-    for (const InstanceCut& Cut : Cuts)
+    auto AcquireOrBuildAssetCutBlas = [&](const InstanceCut& Cut, const SpatialAcceleration::ClusterPyramid* Pyramid) -> const CachedAssetCutBlas*
     {
-        const RigidClusterInstance& Inst = Scene.ClusterInstances[Cut.InstanceIndex];
-        const auto* Pyramid = Inst.PyramidAsset;
-        const float ScaleU = std::max(1.0e-4f, Inst.UniformScale);
-        const float ScaleX = (Inst.NonUniformScale.X > 1.0e-4f) ? Inst.NonUniformScale.X : ScaleU;
-        const float ScaleY = (Inst.NonUniformScale.Y > 1.0e-4f) ? Inst.NonUniformScale.Y : ScaleU;
-        const float ScaleZ = (Inst.NonUniformScale.Z > 1.0e-4f) ? Inst.NonUniformScale.Z : ScaleU;
-        const float InvScaleX = 1.0f / ScaleX;
-        const float InvScaleY = 1.0f / ScaleY;
-        const float InvScaleZ = 1.0f / ScaleZ;
-        const bool  NonUni = (std::fabs(ScaleX - ScaleY) > 1.0e-4f) || (std::fabs(ScaleX - ScaleZ) > 1.0e-4f);
-        const float YawRad     = Inst.RotationZDegrees * Constants::DegToRadFloat;
-        const bool  YawRotated = std::fabs(YawRad) > 1.0e-5f;
-        const float CosZ       = YawRotated ? std::cos(YawRad) : 1.0f;
-        const float SinZ       = YawRotated ? std::sin(YawRad) : 0.0f;
-        const auto  RotZ   = [CosZ, SinZ](Mathematics::Axis3D V) noexcept -> Mathematics::Axis3D
+        if (Cut.Selection.ActiveClusterIndices.empty())
         {
-            return { V.X * CosZ - V.Y * SinZ, V.X * SinZ + V.Y * CosZ, V.Z };
-        };
-        const auto ScaleVec = [ScaleX, ScaleY, ScaleZ](Mathematics::Axis3D V) noexcept -> Mathematics::Axis3D
+            return nullptr;
+        }
+        for (const CachedAssetCutBlas& Existing : AssetCutBlasCache)
         {
-            return { V.X * ScaleX, V.Y * ScaleY, V.Z * ScaleZ };
-        };
-        const auto XformNormal = [NonUni, YawRotated, InvScaleX, InvScaleY, InvScaleZ, &RotZ](Mathematics::Axis3D N) noexcept -> Mathematics::Axis3D
+            if (Existing.Key == Cut.AssetCutKey)
+            {
+                return &Existing;
+            }
+        }
+        if (AssetCutBlasCache.size() >= 64u)
         {
-            Mathematics::Axis3D Sn = NonUni
-                ? Mathematics::NormalizeAxis({ N.X * InvScaleX, N.Y * InvScaleY, N.Z * InvScaleZ }, { 0.0f, 0.0f, 1.0f })
-                : N;
-            return YawRotated ? RotZ(Sn) : Sn;
-        };
+            while (AssetCutBlasCache.size() >= 48u)
+            {
+                AssetCutBlasCache.pop_front();
+            }
+        }
+
+        CachedAssetCutBlas Built {};
+        Built.Key          = Cut.AssetCutKey;
+        Built.ClusterCount = static_cast<uint32_t>(Cut.Selection.ActiveClusterIndices.size());
+
+        std::vector<SpatialAcceleration::RayTrianglePrimitive>  LocalPrims;
+        std::vector<SpatialAcceleration::TriangleSmoothNormals> LocalNormals;
+        LocalPrims.reserve(std::max(1u, Cut.Selection.ActiveTriangleCount));
+        LocalNormals.reserve(std::max(1u, Cut.Selection.ActiveTriangleCount));
+        Built.PrimLevel.reserve(std::max(1u, Cut.Selection.ActiveTriangleCount));
+        Built.PrimCluster.reserve(std::max(1u, Cut.Selection.ActiveTriangleCount));
+        Built.PrimGroup.reserve(std::max(1u, Cut.Selection.ActiveTriangleCount));
+        Built.PrimOrigGroup.reserve(std::max(1u, Cut.Selection.ActiveTriangleCount));
+
+        uint32_t LocalPrimOrd = 0u;
+        uint32_t LocalClusOrd = 0u;
         for (const uint32_t ClusterIdx : Cut.Selection.ActiveClusterIndices)
         {
             const auto& Cluster = Pyramid->Clusters[ClusterIdx];
             const uint32_t Level = std::min(7u, static_cast<uint32_t>(Cluster.HierarchyLevel));
-            LevelClusters[Level] += 1u;
-            LevelTriangles[Level] += Cluster.TriangleCount;
-            const uint32_t ThisClusterOrdinal = GlobalClusterOrdinal++;
+            Built.LevelClus[Level] += 1u;
+            Built.LevelTri[Level]  += Cluster.TriangleCount;
+            const uint32_t ClusOrd = LocalClusOrd++;
             const uint32_t LocalGroupOrd = (Cluster.OriginGroupOrdinal > 0u)
                 ? Cluster.OriginGroupOrdinal
                 : Cluster.EnclosingGroupOrdinal;
-            const uint32_t ThisGroupOrdinal = GlobalGroupBaseOrdinal + LocalGroupOrd;
-            const float SelfPx = (Cluster.OriginGroupOrdinal > 0u)
-                ? Pyramid->EvaluateGroupProjectedPixelError(Cluster.OriginGroupOrdinal, Cut.LocalCameraPos, PixelsPerRadian)
-                : 0.0f;
-            const float ErrorRatio = std::clamp(SelfPx / std::max(1.0e-4f, PixelError), 0.0f, 1.0f);
             for (uint32_t TriOff = 0u; TriOff < Cluster.TriangleCount; ++TriOff)
             {
                 const auto& Tri = Pyramid->Triangles[Cluster.TriangleStartOffset + TriOff];
-                const Mathematics::Axis3D L0 = ScaleVec(Pyramid->Positions[Tri.VertexIndex0]);
-                const Mathematics::Axis3D L1 = ScaleVec(Pyramid->Positions[Tri.VertexIndex1]);
-                const Mathematics::Axis3D L2 = ScaleVec(Pyramid->Positions[Tri.VertexIndex2]);
-                const Mathematics::Axis3D W0 = Inst.WorldTranslation + (YawRotated ? RotZ(L0) : L0);
-                const Mathematics::Axis3D W1 = Inst.WorldTranslation + (YawRotated ? RotZ(L1) : L1);
-                const Mathematics::Axis3D W2 = Inst.WorldTranslation + (YawRotated ? RotZ(L2) : L2);
+                const Mathematics::Axis3D P0 = Pyramid->Positions[Tri.VertexIndex0];
+                const Mathematics::Axis3D P1 = Pyramid->Positions[Tri.VertexIndex1];
+                const Mathematics::Axis3D P2 = Pyramid->Positions[Tri.VertexIndex2];
                 SpatialAcceleration::RayTrianglePrimitive Prim {};
-                Prim.Corner0          = W0;
-                Prim.Edge01           = W1 - W0;
-                Prim.Edge02           = W2 - W0;
+                Prim.Corner0          = P0;
+                Prim.Edge01           = P1 - P0;
+                Prim.Edge02           = P2 - P0;
                 Prim.SourceFaceIndex  = Tri.SourceFaceIndex;
-                Prim.MaterialOrdinal  = Tri.MaterialOrdinal; // per-face material slot, preserved by the bake
+                Prim.MaterialOrdinal  = Tri.MaterialOrdinal;
                 Prim.OpaqueMask       = 1u;
-                Prim.PrimitiveOrdinal = PrimOrdinal++;
-                LodPrimLevel.push_back(Level);
-                LodPrimCluster.push_back(ThisClusterOrdinal);
-                LodPrimGroup.push_back(ThisGroupOrdinal);
-                LodPrimErrorRatio.push_back(ErrorRatio);
-                LodPrims.push_back(Prim);
+                Prim.PrimitiveOrdinal = LocalPrimOrd++;
+                LocalPrims.push_back(Prim);
+
                 SpatialAcceleration::TriangleSmoothNormals Smooth {};
-                const Mathematics::Axis3D N0 = GeometrySpace::UnpackOctahedralDirection32(Tri.PackedNormal0);
-                const Mathematics::Axis3D N1 = GeometrySpace::UnpackOctahedralDirection32(Tri.PackedNormal1);
-                const Mathematics::Axis3D N2 = GeometrySpace::UnpackOctahedralDirection32(Tri.PackedNormal2);
-                Smooth.Normal0 = XformNormal(N0);
-                Smooth.Normal1 = XformNormal(N1);
-                Smooth.Normal2 = XformNormal(N2);
-                LodNormals.push_back(Smooth);
+                Smooth.Normal0 = GeometrySpace::UnpackOctahedralDirection32(Tri.PackedNormal0);
+                Smooth.Normal1 = GeometrySpace::UnpackOctahedralDirection32(Tri.PackedNormal1);
+                Smooth.Normal2 = GeometrySpace::UnpackOctahedralDirection32(Tri.PackedNormal2);
+                LocalNormals.push_back(Smooth);
+
+                Built.PrimLevel.push_back(Level);
+                Built.PrimCluster.push_back(ClusOrd);
+                Built.PrimGroup.push_back(LocalGroupOrd);
+                Built.PrimOrigGroup.push_back(Cluster.OriginGroupOrdinal);
             }
         }
-        GlobalGroupBaseOrdinal += static_cast<uint32_t>(Pyramid->Groups.size()) + 4u;
-    }
-    if (LodPrims.empty())
+
+        if (!Built.LocalTree.BuildFromTrianglePrimitivesWithNormals(LocalPrims, LocalNormals) ||
+            Built.LocalTree.WideEntries.empty())
+        {
+            return nullptr;
+        }
+        AssetCutBlasCache.push_back(std::move(Built));
+        return &AssetCutBlasCache.back();
+    };
+
+    struct ActiveBlasRef
     {
-        // All clusters were frustum/backface culled for this camera view: upload an empty sentinel BVH entry.
+        const InstanceCut*        Cut  = nullptr;
+        const CachedAssetCutBlas* Blas = nullptr;
+        Mathematics::Axis3D       WorldMin {};
+        Mathematics::Axis3D       WorldMax {};
+    };
+    std::vector<ActiveBlasRef> ActiveRefs;
+    ActiveRefs.reserve(Cuts.size());
+    std::size_t TotalWideEntries = 0u;
+    std::size_t TotalBlasPrims   = 0u;
+    uint32_t    LevelTriangles[8] {};
+    uint32_t    LevelClusters[8] {};
+
+    for (const InstanceCut& Cut : Cuts)
+    {
+        const RigidClusterInstance& Inst = Scene.ClusterInstances[Cut.InstanceIndex];
+        const CachedAssetCutBlas* Blas = AcquireOrBuildAssetCutBlas(Cut, Inst.PyramidAsset);
+        if (Blas == nullptr)
+        {
+            continue;
+        }
+        for (uint32_t L = 0u; L < 8u; ++L)
+        {
+            LevelTriangles[L] += Blas->LevelTri[L];
+            LevelClusters[L]  += Blas->LevelClus[L];
+        }
+        const float ScaleU = std::max(1.0e-4f, Inst.UniformScale);
+        const float ScaleX = (Inst.NonUniformScale.X > 1.0e-4f) ? Inst.NonUniformScale.X : ScaleU;
+        const float ScaleY = (Inst.NonUniformScale.Y > 1.0e-4f) ? Inst.NonUniformScale.Y : ScaleU;
+        const float ScaleZ = (Inst.NonUniformScale.Z > 1.0e-4f) ? Inst.NonUniformScale.Z : ScaleU;
+        const float YawRad = Inst.RotationZDegrees * Constants::DegToRadFloat;
+        const float AbsCos = std::fabs(std::cos(YawRad));
+        const float AbsSin = std::fabs(std::sin(YawRad));
+        const float CosZ   = std::cos(YawRad);
+        const float SinZ   = std::sin(YawRad);
+        const Mathematics::Axis3D LMin { Blas->LocalTree.RootBoundsMin.X * ScaleX, Blas->LocalTree.RootBoundsMin.Y * ScaleY, Blas->LocalTree.RootBoundsMin.Z * ScaleZ };
+        const Mathematics::Axis3D LMax { Blas->LocalTree.RootBoundsMax.X * ScaleX, Blas->LocalTree.RootBoundsMax.Y * ScaleY, Blas->LocalTree.RootBoundsMax.Z * ScaleZ };
+        const Mathematics::Axis3D LCtr = (LMin + LMax) * 0.5f;
+        const Mathematics::Axis3D LExt = (LMax - LMin) * 0.5f;
+        const Mathematics::Axis3D WCtr {
+            Inst.WorldTranslation.X + LCtr.X * CosZ - LCtr.Y * SinZ,
+            Inst.WorldTranslation.Y + LCtr.X * SinZ + LCtr.Y * CosZ,
+            Inst.WorldTranslation.Z + LCtr.Z,
+        };
+        const Mathematics::Axis3D WExt {
+            AbsCos * LExt.X + AbsSin * LExt.Y,
+            AbsSin * LExt.X + AbsCos * LExt.Y,
+            LExt.Z,
+        };
+        ActiveRefs.push_back({ &Cut, Blas, WCtr - WExt, WCtr + WExt });
+        TotalWideEntries += Blas->LocalTree.WideEntries.size();
+        TotalBlasPrims   += Blas->LocalTree.Primitives.size();
+    }
+
+    if (ActiveRefs.empty())
+    {
         const SpatialAcceleration::WideTreeEntry EmptyEntry = []() noexcept
         {
             SpatialAcceleration::WideTreeEntry Entry {};
@@ -2060,58 +2205,250 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
         return;
     }
 
-    SpatialAcceleration::WideBoundingTree LodTree {};
-    if (!LodTree.BuildFromTrianglePrimitivesWithNormals(LodPrims, LodNormals) || LodTree.WideEntries.empty())
+    // Build top-level BVH4 internal connectors over per-instance BLAS roots, then append transformed BLAS entries (0 full-scene SAH rebuilds on gizmo drag!).
+    std::vector<SpatialAcceleration::WideTreeEntry> CombinedEntries;
+    CombinedEntries.reserve(TotalWideEntries + ActiveRefs.size() + 4u);
+    std::vector<GpuShadedTriangle96> ShadedTris;
+    ShadedTris.reserve(std::max<std::size_t>(1u, TotalBlasPrims));
+
+    std::vector<uint32_t> BlasRootWideIndex(ActiveRefs.size(), 0u);
+    if (ActiveRefs.size() > 1u)
+    {
+        auto EmitTopSubtree = [&](auto& Self, uint32_t StartIdx, uint32_t Count) -> uint32_t
+        {
+            const uint32_t NodeIdx = static_cast<uint32_t>(CombinedEntries.size());
+            SpatialAcceleration::WideTreeEntry TopEntry {};
+            TopEntry.BranchBoundsMinX.fill(1.0e30f);
+            TopEntry.BranchBoundsMaxX.fill(-1.0e30f);
+            TopEntry.BranchBoundsMinY.fill(1.0e30f);
+            TopEntry.BranchBoundsMaxY.fill(-1.0e30f);
+            TopEntry.BranchBoundsMinZ.fill(1.0e30f);
+            TopEntry.BranchBoundsMaxZ.fill(-1.0e30f);
+            TopEntry.BranchReference.fill(SpatialAcceleration::EmptyBranchReference);
+            CombinedEntries.push_back(TopEntry);
+
+            if (Count <= 4u)
+            {
+                for (uint32_t K = 0u; K < Count; ++K)
+                {
+                    const auto& Ref = ActiveRefs[StartIdx + K];
+                    CombinedEntries[NodeIdx].BranchBoundsMinX[K] = Ref.WorldMin.X;
+                    CombinedEntries[NodeIdx].BranchBoundsMaxX[K] = Ref.WorldMax.X;
+                    CombinedEntries[NodeIdx].BranchBoundsMinY[K] = Ref.WorldMin.Y;
+                    CombinedEntries[NodeIdx].BranchBoundsMaxY[K] = Ref.WorldMax.Y;
+                    CombinedEntries[NodeIdx].BranchBoundsMinZ[K] = Ref.WorldMin.Z;
+                    CombinedEntries[NodeIdx].BranchBoundsMaxZ[K] = Ref.WorldMax.Z;
+                    CombinedEntries[NodeIdx].BranchPrimitiveCount[K] = 0u;
+                    BlasRootWideIndex[StartIdx + K] = (NodeIdx << 4u) | K;
+                }
+            }
+            else
+            {
+                const uint32_t Step = (Count + 3u) / 4u;
+                uint32_t Offset = StartIdx;
+                for (uint32_t K = 0u; K < 4u && Offset < StartIdx + Count; ++K)
+                {
+                    const uint32_t SubCnt = std::min(Step, StartIdx + Count - Offset);
+                    Mathematics::Axis3D BMin = ActiveRefs[Offset].WorldMin;
+                    Mathematics::Axis3D BMax = ActiveRefs[Offset].WorldMax;
+                    for (uint32_t J = 1u; J < SubCnt; ++J)
+                    {
+                        BMin.X = std::min(BMin.X, ActiveRefs[Offset + J].WorldMin.X);
+                        BMin.Y = std::min(BMin.Y, ActiveRefs[Offset + J].WorldMin.Y);
+                        BMin.Z = std::min(BMin.Z, ActiveRefs[Offset + J].WorldMin.Z);
+                        BMax.X = std::max(BMax.X, ActiveRefs[Offset + J].WorldMax.X);
+                        BMax.Y = std::max(BMax.Y, ActiveRefs[Offset + J].WorldMax.Y);
+                        BMax.Z = std::max(BMax.Z, ActiveRefs[Offset + J].WorldMax.Z);
+                    }
+                    CombinedEntries[NodeIdx].BranchBoundsMinX[K] = BMin.X;
+                    CombinedEntries[NodeIdx].BranchBoundsMaxX[K] = BMax.X;
+                    CombinedEntries[NodeIdx].BranchBoundsMinY[K] = BMin.Y;
+                    CombinedEntries[NodeIdx].BranchBoundsMaxY[K] = BMax.Y;
+                    CombinedEntries[NodeIdx].BranchBoundsMinZ[K] = BMin.Z;
+                    CombinedEntries[NodeIdx].BranchBoundsMaxZ[K] = BMax.Z;
+                    CombinedEntries[NodeIdx].BranchPrimitiveCount[K] = 0u;
+                    if (SubCnt == 1u)
+                    {
+                        BlasRootWideIndex[Offset] = (NodeIdx << 4u) | K;
+                    }
+                    else
+                    {
+                        const uint32_t SubNode = Self(Self, Offset, SubCnt);
+                        CombinedEntries[NodeIdx].BranchReference[K] = SubNode;
+                    }
+                    Offset += SubCnt;
+                }
+            }
+            return NodeIdx;
+        };
+        (void)EmitTopSubtree(EmitTopSubtree, 0u, static_cast<uint32_t>(ActiveRefs.size()));
+    }
+
+    uint32_t GlobalClusterOrdinal = 0u;
+    uint32_t GlobalGroupBaseOrdinal = 0u;
+    for (std::size_t RefIdx = 0u; RefIdx < ActiveRefs.size(); ++RefIdx)
+    {
+        const InstanceCut&          Cut     = *ActiveRefs[RefIdx].Cut;
+        const CachedAssetCutBlas&   Blas    = *ActiveRefs[RefIdx].Blas;
+        const RigidClusterInstance& Inst    = Scene.ClusterInstances[Cut.InstanceIndex];
+        const auto*                 Pyramid = Inst.PyramidAsset;
+
+        const float ScaleU    = std::max(1.0e-4f, Inst.UniformScale);
+        const float ScaleX    = (Inst.NonUniformScale.X > 1.0e-4f) ? Inst.NonUniformScale.X : ScaleU;
+        const float ScaleY    = (Inst.NonUniformScale.Y > 1.0e-4f) ? Inst.NonUniformScale.Y : ScaleU;
+        const float ScaleZ    = (Inst.NonUniformScale.Z > 1.0e-4f) ? Inst.NonUniformScale.Z : ScaleU;
+        const float InvScaleX = 1.0f / ScaleX;
+        const float InvScaleY = 1.0f / ScaleY;
+        const float InvScaleZ = 1.0f / ScaleZ;
+        const bool  NonUni    = (std::fabs(ScaleX - ScaleY) > 1.0e-4f) || (std::fabs(ScaleX - ScaleZ) > 1.0e-4f);
+        const float YawRad    = Inst.RotationZDegrees * Constants::DegToRadFloat;
+        const bool  YawRotated = std::fabs(YawRad) > 1.0e-5f;
+        const float CosZ      = YawRotated ? std::cos(YawRad) : 1.0f;
+        const float SinZ      = YawRotated ? std::sin(YawRad) : 0.0f;
+        const float AbsCos    = std::fabs(CosZ);
+        const float AbsSin    = std::fabs(SinZ);
+
+        const uint32_t BaseWideIdx = static_cast<uint32_t>(CombinedEntries.size());
+        const uint32_t BasePrimIdx = static_cast<uint32_t>(ShadedTris.size());
+        if (ActiveRefs.size() > 1u)
+        {
+            const uint32_t TopNode = BlasRootWideIndex[RefIdx] >> 4u;
+            const uint32_t TopLane = BlasRootWideIndex[RefIdx] & 0xFu;
+            CombinedEntries[TopNode].BranchReference[TopLane] = BaseWideIdx;
+        }
+
+        for (const SpatialAcceleration::WideTreeEntry& SrcNode : Blas.LocalTree.WideEntries)
+        {
+            SpatialAcceleration::WideTreeEntry DstNode = SrcNode;
+            for (uint32_t K = 0u; K < 4u; ++K)
+            {
+                const uint32_t RefVal = SrcNode.BranchReference[K];
+                if (RefVal == SpatialAcceleration::EmptyBranchReference)
+                {
+                    continue;
+                }
+                const float MinX = SrcNode.BranchBoundsMinX[K] * ScaleX;
+                const float MaxX = SrcNode.BranchBoundsMaxX[K] * ScaleX;
+                const float MinY = SrcNode.BranchBoundsMinY[K] * ScaleY;
+                const float MaxY = SrcNode.BranchBoundsMaxY[K] * ScaleY;
+                const float MinZ = SrcNode.BranchBoundsMinZ[K] * ScaleZ;
+                const float MaxZ = SrcNode.BranchBoundsMaxZ[K] * ScaleZ;
+                if (YawRotated)
+                {
+                    const float CX = 0.5f * (MinX + MaxX);
+                    const float CY = 0.5f * (MinY + MaxY);
+                    const float EX = 0.5f * (MaxX - MinX);
+                    const float EY = 0.5f * (MaxY - MinY);
+                    const float WCX = Inst.WorldTranslation.X + CX * CosZ - CY * SinZ;
+                    const float WCY = Inst.WorldTranslation.Y + CX * SinZ + CY * CosZ;
+                    const float WEX = AbsCos * EX + AbsSin * EY;
+                    const float WEY = AbsSin * EX + AbsCos * EY;
+                    DstNode.BranchBoundsMinX[K] = WCX - WEX;
+                    DstNode.BranchBoundsMaxX[K] = WCX + WEX;
+                    DstNode.BranchBoundsMinY[K] = WCY - WEY;
+                    DstNode.BranchBoundsMaxY[K] = WCY + WEY;
+                }
+                else
+                {
+                    DstNode.BranchBoundsMinX[K] = Inst.WorldTranslation.X + MinX;
+                    DstNode.BranchBoundsMaxX[K] = Inst.WorldTranslation.X + MaxX;
+                    DstNode.BranchBoundsMinY[K] = Inst.WorldTranslation.Y + MinY;
+                    DstNode.BranchBoundsMaxY[K] = Inst.WorldTranslation.Y + MaxY;
+                }
+                DstNode.BranchBoundsMinZ[K] = Inst.WorldTranslation.Z + MinZ;
+                DstNode.BranchBoundsMaxZ[K] = Inst.WorldTranslation.Z + MaxZ;
+
+                if ((RefVal & SpatialAcceleration::WideLeafReferenceMask) != 0u)
+                {
+                    const uint32_t LeafStart = (RefVal & ~SpatialAcceleration::WideLeafReferenceMask) + BasePrimIdx;
+                    DstNode.BranchReference[K] = SpatialAcceleration::WideLeafReferenceMask | LeafStart;
+                }
+                else
+                {
+                    DstNode.BranchReference[K] = RefVal + BaseWideIdx;
+                }
+            }
+            CombinedEntries.push_back(DstNode);
+        }
+
+        const auto RotZ = [CosZ, SinZ](Mathematics::Axis3D V) noexcept -> Mathematics::Axis3D
+        {
+            return { V.X * CosZ - V.Y * SinZ, V.X * SinZ + V.Y * CosZ, V.Z };
+        };
+        const auto ScaleVec = [ScaleX, ScaleY, ScaleZ](Mathematics::Axis3D V) noexcept -> Mathematics::Axis3D
+        {
+            return { V.X * ScaleX, V.Y * ScaleY, V.Z * ScaleZ };
+        };
+        const auto XformNormal = [NonUni, YawRotated, InvScaleX, InvScaleY, InvScaleZ, &RotZ](Mathematics::Axis3D N) noexcept -> Mathematics::Axis3D
+        {
+            Mathematics::Axis3D Sn = NonUni
+                ? Mathematics::NormalizeAxis({ N.X * InvScaleX, N.Y * InvScaleY, N.Z * InvScaleZ }, { 0.0f, 0.0f, 1.0f })
+                : N;
+            return YawRotated ? RotZ(Sn) : Sn;
+        };
+
+        const bool HasNormals = (Blas.LocalTree.PrimitiveNormals.size() == Blas.LocalTree.Primitives.size());
+        const bool EvalErrorRatio = (Config.DebugChannel == 20u);
+        for (std::size_t Idx = 0u; Idx < Blas.LocalTree.Primitives.size(); ++Idx)
+        {
+            const auto& Prim = Blas.LocalTree.Primitives[Idx];
+            const Mathematics::Axis3D L0 = ScaleVec(Prim.Corner0);
+            const Mathematics::Axis3D E1 = ScaleVec(Prim.Edge01);
+            const Mathematics::Axis3D E2 = ScaleVec(Prim.Edge02);
+            const Mathematics::Axis3D W0 = Inst.WorldTranslation + (YawRotated ? RotZ(L0) : L0);
+            const Mathematics::Axis3D WE1 = YawRotated ? RotZ(E1) : E1;
+            const Mathematics::Axis3D WE2 = YawRotated ? RotZ(E2) : E2;
+
+            Mathematics::Axis3D N0 = HasNormals ? XformNormal(Blas.LocalTree.PrimitiveNormals[Idx].Normal0) : Mathematics::NormalizeAxis(Mathematics::EvaluateCross(WE1, WE2), { 0.0f, 0.0f, 1.0f });
+            Mathematics::Axis3D N1 = HasNormals ? XformNormal(Blas.LocalTree.PrimitiveNormals[Idx].Normal1) : N0;
+            Mathematics::Axis3D N2 = HasNormals ? XformNormal(Blas.LocalTree.PrimitiveNormals[Idx].Normal2) : N0;
+
+            const uint32_t Ord = Prim.PrimitiveOrdinal;
+            float ErrorRatio = 0.0f;
+            if (EvalErrorRatio && Ord < Blas.PrimOrigGroup.size() && Blas.PrimOrigGroup[Ord] > 0u)
+            {
+                const float SelfPx = Pyramid->EvaluateGroupProjectedPixelError(Blas.PrimOrigGroup[Ord], Cut.LocalCameraPos, PixelsPerRadian);
+                ErrorRatio = std::clamp(SelfPx / std::max(1.0e-4f, PixelError), 0.0f, 1.0f);
+            }
+
+            GpuShadedTriangle96 OutTri {};
+            OutTri.Corner0Pad[0]  = W0.X;
+            OutTri.Corner0Pad[1]  = W0.Y;
+            OutTri.Corner0Pad[2]  = W0.Z;
+            OutTri.Edge01Pad[0]   = WE1.X;
+            OutTri.Edge01Pad[1]   = WE1.Y;
+            OutTri.Edge01Pad[2]   = WE1.Z;
+            OutTri.Edge02Pad[0]   = WE2.X;
+            OutTri.Edge02Pad[1]   = WE2.Y;
+            OutTri.Edge02Pad[2]   = WE2.Z;
+            OutTri.Normal0Pad[0]  = N0.X;
+            OutTri.Normal0Pad[1]  = N0.Y;
+            OutTri.Normal0Pad[2]  = N0.Z;
+            OutTri.Normal1Pad[0]  = N1.X;
+            OutTri.Normal1Pad[1]  = N1.Y;
+            OutTri.Normal1Pad[2]  = N1.Z;
+            OutTri.Normal2Slot[0] = N2.X;
+            OutTri.Normal2Slot[1] = N2.Y;
+            OutTri.Normal2Slot[2] = N2.Z;
+            OutTri.Normal2Slot[3] = static_cast<float>(Inst.DedicatedMaterialOverride ? Inst.MaterialSlot : Prim.MaterialOrdinal);
+            OutTri.Corner0Pad[3]  = (Ord < Blas.PrimLevel.size()) ? static_cast<float>(Blas.PrimLevel[Ord]) : 0.0f;
+            OutTri.Edge01Pad[3]   = (Ord < Blas.PrimCluster.size()) ? static_cast<float>(GlobalClusterOrdinal + Blas.PrimCluster[Ord]) : 0.0f;
+            OutTri.Edge02Pad[3]   = (Ord < Blas.PrimGroup.size()) ? static_cast<float>(GlobalGroupBaseOrdinal + Blas.PrimGroup[Ord]) : 0.0f;
+            OutTri.Normal0Pad[3]  = ErrorRatio;
+            ShadedTris.push_back(OutTri);
+        }
+        GlobalClusterOrdinal   += Blas.ClusterCount;
+        GlobalGroupBaseOrdinal += static_cast<uint32_t>(Pyramid->Groups.size()) + 4u;
+    }
+
+    const uint64_t BvhBytes = CombinedEntries.size() * sizeof(SpatialAcceleration::WideTreeEntry);
+    if (!UploadToDeviceBuffer(BvhEntryBuffer, CombinedEntries.data(), BvhBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT))
     {
         NaniteLodStats.Enabled = false;
         return;
     }
+    UploadedBvhCount = static_cast<uint32_t>(CombinedEntries.size());
 
-    const uint64_t BvhBytes = LodTree.WideEntries.size() * sizeof(SpatialAcceleration::WideTreeEntry);
-    if (!UploadToDeviceBuffer(BvhEntryBuffer, LodTree.WideEntries.data(), BvhBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT))
-    {
-        NaniteLodStats.Enabled = false;
-        return;
-    }
-    UploadedBvhCount = static_cast<uint32_t>(LodTree.WideEntries.size());
-
-    const bool HasNormals = (LodTree.PrimitiveNormals.size() == LodTree.Primitives.size());
-    std::vector<GpuShadedTriangle96> ShadedTris(LodTree.Primitives.size());
-    for (std::size_t Idx = 0u; Idx < LodTree.Primitives.size(); ++Idx)
-    {
-        const auto& Prim = LodTree.Primitives[Idx];
-        Mathematics::Axis3D N0 = HasNormals ? LodTree.PrimitiveNormals[Idx].Normal0 : Mathematics::NormalizeAxis(Mathematics::EvaluateCross(Prim.Edge01, Prim.Edge02), { 0.0f, 0.0f, 1.0f });
-        Mathematics::Axis3D N1 = HasNormals ? LodTree.PrimitiveNormals[Idx].Normal1 : N0;
-        Mathematics::Axis3D N2 = HasNormals ? LodTree.PrimitiveNormals[Idx].Normal2 : N0;
-        GpuShadedTriangle96 OutTri {};
-        OutTri.Corner0Pad[0]  = Prim.Corner0.X;
-        OutTri.Corner0Pad[1]  = Prim.Corner0.Y;
-        OutTri.Corner0Pad[2]  = Prim.Corner0.Z;
-        OutTri.Edge01Pad[0]   = Prim.Edge01.X;
-        OutTri.Edge01Pad[1]   = Prim.Edge01.Y;
-        OutTri.Edge01Pad[2]   = Prim.Edge01.Z;
-        OutTri.Edge02Pad[0]   = Prim.Edge02.X;
-        OutTri.Edge02Pad[1]   = Prim.Edge02.Y;
-        OutTri.Edge02Pad[2]   = Prim.Edge02.Z;
-        OutTri.Normal0Pad[0]  = N0.X;
-        OutTri.Normal0Pad[1]  = N0.Y;
-        OutTri.Normal0Pad[2]  = N0.Z;
-        OutTri.Normal1Pad[0]  = N1.X;
-        OutTri.Normal1Pad[1]  = N1.Y;
-        OutTri.Normal1Pad[2]  = N1.Z;
-        OutTri.Normal2Slot[0] = N2.X;
-        OutTri.Normal2Slot[1] = N2.Y;
-        OutTri.Normal2Slot[2] = N2.Z;
-        OutTri.Normal2Slot[3] = static_cast<float>(Prim.MaterialOrdinal);
-        // Nanite debug packing in spare pad lanes:
-        //   Corner0Pad.w = hierarchy level, Edge01Pad.w = cluster ordinal, Edge02Pad.w = group ordinal, Normal0Pad.w = error ratio
-        const uint32_t Ord = Prim.PrimitiveOrdinal;
-        OutTri.Corner0Pad[3] = (Ord < LodPrimLevel.size()) ? static_cast<float>(LodPrimLevel[Ord]) : 0.0f;
-        OutTri.Edge01Pad[3]  = (Ord < LodPrimCluster.size()) ? static_cast<float>(LodPrimCluster[Ord]) : 0.0f;
-        OutTri.Edge02Pad[3]  = (Ord < LodPrimGroup.size()) ? static_cast<float>(LodPrimGroup[Ord]) : 0.0f;
-        OutTri.Normal0Pad[3] = (Ord < LodPrimErrorRatio.size()) ? LodPrimErrorRatio[Ord] : 0.0f;
-        ShadedTris[Idx]      = OutTri;
-    }
     const uint64_t TriBytes = ShadedTris.size() * sizeof(GpuShadedTriangle96);
     if (!UploadToDeviceBuffer(ShadedTriangleBuffer, ShadedTris.data(), TriBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT))
     {
@@ -2127,7 +2464,7 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
     NaniteLodStats.CulledBackfaceCount  = CulledBackface;
     NaniteLodStats.CulledFrustumCount   = CulledFrustum;
     NaniteLodStats.TestedDagGroupCount  = TestedGroups;
-    NaniteLodStats.ActiveTriangleCount  = static_cast<uint32_t>(LodPrims.size());
+    NaniteLodStats.ActiveTriangleCount  = static_cast<uint32_t>(ShadedTris.size());
     NaniteLodStats.FullTriangleCount    = static_cast<uint32_t>(Scene.SceneTree.Primitives.size());
     NaniteLodStats.GeometryRebuildCount = PreviousRebuilds + 1u;
     for (uint32_t Level = 0u; Level < 8u; ++Level)
@@ -2424,14 +2761,18 @@ bool VulkanWorldRenderSequence::ExecuteWorldRenderDispatch(
         return false;
     }
 
+    const auto StartClock = std::chrono::steady_clock::now();
+    LastViewportTiming = {};
+
     if (!SceneUploadedOnce)
     {
         SynchronizeSceneResources(Scene, true);
     }
+    const auto LodStartClock = std::chrono::steady_clock::now();
     RefreshNaniteLodGeometry(Config, Camera, Scene);
-
-    const auto StartClock = std::chrono::steady_clock::now();
-    LastViewportTiming = {};
+    const auto LodEndClock = std::chrono::steady_clock::now();
+    LastViewportTiming.SceneSyncGpuMs += static_cast<float>(
+        std::chrono::duration<double, std::milli>(LodEndClock - LodStartClock).count());
 
     const uint32_t WidthPx    = std::max(1u, Camera.ViewportWidthPx);
     const uint32_t HeightPx   = std::max(1u, Camera.ViewportHeightPx);
@@ -2521,7 +2862,8 @@ bool VulkanWorldRenderSequence::ExecuteWorldRenderDispatch(
 
     const bool DynamicInstancesChanged =
         !Scene.ClusterInstances.empty() && SynchronizeLocalSdfResources(Scene);
-    const Mathematics::Axis3D DesiredClipFocus = ResolveDynamicClipFocusWorld(&Camera, Scene);
+    const PerspectiveCameraBasis* FocusCamera = Config.DynamicClipmapScrolling ? &Camera : nullptr;
+    const Mathematics::Axis3D DesiredClipFocus = ResolveDynamicClipFocusWorld(FocusCamera, Scene);
     const float CurrentFineHalf   = std::max(3.2f, CachedFineGdfCenterSpan[3]);
     const float FineVoxelStep     = (2.0f * CurrentFineHalf) / 64.0f;
     const Mathematics::Axis3D FocusDelta {
@@ -2532,18 +2874,21 @@ bool VulkanWorldRenderSequence::ExecuteWorldRenderDispatch(
     const float FocusShiftSq = Mathematics::EvaluateDot(FocusDelta, FocusDelta);
     const float ScrollThreshold = FineVoxelStep * 2.5f;
     const bool ClipFocusScrolled =
-        !ActiveClipFocusInitialized || (FocusShiftSq > ScrollThreshold * ScrollThreshold);
+        !ActiveClipFocusInitialized ||
+        (Config.DynamicClipmapScrolling && (FocusShiftSq > ScrollThreshold * ScrollThreshold));
     const bool SunDirectionShifted = Mathematics::EvaluateDot(SunDir, LastSyncedSunDir) < 0.99995f;
 
     if (ShadowCascadeProgramHandle != UINT32_MAX &&
-        (DynamicInstancesChanged || ClipFocusScrolled || SunDirectionShifted))
+        (DynamicInstancesChanged || ClipFocusScrolled || SunDirectionShifted || StaticGiBakePending || !GlobalDistanceFieldReady))
     {
         ActiveClipFocusWorld       = DesiredClipFocus;
         ActiveClipFocusInitialized = true;
+        const bool RebuildGdfFields = DynamicInstancesChanged || ClipFocusScrolled || !GlobalDistanceFieldReady;
+        StaticGiBakePending = false;
         const auto PreSyncStart = std::chrono::steady_clock::now();
-        (void)DispatchGpuScenePrecompute(Scene, true);
+        (void)DispatchGpuScenePrecompute(Scene, RebuildGdfFields);
         const auto PreSyncEnd = std::chrono::steady_clock::now();
-        LastViewportTiming.SceneSyncGpuMs = static_cast<float>(
+        LastViewportTiming.SceneSyncGpuMs += static_cast<float>(
             std::chrono::duration<double, std::milli>(PreSyncEnd - PreSyncStart).count());
     }
     Uniforms.SunDirConeTan[0]       = SunDir.X;
@@ -3198,12 +3543,42 @@ bool VulkanWorldRenderSequence::ExecuteWorldRenderDispatch(
     WriteStamp(2u, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
     if (AtmoActive && Scene.Atmosphere.Clouds.CloudsEnabled && Config.DebugChannel == 0u)
     {
-        if (!DispatchEncoder.EncodeComputeDispatch(Cmd, CloudLayerProgramHandle, Pass0Slots, CloudGroupsX, CloudGroupsY, 1u))
+        uint64_t CloudSig = 14695981039346656037ull;
+        auto MixCloudBytes = [&CloudSig](const void* Ptr, std::size_t Len) noexcept
         {
-            BoundDevice->FreeCommandBuffer(Cmd);
-            return false;
+            const auto* Raw = static_cast<const uint8_t*>(Ptr);
+            for (std::size_t K = 0u; K < Len; ++K)
+            {
+                CloudSig ^= static_cast<uint64_t>(Raw[K]);
+                CloudSig *= 1099511628211ull;
+            }
+        };
+        MixCloudBytes(&CloudW, sizeof(CloudW));
+        MixCloudBytes(&CloudH, sizeof(CloudH));
+        MixCloudBytes(Uniforms.CameraOriginTanX, sizeof(Uniforms.CameraOriginTanX));
+        MixCloudBytes(Uniforms.CameraRightTanY, sizeof(Uniforms.CameraRightTanY));
+        MixCloudBytes(Uniforms.CameraUpWidth, sizeof(Uniforms.CameraUpWidth));
+        MixCloudBytes(Uniforms.CameraForwardHeight, sizeof(Uniforms.CameraForwardHeight));
+        MixCloudBytes(Uniforms.SunDirConeTan, sizeof(Uniforms.SunDirConeTan));
+        MixCloudBytes(Uniforms.SolarIrradiancePad, sizeof(Uniforms.SolarIrradiancePad));
+        MixCloudBytes(&Uniforms.CloudParams, sizeof(Uniforms.CloudParams));
+
+        if (!CloudLayerCacheValid || CloudSig != LastCloudPassSignature)
+        {
+            if (!DispatchEncoder.EncodeComputeDispatch(Cmd, CloudLayerProgramHandle, Pass0Slots, CloudGroupsX, CloudGroupsY, 1u))
+            {
+                BoundDevice->FreeCommandBuffer(Cmd);
+                return false;
+            }
+            InsertComputeSyncBarrier();
+            CloudLayerCacheValid   = true;
+            LastCloudPassSignature = CloudSig;
+            ++CloudLayerDispatchCount;
         }
-        InsertComputeSyncBarrier();
+    }
+    else
+    {
+        CloudLayerCacheValid = false;
     }
     WriteStamp(3u, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 

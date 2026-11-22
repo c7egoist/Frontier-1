@@ -820,6 +820,12 @@ void EditorLifecycle::ProcessShowcaseViewportInteraction(
 
     if (WorldTransformGizmo.QueryDragging())
     {
+        if (MarqueeBoxActive || MarqueePressCandidate)
+        {
+            MarqueeBoxActive      = false;
+            MarqueePressCandidate = false;
+            Panes->Viewport.ConfigureMarqueeSelectionRect(false);
+        }
         if (LeftHeld && LastGizmoSlot.Valid())
         {
             Configuration::GizmoSnapSettings SnapCfg {};
@@ -853,27 +859,15 @@ void EditorLifecycle::ProcessShowcaseViewportInteraction(
     }
     else if (!AltHeld && !RightHeld && !MiddleHeld)
     {
-        // 100% GPU Gizmo picking from WorldGizmoOverlayRasterization PickAttachment (R32G32B32A32_UINT)
+        // Zero-stall analytical 3D ray hover against the active 13-handle gizmo (no synchronous GPU pick readback on mouse move!)
         Editor::GizmoHandleOrdinal Hovered = Editor::GizmoHandleOrdinal::None;
-        if (WorldGizmoRasterizer != nullptr && WorldGizmoRasterizer->QueryReady() && LastGizmoSlot.Valid())
+        if (LastGizmoSlot.Valid())
         {
-            const uint32_t PixX = static_cast<uint32_t>(NormU * static_cast<float>(PickSurfaceW - 1u));
-            const uint32_t PixY = static_cast<uint32_t>(NormV * static_cast<float>(PickSurfaceH - 1u));
-            Hovered             = WorldGizmoRasterizer->QueryLastGpuPickAtPixel(PixX, PixY);
-        }
-        else if (LastGizmoSlot.Valid())
-        {
-            // Headless null-device fallback ONLY when no Vulkan Gizmo rasterizer is attached
             Hovered = WorldTransformGizmo.EvaluateRayHover(CursorRay, RenderRight, RenderUp);
         }
         if (Hovered != WorldTransformGizmo.QueryHoveredHandle())
         {
             WorldTransformGizmo.AssignHoveredHandle(Hovered);
-            GizmoOverlayOnly = true;
-        }
-        else if (LastGizmoSlot.Valid() && (std::fabs(RawCursorDeltaX) > 0.25f || std::fabs(RawCursorDeltaY) > 0.25f))
-        {
-            // Keep the 9x9 GPU pick patch fresh under the moving cursor without re-dispatching world GI
             GizmoOverlayOnly = true;
         }
 
@@ -890,7 +884,69 @@ void EditorLifecycle::ProcessShowcaseViewportInteraction(
                     (void)WorldTransformGizmo.BeginDragInteraction(Hovered, CursorRay, GizmoActiveTransform, RenderRight, RenderUp);
                     CameraInteractiveDrag = true;
                     GizmoOverlayOnly      = true;
+                    MarqueePressCandidate = false;
+                    MarqueeBoxActive      = false;
+                    Panes->Viewport.ConfigureMarqueeSelectionRect(false);
                 }
+            }
+            else
+            {
+                MarqueePressCandidate  = true;
+                MarqueeBoxActive       = false;
+                MarqueeStartLogicalPos = Cursor;
+                MarqueeStartUv         = { NormU, NormV };
+                Panes->Viewport.ConfigureMarqueeSelectionRect(false);
+            }
+        }
+        else if (MarqueePressCandidate && LeftHeld)
+        {
+            const float DragDx = std::fabs(Cursor.X - MarqueeStartLogicalPos.X);
+            const float DragDy = std::fabs(Cursor.Y - MarqueeStartLogicalPos.Y);
+            if (MarqueeBoxActive || DragDx >= 5.0f || DragDy >= 5.0f)
+            {
+                MarqueeBoxActive = true;
+                const float MinX = std::clamp(std::min(MarqueeStartLogicalPos.X, Cursor.X), PaneBounds.X, PaneBounds.Right());
+                const float MinY = std::clamp(std::min(MarqueeStartLogicalPos.Y, Cursor.Y), PaneBounds.Y, PaneBounds.Bottom());
+                const float MaxX = std::clamp(std::max(MarqueeStartLogicalPos.X, Cursor.X), PaneBounds.X, PaneBounds.Right());
+                const float MaxY = std::clamp(std::max(MarqueeStartLogicalPos.Y, Cursor.Y), PaneBounds.Y, PaneBounds.Bottom());
+                Panes->Viewport.ConfigureMarqueeSelectionRect(
+                    true,
+                    Rectangle2D{ MinX, MinY, std::max(1.0f, MaxX - MinX), std::max(1.0f, MaxY - MinY) });
+            }
+        }
+        else if (MarqueePressCandidate && !LeftHeld)
+        {
+            const bool WasMarquee = MarqueeBoxActive;
+            MarqueePressCandidate = false;
+            MarqueeBoxActive      = false;
+            Panes->Viewport.ConfigureMarqueeSelectionRect(false);
+
+            if (WasMarquee)
+            {
+                const auto BoxTokens = GeometricRaster::PickShowcaseGalleryEntriesInUvBox(
+                    Panes->Outliner,
+                    *ShowcaseBundle,
+                    MarqueeStartUv.X,
+                    MarqueeStartUv.Y,
+                    NormU,
+                    NormV);
+                if (!ShiftHeld && !CtrlHeld)
+                {
+                    Panes->Outliner.ClearSelection();
+                }
+                for (std::size_t Idx = 0u; Idx < BoxTokens.size(); ++Idx)
+                {
+                    if (!ShiftHeld && !CtrlHeld && Idx == 0u)
+                    {
+                        Panes->Outliner.SelectSingle(BoxTokens[Idx]);
+                    }
+                    else if (!Panes->Outliner.QuerySlotSelected(BoxTokens[Idx]))
+                    {
+                        Panes->Outliner.SelectWithModifiers(BoxTokens[Idx], false, true);
+                    }
+                }
+                SynchronizeShowcaseGizmoAnchor();
+                GizmoOverlayOnly = true;
             }
             else
             {
@@ -899,14 +955,33 @@ void EditorLifecycle::ProcessShowcaseViewportInteraction(
                     *ShowcaseBundle,
                     NormU,
                     NormV);
-                if (Picked.Valid() && Picked != Panes->Outliner.QueryPrimarySelection())
+                if (Picked.Valid())
                 {
-                    Panes->Outliner.SelectSingle(Picked);
+                    if (ShiftHeld || CtrlHeld)
+                    {
+                        Panes->Outliner.SelectWithModifiers(Picked, ShiftHeld, CtrlHeld);
+                    }
+                    else
+                    {
+                        Panes->Outliner.SelectSingle(Picked);
+                    }
+                    SynchronizeShowcaseGizmoAnchor();
+                    GizmoOverlayOnly = true;
+                }
+                else if (!ShiftHeld && !CtrlHeld && Panes->Outliner.QueryPrimarySelection().Valid())
+                {
+                    Panes->Outliner.ClearSelection();
                     SynchronizeShowcaseGizmoAnchor();
                     GizmoOverlayOnly = true;
                 }
             }
         }
+    }
+    else if (MarqueePressCandidate || MarqueeBoxActive)
+    {
+        MarqueePressCandidate = false;
+        MarqueeBoxActive      = false;
+        Panes->Viewport.ConfigureMarqueeSelectionRect(false);
     }
 
     // 3. Unreal Engine Camera Navigation (ONE camera model — never two competing models):
@@ -1535,10 +1610,21 @@ void EditorLifecycle::SynchronizeShowcaseRendererAfterEdit(bool RebuildGeometry)
 
     if (GpuWorldRenderer != nullptr && GpuWorldRenderer->QueryReady())
     {
-        GpuWorldRenderer->SynchronizeSceneResources(ShowcaseBundle->Scene, RebuildGeometry);
+        if (RebuildGeometry)
+        {
+            GpuWorldRenderer->SynchronizeSceneResources(ShowcaseBundle->Scene, true);
+        }
+        else
+        {
+            GpuWorldRenderer->SynchronizeMaterialEntriesOnly(ShowcaseBundle->Scene);
+        }
     }
     else if (ShowcaseRenderer != nullptr)
     {
+        if (!RebuildGeometry)
+        {
+            GeometricRaster::RebuildShowcaseSceneAcceleration(*ShowcaseBundle);
+        }
         ShowcaseRenderer->PrepareWorldScene(ShowcaseBundle->Scene);
     }
     SynchronizeShowcaseGizmoAnchor();
@@ -1895,7 +1981,7 @@ void EditorLifecycle::RefreshGizmoOverlayFromCachedWorld()
         CompReq.Camera               = ShowcaseBundle->EditorCamera;
         CompReq.Gizmo3D              = &WorldTransformGizmo;
         CompReq.DrawGizmo            = LastGizmoSlot.Valid();
-        CompReq.RequestPickPatch     = !CameraInteractiveDrag && CursorInCanvas && LastGizmoSlot.Valid();
+        CompReq.RequestPickPatch     = false;
         CompReq.PickCursorX          = PickX;
         CompReq.PickCursorY          = PickY;
 
@@ -2092,7 +2178,7 @@ void EditorLifecycle::RefreshShowcaseViewportRaster()
             CompReq.Camera               = ShowcaseBundle->EditorCamera;
             CompReq.Gizmo3D              = &WorldTransformGizmo;
             CompReq.DrawGizmo            = LastGizmoSlot.Valid();
-            CompReq.RequestPickPatch     = !CameraInteractiveDrag && CursorInCanvas && LastGizmoSlot.Valid();
+            CompReq.RequestPickPatch     = false;
             CompReq.PickCursorX          = PickX;
             CompReq.PickCursorY          = PickY;
 
