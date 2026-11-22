@@ -680,6 +680,8 @@ void VulkanWorldRenderSequence::TeardownSequence() noexcept
     CloudLayerCacheValid            = false;
     LastCloudPassSignature          = 0ull;
     CloudLayerDispatchCount         = 0u;
+    AssetCutBlasBuildCount          = 0u;
+    AssetCutBlasReuseCount          = 0u;
     LastSkyViewUniformSnapshot.fill(0u);
     LastRadiosityLightingSignature  = 0ull;
     UploadedBvhCount                = 0u;
@@ -2052,6 +2054,7 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
         {
             if (Existing.Key == Cut.AssetCutKey)
             {
+                ++AssetCutBlasReuseCount;
                 return &Existing;
             }
         }
@@ -2123,6 +2126,7 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
             return nullptr;
         }
         AssetCutBlasCache.push_back(std::move(Built));
+        ++AssetCutBlasBuildCount;
         return &AssetCutBlasCache.back();
     };
 

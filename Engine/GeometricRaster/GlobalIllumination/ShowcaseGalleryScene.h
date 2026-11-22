@@ -15,6 +15,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -215,5 +216,22 @@ OutlinerSlotToken ConstructShowcaseModelInOutliner(
     float                           NormalizedU,
     float                           NormalizedV,
     float                           HalfHeightMeters) noexcept;
+
+// Disk cache telemetry for the derived asset store under build/AssetCache (.cpy1 / .wbvh4 / .sdv1)
+struct ShowcaseAssetCacheStats
+{
+    uint32_t PyramidDiskHitCount = 0u; // [cnt] - ClusterPyramid .cpy1 warm loads
+    uint32_t PyramidBakeCount    = 0u; // [cnt] - ClusterPyramid QEM bakes executed
+    uint32_t BlasDiskHitCount    = 0u; // [cnt] - Local BVH4 BLAS .wbvh4 warm loads
+    uint32_t BlasBakeCount       = 0u; // [cnt] - Local BVH4 SAH builds executed
+    uint32_t SdfDiskHitCount     = 0u; // [cnt] - Local SDF volume .sdv1 warm loads
+    uint32_t SdfBakeCount        = 0u; // [cnt] - Local SDF voxelisation passes executed
+};
+
+[[nodiscard]] const ShowcaseAssetCacheStats& QueryShowcaseAssetCacheStats() noexcept;
+void ResetShowcaseAssetCacheStats() noexcept;
+
+// Absolute directory holding the derived .cpy1 / .wbvh4 / .sdv1 asset cache files
+[[nodiscard]] std::filesystem::path QueryShowcaseAssetCacheDirectory();
 
 } // namespace Frontier::GeometricRaster

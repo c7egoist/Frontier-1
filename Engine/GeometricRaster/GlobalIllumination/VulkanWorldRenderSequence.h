@@ -83,6 +83,10 @@ public:
     [[nodiscard]] const ViewportTimingBreakdown&  QueryLastTimingBreakdown() const noexcept { return LastViewportTiming; }
     [[nodiscard]] uint32_t                        QueryCloudLayerDispatchCount() const noexcept { return CloudLayerDispatchCount; }
 
+    // Two-level per-asset cluster-cut BLAS reuse telemetry (proves rigid motion never re-runs the SAH build).
+    [[nodiscard]] uint32_t QueryAssetCutBlasBuildCount() const noexcept { return AssetCutBlasBuildCount; }
+    [[nodiscard]] uint32_t QueryAssetCutBlasReuseCount() const noexcept { return AssetCutBlasReuseCount; }
+
     // Explicit C++ cache invalidation & bake triggers (invoked by Inspector / Render menu / CLI tools).
     void RequestStaticGiBake() noexcept;
     void RequestSdfVolumeBake() noexcept;
@@ -266,6 +270,8 @@ private:
     uint64_t               CachedNaniteCutSignature      = 0u;
     bool                   NaniteLodBuffersActive        = false;
     std::deque<CachedAssetCutBlas> AssetCutBlasCache    {};
+    uint32_t               AssetCutBlasBuildCount         = 0u;
+    uint32_t               AssetCutBlasReuseCount         = 0u;
     uint32_t               FrameSequenceIndex            = 0u;
     uint32_t               ProgressiveSampleCount        = 0u;
     uint32_t               LastEngineOrdinal             = UINT32_MAX;

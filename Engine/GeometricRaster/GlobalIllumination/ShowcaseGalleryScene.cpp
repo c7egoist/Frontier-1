@@ -39,6 +39,28 @@ namespace
     return Dir;
 }
 
+ShowcaseAssetCacheStats CachedAssetCacheStats {};
+
+} // namespace
+
+std::filesystem::path QueryShowcaseAssetCacheDirectory()
+{
+    return QueryDerivedAssetCacheDirectory();
+}
+
+const ShowcaseAssetCacheStats& QueryShowcaseAssetCacheStats() noexcept
+{
+    return CachedAssetCacheStats;
+}
+
+void ResetShowcaseAssetCacheStats() noexcept
+{
+    CachedAssetCacheStats = {};
+}
+
+namespace
+{
+
 [[nodiscard]] bool ReadBinaryFileBytes(const std::filesystem::path& FilePath, std::vector<uint8_t>& OutBytes)
 {
     std::ifstream Stream(FilePath, std::ios::binary | std::ios::ate);
@@ -560,6 +582,7 @@ void BuildOrLoadCachedLocalTreeFromSmoothTriangles(
             reinterpret_cast<const std::byte*>(RawBytes.data()), RawBytes.size());
         if (OutTree.DeserializeFromBinaryBytes(ByteSpan) && !OutTree.WideEntries.empty())
         {
+            ++CachedAssetCacheStats.BlasDiskHitCount;
             return;
         }
     }
@@ -581,6 +604,7 @@ void BuildOrLoadCachedLocalTreeFromSmoothTriangles(
     }
     if (OutTree.BuildFromTrianglePrimitives(LocalPrims))
     {
+        ++CachedAssetCacheStats.BlasBakeCount;
         const std::vector<std::byte> Encoded = OutTree.SerializeToBinaryBytes();
         WriteBinaryFileBytes(
             CacheFile,
@@ -603,10 +627,12 @@ void BakeOrLoadCachedAssetLocalSdf(
     std::vector<uint8_t> RawBytes {};
     if (ReadBinaryFileBytes(CacheFile, RawBytes) && OutVolume.DeserializeFromBinaryBytes(RawBytes))
     {
+        ++CachedAssetCacheStats.SdfDiskHitCount;
         return;
     }
     if (BakeAssetSignedLocalSdfFromSmoothTriangles(LocalTriangles, DimensionsMeters, OutVolume))
     {
+        ++CachedAssetCacheStats.SdfBakeCount;
         std::vector<uint8_t> Encoded {};
         if (OutVolume.SerializeToBinaryBytes(Encoded))
         {
@@ -885,10 +911,15 @@ bool LoadWorldSceneFromSpaceFile(
             const std::filesystem::path PyrCacheFile =
                 QueryDerivedAssetCacheDirectory() / ("Pyr_" + FormatHexCacheTag(GeomCacheKey) + ".cpy1");
             std::vector<uint8_t> PyrCacheBytes {};
-            if (!ReadBinaryFileBytes(PyrCacheFile, PyrCacheBytes) ||
-                !GeomAsset->Pyramid.DeserializeFromBinaryBytes(
-                    std::span<const std::byte>(reinterpret_cast<const std::byte*>(PyrCacheBytes.data()), PyrCacheBytes.size())) ||
-                GeomAsset->Pyramid.Clusters.empty())
+            const bool PyrDiskHit = ReadBinaryFileBytes(PyrCacheFile, PyrCacheBytes) &&
+                GeomAsset->Pyramid.DeserializeFromBinaryBytes(
+                    std::span<const std::byte>(reinterpret_cast<const std::byte*>(PyrCacheBytes.data()), PyrCacheBytes.size())) &&
+                !GeomAsset->Pyramid.Clusters.empty();
+            if (PyrDiskHit)
+            {
+                ++CachedAssetCacheStats.PyramidDiskHitCount;
+            }
+            else
             {
                 SpatialAcceleration::ClusterLodBakeConfiguration LodBake {};
                 LodBake.MaximumLevels          = 3u;
@@ -909,6 +940,7 @@ bool LoadWorldSceneFromSpaceFile(
                         }
                     }
                 }
+                ++CachedAssetCacheStats.PyramidBakeCount;
                 const std::vector<std::byte> EncodedPyr = GeomAsset->Pyramid.SerializeToBinaryBytes();
                 WriteBinaryFileBytes(
                     PyrCacheFile,
@@ -1369,10 +1401,15 @@ void BuildVehicleClearSkyDefaultScene(
         const std::filesystem::path VehiclePyrFile =
             QueryDerivedAssetCacheDirectory() / ("Pyr_" + FormatHexCacheTag(VehicleCacheKey) + ".cpy1");
         std::vector<uint8_t> VehiclePyrBytes {};
-        if (!ReadBinaryFileBytes(VehiclePyrFile, VehiclePyrBytes) ||
-            !VehicleGeom->Pyramid.DeserializeFromBinaryBytes(
-                std::span<const std::byte>(reinterpret_cast<const std::byte*>(VehiclePyrBytes.data()), VehiclePyrBytes.size())) ||
-            VehicleGeom->Pyramid.Clusters.empty())
+        const bool VehiclePyrDiskHit = ReadBinaryFileBytes(VehiclePyrFile, VehiclePyrBytes) &&
+            VehicleGeom->Pyramid.DeserializeFromBinaryBytes(
+                std::span<const std::byte>(reinterpret_cast<const std::byte*>(VehiclePyrBytes.data()), VehiclePyrBytes.size())) &&
+            !VehicleGeom->Pyramid.Clusters.empty();
+        if (VehiclePyrDiskHit)
+        {
+            ++CachedAssetCacheStats.PyramidDiskHitCount;
+        }
+        else
         {
             SpatialAcceleration::ClusterLodBakeConfiguration VehicleBake {};
             VehicleBake.MaximumLevels          = 8u;
@@ -1383,6 +1420,7 @@ void BuildVehicleClearSkyDefaultScene(
             (void)VehicleGeom->Pyramid.BuildFromPolygonNetwork(VehicleGeom->Network, VehicleBake);
             const uint16_t GlassSlot = VehicleSlots[static_cast<std::size_t>(Codecs::VehicleSurfaceSlot::VehicleGlass)];
             VehicleGeom->Pyramid.ConfigureMaterialCoarsestAllowedLevel(static_cast<uint8_t>(GlassSlot & 0xFFu), 2u);
+            ++CachedAssetCacheStats.PyramidBakeCount;
             const std::vector<std::byte> EncodedVehiclePyr = VehicleGeom->Pyramid.SerializeToBinaryBytes();
             WriteBinaryFileBytes(
                 VehiclePyrFile,
