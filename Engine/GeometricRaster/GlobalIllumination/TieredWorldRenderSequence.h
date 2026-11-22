@@ -78,6 +78,7 @@ struct WorldRenderConfiguration
     uint32_t                              PathTraceTargetSpp  = 0u;   // [spp]   - Convergence target for progressive PT (0 = continuous, no cap)
     bool                                  NaniteLodEnabled    = true;  // [-]    - Viewport traces the per-camera Cluster LOD cut (Nanite-like) instead of full-res geometry
     float                                 NanitePixelError    = 1.25f; // [px]   - Screen-space error budget driving the monotonic LOD cut
+    uint32_t                              NaniteCoarsestLevel = 7u;    // [lvl]  - Cluster LOD floor: coarsest level the cut may ever select (7 = uncapped)
 };
 
 struct WorldSceneSpecification

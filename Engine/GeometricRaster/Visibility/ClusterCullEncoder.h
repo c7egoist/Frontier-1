@@ -31,6 +31,7 @@ struct RigidClusterInstance
     float                                      UniformScale       = 1.0f;    // [-]   - Uniform rigid world scale
     uint16_t                                   MaterialSlot       = 0u;      // [idx] - CompactMaterialRegister slot
     bool                                       TransparentGlass   = false;   // [-]   - Routed to 2-layer glass depth-peel pass
+    uint32_t                                   CoarsestLodLevel   = 0xFFFFFFFFu; // [lvl] - Per-instance LOD floor: the cut may never exceed this level
 };
 
 struct VisibleClusterCommand

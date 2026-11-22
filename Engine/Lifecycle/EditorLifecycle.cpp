@@ -367,6 +367,7 @@ void EditorLifecycle::PopulateWorldSceneSession(uint32_t RenderWidthPx, uint32_t
     {
         ShowcaseRenderer->PrepareWorldScene(ShowcaseBundle->Scene);
     }
+    PrimeEditorFlyLookAngles();
     EditorCameraLag.SnapTo(ShowcaseBundle->EditorCamera.CameraOrigin, ShowcaseBundle->EditorCamera.TargetPoint);
     DesiredCameraOrigin = ShowcaseBundle->EditorCamera.CameraOrigin;
     DesiredCameraTarget = ShowcaseBundle->EditorCamera.TargetPoint;
@@ -572,6 +573,50 @@ void EditorLifecycle::PopulateWorldSceneSession(uint32_t RenderWidthPx, uint32_t
     RefreshShowcaseViewportRaster();
 }
 
+//------------------------------------------------------------------------------------------------------------------------
+//                                        EXACT UNREAL-STYLE LOOK STATE (YAW / PITCH)
+//------------------------------------------------------------------------------------------------------------------------
+// The editor fly camera owns yaw/pitch as state instead of re-deriving them from (Target - Origin).
+// Two defects disappear: (1) mouse-look no longer loses rate through the lag damper because the
+// damped pose is never the integration base; (2) rotation stays exact at any camera distance, so the
+// view can no longer "glitch" once the eye is far from the pivot (float drift in the accumulated
+// look-at vector used to swing the whole view).
+
+void EditorLifecycle::PrimeEditorFlyLookAngles() noexcept
+{
+    if (ShowcaseBundle == nullptr)
+    {
+        return;
+    }
+    const auto& Cam   = ShowcaseBundle->EditorCamera;
+    const Mathematics::Axis3D ToTarget = Cam.TargetPoint - Cam.CameraOrigin;
+    const float LenSq = Mathematics::EvaluateDot(ToTarget, ToTarget);
+    if (LenSq > 1.0e-12f)
+    {
+        const Mathematics::Axis3D Dir = ToTarget * (1.0f / std::sqrt(LenSq));
+        EditorFlyYawRadians   = std::atan2(Dir.X, Dir.Y);
+        EditorFlyPitchRadians = std::asin(std::clamp(Dir.Z, -0.99990f, 0.99990f));
+    }
+    else
+    {
+        EditorFlyYawRadians   = 0.0f;
+        EditorFlyPitchRadians = 0.0f;
+    }
+    EditorFlyLookPrimed = true;
+}
+
+Mathematics::Axis3D EditorLifecycle::EvaluateEditorFlyForward() const noexcept
+{
+    const float CosPitch = std::cos(EditorFlyPitchRadians);
+    return Mathematics::NormalizeAxis(
+        {
+            std::sin(EditorFlyYawRadians) * CosPitch,
+            std::cos(EditorFlyYawRadians) * CosPitch,
+            std::sin(EditorFlyPitchRadians),
+        },
+        { 0.0f, 1.0f, 0.0f });
+}
+
 void EditorLifecycle::SynchronizeShowcaseGizmoAnchor() noexcept
 {
     WorkspaceSessionPanes* Panes = Workspaces.AccessActivePanes();
@@ -597,7 +642,9 @@ void EditorLifecycle::SynchronizeShowcaseGizmoAnchor() noexcept
         (Pivot.X - ShowcaseBundle->EditorCamera.CameraOrigin.X) * (Pivot.X - ShowcaseBundle->EditorCamera.CameraOrigin.X) +
         (Pivot.Y - ShowcaseBundle->EditorCamera.CameraOrigin.Y) * (Pivot.Y - ShowcaseBundle->EditorCamera.CameraOrigin.Y) +
         (Pivot.Z - ShowcaseBundle->EditorCamera.CameraOrigin.Z) * (Pivot.Z - ShowcaseBundle->EditorCamera.CameraOrigin.Z));
-    const float WorldRad = std::clamp(DistToCam * 0.17f, 0.28f, 1.85f);
+    // Constant SCREEN size: the world radius must keep scaling with view distance. The old 1.85 m cap
+    // froze the radius past ~11 m, so the gizmo shrank to a few pixels and its handles stopped picking.
+    const float WorldRad = std::clamp(DistToCam * 0.17f, 0.10f, 24.0f);
     WorldTransformGizmo.ConfigureAnchor(Pivot, WorldRad);
     LastGizmoSlot = PrimarySlot;
 }
@@ -638,6 +685,7 @@ void EditorLifecycle::FrameShowcaseCameraSelection() noexcept
         CamEntry->PositionY = ShowcaseBundle->EditorCamera.CameraOrigin.Y;
         CamEntry->PositionZ = ShowcaseBundle->EditorCamera.CameraOrigin.Z;
     }
+    PrimeEditorFlyLookAngles();
     EditorCameraLag.SnapTo(ShowcaseBundle->EditorCamera.CameraOrigin, ShowcaseBundle->EditorCamera.TargetPoint);
     DesiredCameraOrigin = ShowcaseBundle->EditorCamera.CameraOrigin;
     DesiredCameraTarget = ShowcaseBundle->EditorCamera.TargetPoint;
@@ -666,6 +714,12 @@ void EditorLifecycle::ProcessShowcaseNavigationDirective(ViewportNavigationDirec
                                              ? std::clamp(CurDist * 0.85f, 0.55f, 18.0f)
                                              : std::clamp(CurDist * 1.18f, 0.55f, 18.0f);
     ShowcaseBundle->EditorCamera.CameraOrigin = ShowcaseBundle->EditorCamera.TargetPoint - Fwd * NextDist;
+    PrimeEditorFlyLookAngles();
+    // Keep the desired pose authoritative: the next interaction tick re-seeds the camera from the
+    // desired pose, so a stale desired pose would silently undo this zoom.
+    DesiredCameraOrigin = ShowcaseBundle->EditorCamera.CameraOrigin;
+    DesiredCameraTarget = ShowcaseBundle->EditorCamera.TargetPoint;
+    DesiredCameraValid  = true;
 
     if (WorkspaceSessionPanes* Panes = Workspaces.AccessActivePanes())
     {
@@ -727,6 +781,23 @@ void EditorLifecycle::ProcessShowcaseViewportInteraction(
     bool GizmoDragEnded   = false;
 
     auto& Cam = ShowcaseBundle->EditorCamera;
+
+    // ⚠️ Camera-lag correctness: the lag component damps the RENDERED pose toward the desired pose.
+    // Input must therefore integrate on the DESIRED pose, never on the damped one. Seeding the working
+    // pose from the desired pose every frame is what makes RMB turn at full rate; integrating on the
+    // damped pose re-attenuated each frame's delta through the lag blend, so turning ran several times
+    // slower than the mouse (the reported "right click turn is very slow" symptom).
+    if (DesiredCameraValid && EditorCameraLag.QueryPrimed() && !WorldTransformGizmo.QueryDragging())
+    {
+        Cam.CameraOrigin = DesiredCameraOrigin;
+        Cam.TargetPoint  = DesiredCameraTarget;
+    }
+
+    if (!EditorFlyLookPrimed)
+    {
+        PrimeEditorFlyLookAngles();
+    }
+
     Mathematics::Axis3D Fwd   = Mathematics::NormalizeAxis(Cam.TargetPoint - Cam.CameraOrigin, { 0.0f, 1.0f, 0.0f });
     Mathematics::Axis3D Right = Mathematics::NormalizeAxis(Mathematics::EvaluateCross(Fwd, Cam.WorldUpAxis), { 1.0f, 0.0f, 0.0f });
     Mathematics::Axis3D Up    = Mathematics::NormalizeAxis(Mathematics::EvaluateCross(Right, Fwd), { 0.0f, 0.0f, 1.0f });
@@ -734,7 +805,10 @@ void EditorLifecycle::ProcessShowcaseViewportInteraction(
     // 1. Modifier & Mouse Button State (Unreal Engine Z-Up Viewport Controls)
     const bool RightHeld  = ImGui::IsMouseDown(ImGuiMouseButton_Right);
     const bool MiddleHeld = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
-    const bool LeftHeld   = ImGui::IsMouseDown(ImGuiMouseButton_Left) || Input.PrimaryPointer.Down;
+    // A stale PrimaryPointer.Down must never veto RMB mouse-look: the pointer reading is only trusted
+    // while RMB is free, which removes the "RMB turns do nothing" failure mode when the pane misses
+    // the button-release event.
+    const bool LeftHeld   = ImGui::IsMouseDown(ImGuiMouseButton_Left) || (Input.PrimaryPointer.Down && !RightHeld);
     const bool ShiftHeld  = Io.KeyShift || ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift);
     const bool CtrlHeld   = Io.KeyCtrl  || ImGui::IsKeyDown(ImGuiKey_LeftCtrl)  || ImGui::IsKeyDown(ImGuiKey_RightCtrl);
     const bool AltHeld    = Io.KeyAlt   || ImGui::IsKeyDown(ImGuiKey_LeftAlt)   || ImGui::IsKeyDown(ImGuiKey_RightAlt);
@@ -792,6 +866,7 @@ void EditorLifecycle::ProcessShowcaseViewportInteraction(
         else
         {
             WorldTransformGizmo.EndDragInteraction();
+            WorldTransformGizmo.AssignHoveredHandle(Editor::GizmoHandleOrdinal::None);
             CameraInteractiveDrag = false;
             GizmoDragEnded        = true;
             SceneChanged          = true;
@@ -879,19 +954,22 @@ void EditorLifecycle::ProcessShowcaseViewportInteraction(
         {
             if (std::fabs(NavDeltaX) > 0.01f || std::fabs(NavDeltaY) > 0.01f)
             {
-                const Mathematics::Axis3D ToTarget = Cam.TargetPoint - Cam.CameraOrigin;
-                const float Dist  = std::max(0.35f, std::sqrt(Mathematics::EvaluateDot(ToTarget, ToTarget)));
-                const float Yaw   = std::atan2(Fwd.X, Fwd.Y) + NavDeltaX * 0.0042f;
-                const float Pitch = std::clamp(
-                    std::asin(std::clamp(Fwd.Z, -0.995f, 0.995f)) - NavDeltaY * 0.0042f,
-                    -1.52f,
-                    1.52f);
-                const float CosP = std::cos(Pitch);
-                Fwd              = Mathematics::NormalizeAxis({ std::sin(Yaw) * CosP, std::cos(Yaw) * CosP, std::sin(Pitch) }, Fwd);
-                Cam.TargetPoint  = Cam.CameraOrigin + Fwd * Dist;
-                Right            = Mathematics::NormalizeAxis(Mathematics::EvaluateCross(Fwd, Cam.WorldUpAxis), { 1.0f, 0.0f, 0.0f });
-                Up               = Mathematics::NormalizeAxis(Mathematics::EvaluateCross(Right, Fwd), { 0.0f, 0.0f, 1.0f });
-                CameraMoved      = true;
+                // Unreal viewport mouse-look: exact angle integration (no look-at vector drift).
+                constexpr float LookRadiansPerLogicalPixel = 0.0032f; // [rad/px] - ~0.18 deg per logical px
+                EditorFlyYawRadians   += NavDeltaX * LookRadiansPerLogicalPixel;
+                EditorFlyPitchRadians  = std::clamp(
+                    EditorFlyPitchRadians - NavDeltaY * LookRadiansPerLogicalPixel,
+                    -1.55334f,
+                    1.55334f); // [rad] - +-89 deg, never degenerate
+                const Mathematics::Axis3D LookFwd = EvaluateEditorFlyForward();
+                const float LookDist = std::max(
+                    0.35f,
+                    std::sqrt(Mathematics::EvaluateDot(Cam.TargetPoint - Cam.CameraOrigin, Cam.TargetPoint - Cam.CameraOrigin)));
+                Cam.TargetPoint = Cam.CameraOrigin + LookFwd * LookDist;
+                Fwd             = LookFwd;
+                Right           = Mathematics::NormalizeAxis(Mathematics::EvaluateCross(Fwd, Cam.WorldUpAxis), { 1.0f, 0.0f, 0.0f });
+                Up              = Mathematics::NormalizeAxis(Mathematics::EvaluateCross(Right, Fwd), { 0.0f, 0.0f, 1.0f });
+                CameraMoved     = true;
             }
         }
         else if ((MiddleHeld && !AltHeld) || (LeftHeld && RightHeld && !AltHeld))
@@ -927,6 +1005,7 @@ void EditorLifecycle::ProcessShowcaseViewportInteraction(
                 Fwd   = Mathematics::NormalizeAxis(Cam.TargetPoint - Cam.CameraOrigin, Fwd);
                 Right = Mathematics::NormalizeAxis(Mathematics::EvaluateCross(Fwd, Cam.WorldUpAxis), Right);
                 Up    = Mathematics::NormalizeAxis(Mathematics::EvaluateCross(Right, Fwd), Up);
+                PrimeEditorFlyLookAngles(); // orbit changed the view direction: re-seed the exact look state
                 CameraMoved = true;
             }
         }
@@ -1009,39 +1088,57 @@ void EditorLifecycle::ProcessShowcaseViewportInteraction(
     }
 
     {
-        char SpeedReadout[80]{};
+        // The active gizmo mode is always visible: an invisible filter change used to look like a
+        // broken gizmo (translate arrows missing because the filter had latched to rotate).
+        const char* GizmoModeLabel = "Universal";
+        switch (WorldTransformGizmo.QueryHandleFilter())
+        {
+        case Editor::GizmoHandleFilter::TranslateOnly: GizmoModeLabel = "Move";   break;
+        case Editor::GizmoHandleFilter::RotateOnly:    GizmoModeLabel = "Rotate"; break;
+        case Editor::GizmoHandleFilter::ScaleOnly:     GizmoModeLabel = "Scale";  break;
+        case Editor::GizmoHandleFilter::Universal:
+        default:                                        GizmoModeLabel = "Universal"; break;
+        }
+
+        char SpeedReadout[160]{};
         std::snprintf(
             SpeedReadout,
             sizeof(SpeedReadout),
-            "Fly Speed %.2fx%s",
+            "Fly Speed %.2fx%s · Gizmo %s (W/E/R/Q)",
             CameraFlySpeedScalar,
-            (ShiftHeld && FlyKeysPossible) ? " · Sprint x3" : "");
+            (ShiftHeld && FlyKeysPossible) ? " · Sprint x3" : "",
+            GizmoModeLabel);
         Panes->Viewport.ConfigureProbeReadoutText(SpeedReadout);
     }
 
     CameraInteractiveDrag = RightHeld || MiddleHeld || (AltHeld && LeftHeld) || WorldTransformGizmo.QueryDragging() || CameraMoved;
 
     // 4. Gizmo & Frame-Selection Keyboard Shortcuts (when not flying RMB/LMB and not typing in text fields)
-    if (!RightHeld && !LeftHeld && !Io.WantTextInput && !CtrlHeld && !AltHeld)
+    //    A filter change always clears the hovered handle so no stale handle can survive the switch.
+    if (!RightHeld && !LeftHeld && !Io.WantTextInput && !CtrlHeld && !AltHeld && !GizmoBusy)
     {
         if (ImGui::IsKeyPressed(ImGuiKey_W, false))
         {
             WorldTransformGizmo.ConfigureHandleFilter(Editor::GizmoHandleFilter::TranslateOnly);
+            WorldTransformGizmo.AssignHoveredHandle(Editor::GizmoHandleOrdinal::None);
             GizmoOverlayOnly = true;
         }
         else if (ImGui::IsKeyPressed(ImGuiKey_E, false))
         {
             WorldTransformGizmo.ConfigureHandleFilter(Editor::GizmoHandleFilter::RotateOnly);
+            WorldTransformGizmo.AssignHoveredHandle(Editor::GizmoHandleOrdinal::None);
             GizmoOverlayOnly = true;
         }
         else if (ImGui::IsKeyPressed(ImGuiKey_R, false))
         {
             WorldTransformGizmo.ConfigureHandleFilter(Editor::GizmoHandleFilter::ScaleOnly);
+            WorldTransformGizmo.AssignHoveredHandle(Editor::GizmoHandleOrdinal::None);
             GizmoOverlayOnly = true;
         }
         else if (ImGui::IsKeyPressed(ImGuiKey_U, false) || ImGui::IsKeyPressed(ImGuiKey_Q, false))
         {
             WorldTransformGizmo.ConfigureHandleFilter(Editor::GizmoHandleFilter::Universal);
+            WorldTransformGizmo.AssignHoveredHandle(Editor::GizmoHandleOrdinal::None);
             GizmoOverlayOnly = true;
         }
         else if (ImGui::IsKeyPressed(ImGuiKey_F, false))
@@ -1072,7 +1169,16 @@ void EditorLifecycle::ProcessShowcaseViewportInteraction(
         DesiredCameraTarget = Cam.TargetPoint;
         DesiredCameraValid  = true;
     }
-    if (DesiredCameraValid && !WorldTransformGizmo.QueryDragging())
+    if (WorldTransformGizmo.QueryDragging())
+    {
+        // While a gizmo drag owns the pointer the camera never moves: keep the lag component and the
+        // desired pose exactly on the live pose so releasing the handle cannot sweep the view afterwards.
+        EditorCameraLag.SnapTo(Cam.CameraOrigin, Cam.TargetPoint);
+        DesiredCameraOrigin = Cam.CameraOrigin;
+        DesiredCameraTarget = Cam.TargetPoint;
+        DesiredCameraValid  = true;
+    }
+    else if (DesiredCameraValid)
     {
         if (!EditorCameraLag.QueryPrimed())
         {
@@ -1931,13 +2037,14 @@ void EditorLifecycle::RefreshShowcaseViewportRaster()
     RenderConfig.ReflectionSource = (DisplayCfg.ReflectionsEnabled && DisplayCfg.RaytracingEnabled && DisplayCfg.ReflectionSourceIndex == 0u)
         ? GeometricRaster::SpecularReflectionSource::WideTreeRaytrace
         : GeometricRaster::SpecularReflectionSource::SkyEnvironment;
-    RenderConfig.DebugChannel       = std::min(18u, DisplayCfg.DebugChannelIndex);
+    RenderConfig.DebugChannel       = std::min(19u, DisplayCfg.DebugChannelIndex);
     RenderConfig.XeGtaoEnabled      = DisplayCfg.XeGtaoEnabled;
     RenderConfig.XeGtaoStrength     = DisplayCfg.XeGtaoStrength;
     RenderConfig.PathTraceSamples   = std::clamp(DisplayCfg.PathTraceBatchSpp, 1u, 8u);
     RenderConfig.PathTraceTargetSpp = DisplayCfg.PathTraceTargetSpp;
     RenderConfig.NaniteLodEnabled   = DisplayCfg.ClusterLodEnabled;
     RenderConfig.NanitePixelError   = DisplayCfg.ClusterLodPixelError;
+    RenderConfig.NaniteCoarsestLevel = std::min(7u, DisplayCfg.ClusterLodCoarsestLevel);
     RenderConfig.QualityTier        = QTier;
     RenderConfig.ReflectionsEnabled = DisplayCfg.ReflectionsEnabled;
     RenderConfig.RaytracingEnabled  = DisplayCfg.RaytracingEnabled;
@@ -2037,18 +2144,32 @@ void EditorLifecycle::RefreshShowcaseViewportRaster()
 
     if (RenderedOnGpu && GpuWorldRenderer != nullptr && DisplayCfg.RenderEngineIndex < 4u)
     {
-        // Live Nanite proof in the viewport footer: triangles actually traced vs full-res scene.
-        const auto& LodStats = GpuWorldRenderer->QueryNaniteLodStats();
-        char LodReadout[128] {};
+        // Live Nanite + global distance field proof in the viewport footer: triangles actually traced
+        // vs full-res, and whether the SDF is tracking an object incrementally or doing a full rebuild.
+        const auto& LodStats    = GpuWorldRenderer->QueryNaniteLodStats();
+        const auto& GdfReport   = GpuWorldRenderer->QueryGlobalDistanceFieldReport();
+        char        LodReadout[256] {};
         if (LodStats.Enabled)
         {
             std::snprintf(
-                LodReadout, sizeof(LodReadout), "Nanite LOD %u tris · %u clusters (full %u)",
-                LodStats.ActiveTriangleCount, LodStats.ActiveClusterCount, LodStats.FullTriangleCount);
+                LodReadout, sizeof(LodReadout),
+                "Nanite LOD %u tris · %u clusters (full %u) · GDF %s · %u inc / %u full · %.1f%%",
+                LodStats.ActiveTriangleCount,
+                LodStats.ActiveClusterCount,
+                LodStats.FullTriangleCount,
+                GdfReport.Ready ? "live" : "cold",
+                GdfReport.IncrementalUpdateCount,
+                GdfReport.RebuildCount,
+                static_cast<double>(GdfReport.LastDirtyFraction * 100.0f));
         }
         else
         {
-            std::snprintf(LodReadout, sizeof(LodReadout), "Nanite LOD off · %u tris full-res", LodStats.FullTriangleCount);
+            std::snprintf(
+                LodReadout, sizeof(LodReadout),
+                "Nanite LOD off · %u tris full-res · GDF %u inc / %u full",
+                LodStats.FullTriangleCount,
+                GdfReport.IncrementalUpdateCount,
+                GdfReport.RebuildCount);
         }
         Panes->Viewport.ConfigureProbeReadoutText(LodReadout);
     }
@@ -2303,6 +2424,7 @@ bool EditorLifecycle::ExecuteExternalDesktopTick(double Δt)
                 DisplayCfg.TraceResolutionIndex != LastTraceResolutionIdx ||
                 DisplayCfg.ClusterLodEnabled != LastClusterLodEnabled ||
                 DisplayCfg.ClusterLodPixelError != LastClusterLodPixelError ||
+                DisplayCfg.ClusterLodCoarsestLevel != LastClusterLodCoarsestLevel ||
                 DisplayCfg.PathTraceTargetSpp != LastPathTraceTargetSpp ||
                 DisplayCfg.PathTraceBatchSpp != LastPathTraceBatchSpp ||
                 DisplayCfg.XeGtaoEnabled != LastXeGtaoEnabled ||
@@ -2328,6 +2450,7 @@ bool EditorLifecycle::ExecuteExternalDesktopTick(double Δt)
             LastTraceResolutionIdx = DisplayCfg.TraceResolutionIndex;
             LastClusterLodEnabled  = DisplayCfg.ClusterLodEnabled;
             LastClusterLodPixelError = DisplayCfg.ClusterLodPixelError;
+            LastClusterLodCoarsestLevel = DisplayCfg.ClusterLodCoarsestLevel;
             LastPathTraceTargetSpp = DisplayCfg.PathTraceTargetSpp;
             LastPathTraceBatchSpp  = DisplayCfg.PathTraceBatchSpp;
             LastXeGtaoEnabled      = DisplayCfg.XeGtaoEnabled;

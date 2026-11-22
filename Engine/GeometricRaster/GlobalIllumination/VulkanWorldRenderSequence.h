@@ -68,6 +68,26 @@ public:
         const WorldSceneSpecification& Scene,
         bool                           RebuildShadows = true);
 
+    // Global view distance field focus: the fine cascade re-centres on the viewpoint only when the
+    // view leaves the inner band of the field, so ordinary orbiting never triggers a rebuild.
+    void ConfigureGlobalDistanceFieldFocus(
+        Mathematics::Axis3D FocusWorld,
+        bool                ViewValid = true) noexcept;
+
+    struct GlobalDistanceFieldReport
+    {
+        bool     Ready                 = false; // [-]  - Field holds baked distances
+        uint32_t RebuildCount          = 0u;    // [cnt]- Full-grid rebuilds (cascade re-centre / scene reload)
+        uint32_t IncrementalUpdateCount= 0u;    // [cnt]- Dirty-region updates (object moved, field follows locally)
+        float    LastDirtyFraction     = 0.0f;  // [-]  - Dirty voxels / total voxels of the last update
+        float    LastUpdateMilliseconds= 0.0f;  // [ms] - Wall time of the last field update
+        float    LastDirtyExtentMeters = 0.0f;  // [m]  - Longest edge of the last dirty region
+    };
+    [[nodiscard]] const GlobalDistanceFieldReport& QueryGlobalDistanceFieldReport() const noexcept
+    {
+        return GlobalDistanceReport;
+    }
+
     [[nodiscard]] bool RenderWorldViewportWithEngine(
         const WorldRenderConfiguration& Config,
         uint32_t                        FrameIndex,
@@ -194,6 +214,18 @@ private:
     float                  CachedFineGdfCenterSpan[4]      { 0.0f, 0.0f, 0.0f, 3.4f };
     float                  CachedCoarseGdfCenterSpan[4]    { 0.0f, 0.0f, 0.0f, 10.2f };
     bool                   GlobalDistanceFieldReady        = false;
+    // Incremental global distance field invalidation state
+    Mathematics::Axis3D    GdfFocusWorld                    { 0.0f, 0.0f, 0.0f };
+    bool                   GdfFocusValid                    = false;
+    float                  GdfDirtyMinimumWorld[3]          {};
+    float                  GdfDirtyMaximumWorld[3]          {};
+    bool                   GdfDirtyActive                    = false;
+    bool                   GdfNeedsFullRebuild               = true;
+    std::vector<Mathematics::Axis3D> CachedGdfInstanceCentres {}; // [-] - Last-frame instance positions for move detection
+    float                  CachedGdfSceneBoundsMin[3]        {};   // [m] - Previous scene AABB (non-instance edit safety net)
+    float                  CachedGdfSceneBoundsMax[3]        {};   // [m] - Previous scene AABB
+    bool                   CachedGdfSceneBoundsSeeded        = false;
+    GlobalDistanceFieldReport GlobalDistanceReport            {};
     bool                   SkyViewLutValid                 = false;
     std::array<uint8_t, 128u> LastSkyViewUniformSnapshot   {};
     uint64_t               LastRadiosityLightingSignature  = 0ull;

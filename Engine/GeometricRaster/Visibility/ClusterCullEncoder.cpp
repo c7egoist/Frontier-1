@@ -93,7 +93,8 @@ TwoPhaseCullReport ClusterCullEncoder::EncodePhaseOneVisibility(
             LocalCameraPos,
             PixelsPerRadian,
             Settings.MaxAllowedLodErrorPx,
-            false);
+            false,
+            Inst.CoarsestLodLevel);
 
         Report.TotalLodCutClusters += static_cast<uint32_t>(CutSelection.ActiveClusterIndices.size());
 

@@ -706,8 +706,16 @@ bool LoadWorldSceneFromSpaceFile(
             EnsureObjectLocalSmoothTriangles(Entry);
         }
 
+        // Per-instance LOD floor: glass shells keep level 1 as their coarsest selectable LOD so the
+        // silhouette survives at the lowest point, exactly as baked into the pyramid.
         OutBundle.Scene.ClusterInstances.push_back(
-            { &GeomAsset->Pyramid, Entry.CenterWorld, Entry.CenterWorld, 1.0f, Entry.MaterialSlot, Entry.SphericalPrimitive });
+            { &GeomAsset->Pyramid,
+              Entry.CenterWorld,
+              Entry.CenterWorld,
+              1.0f,
+              Entry.MaterialSlot,
+              Entry.SphericalPrimitive,
+              Entry.GlassShell ? 1u : 0xFFFFFFFFu });
         OutBundle.DynamicGeometryAssets.push_back(std::move(GeomAsset));
         OutBundle.Objects.push_back(std::move(Entry));
     }

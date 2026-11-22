@@ -163,6 +163,10 @@ private:
     };
 
     void PopulateWorldSceneSession(uint32_t RenderWidthPx, uint32_t RenderHeightPx);
+    // Authoritative Unreal-style look state: exact yaw/pitch angles drive the pose, so mouse-look
+    // never accumulates float drift and never loses rate through the lag damper.
+    void PrimeEditorFlyLookAngles() noexcept;
+    [[nodiscard]] Mathematics::Axis3D EvaluateEditorFlyForward() const noexcept;
     void SynchronizeShowcaseGizmoAnchor() noexcept;
     void RefreshGizmoOverlayFromCachedWorld();
     void ProcessShowcaseViewportInteraction(uint32_t PaneIndex, Rectangle2D PaneBounds, const PaneInputReading& Input);
@@ -201,6 +205,7 @@ private:
     uint32_t                                                         LastTraceResolutionIdx = UINT32_MAX;
     bool                                                             LastClusterLodEnabled  = true;
     float                                                            LastClusterLodPixelError = 1.25f;
+    uint32_t                                                         LastClusterLodCoarsestLevel = 7u;
     uint32_t                                                         LastPathTraceTargetSpp = 256u;
     uint32_t                                                         LastPathTraceBatchSpp  = 1u;
     bool                                                             LastXeGtaoEnabled    = false;
@@ -222,6 +227,9 @@ private:
     OutlinerSlotToken                                                LastGizmoSlot        {}; // [id]- Slot currently anchored by WorldTransformGizmo
     Point2D                                                          LastPointerPosition  {}; // [px]- Previous frame viewport pointer coordinate
     float                                                            CameraFlySpeedScalar = 1.0f; // [x] - Unreal RMB+Wheel dynamic fly-speed multiplier
+    float                                                            EditorFlyYawRadians   = 0.0f;   // [rad] - Exact RMB look yaw (state owner, not derived from the pose)
+    float                                                            EditorFlyPitchRadians = 0.0f;   // [rad] - Exact RMB look pitch
+    bool                                                             EditorFlyLookPrimed   = false;  // [-]   - True once yaw/pitch were seeded from the live camera pose
     Components::CameraLagComponent                                   EditorCameraLag    {};     // [-] - Reusable lag trailing the desired editor camera pose
     Mathematics::Axis3D                                              DesiredCameraOrigin {};     // [m] - Undamped editor camera position requested by input
     Mathematics::Axis3D                                              DesiredCameraTarget {};     // [m] - Undamped editor camera target point requested by input

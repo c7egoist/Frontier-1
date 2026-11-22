@@ -1170,8 +1170,19 @@ Editor::GizmoHandleOrdinal WorldGizmoOverlayRasterization::QueryLastGpuPickAtPix
     uint32_t BestOrd  = 0u;
     int32_t  BestDist = 9999;
 
-    if (CachedPickPatchW > 0u && CachedPickPatchH > 0u &&
-        CachedPickOrdinals.size() >= static_cast<std::size_t>(CachedPickPatchW) * CachedPickPatchH)
+    // ⚠️ A cached 5x5 pick patch is only evidence about its OWN cursor anchor. Reading it for any other
+    // cursor keeps returning the handle that was under the old cursor, which pinned the gizmo hover to a
+    // stale handle (typically a rotate arc) so translate arrows never lit up again. A patch that no longer
+    // contains the queried pixel is treated as stale and never consulted.
+    const bool PatchContainsCursor =
+        CachedPickPatchW > 0u && CachedPickPatchH > 0u &&
+        CachedPickOrdinals.size() >= static_cast<std::size_t>(CachedPickPatchW) * CachedPickPatchH &&
+        ClampedX + 2u >= CachedPickPatchX0 &&
+        ClampedX <= CachedPickPatchX0 + CachedPickPatchW + 1u &&
+        ClampedY + 2u >= CachedPickPatchY0 &&
+        ClampedY <= CachedPickPatchY0 + CachedPickPatchH + 1u;
+
+    if (PatchContainsCursor)
     {
         for (uint32_t Py = 0u; Py < CachedPickPatchH; ++Py)
         {

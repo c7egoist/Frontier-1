@@ -859,9 +859,12 @@ ClusterCutSelection ClusterPyramid::SelectMonotonicCut(
     Mathematics::Axis3D CameraWorldPosition,
     float               PixelsPerRadian,
     float               MaxAllowedPixelError,
-    bool                EnableNormalConeBackfaceCull) const
+    bool                EnableNormalConeBackfaceCull,
+    uint32_t            CoarsestLevelOverride) const
 {
     ClusterCutSelection Selection {};
+    // Effective floor = the stricter of the bake-time floor and the per-instance floor.
+    const uint32_t LevelCeiling = std::min(CoarsestAllowedLevel, CoarsestLevelOverride);
     if (Clusters.empty())
     {
         return Selection;
@@ -892,9 +895,9 @@ ClusterCutSelection ClusterPyramid::SelectMonotonicCut(
     for (uint32_t Idx = 0u; Idx < static_cast<uint32_t>(Clusters.size()); ++Idx)
     {
         const ClusterHeaderEntry& Cluster = Clusters[Idx];
-        if (Cluster.HierarchyLevel > CoarsestAllowedLevel)
+        if (Cluster.HierarchyLevel > LevelCeiling)
         {
-            continue; // Per-asset final-level cap: coarser LOD exists in the bake but is never selected
+            continue; // Per-asset/per-instance final-level cap: coarser LOD exists but is never selected
         }
         const float SelfDist = std::max(
             1.0e-3f,
@@ -906,7 +909,7 @@ ClusterCutSelection ClusterPyramid::SelectMonotonicCut(
         // When the coarser replacement is capped out, this cluster is terminal (never replaced).
         const bool CoarserCappedOut =
             Cluster.EnclosingGroupOrdinal != 0u &&
-            (static_cast<uint32_t>(Cluster.HierarchyLevel) + 1u > CoarsestAllowedLevel);
+            (static_cast<uint32_t>(Cluster.HierarchyLevel) + 1u > LevelCeiling);
         const float ProjectedSelfErrorPx    = (Cluster.FinerSelfErrorMeters / SelfDist) * SafeProjScale;
         const float ProjectedCoarserErrorPx = (CoarserCappedOut || Cluster.CoarserThresholdErrorMeters >= 1.0e20f)
             ? 1.0e30f

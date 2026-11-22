@@ -60,7 +60,7 @@ enum class ConstructCategoryRail : uint8_t
 struct ViewportDisplaySettings
 {
     uint32_t QualityTier           = 3u;     // [idx] - 0=Low, 1=Medium, 2=Standard, 3=High, 4=Ultra
-    uint32_t DebugChannelIndex     = 0u;     // [idx] - 0=Off, 1..16=Modular Debug Channels (12..16 = SDF views)
+    uint32_t DebugChannelIndex     = 0u;     // [idx] - 0=Off, 1..19=Modular Debug Channels (12..16 SDF, 17..19 Nanite clusters)
     uint32_t RenderEngineIndex     = 2u;     // [idx] - 0=MatCap, 1=OpenPbrDirect, 2=GtxSdfGi, 3=HighEndBvh4Gi, 4=PtRealtime, 5=PtFinal
     uint32_t ShadowAlgorithmIndex  = 0u;     // [idx] - 0=ContactPcss, 1=PcssPlaneAware, 2=ShadowRayMarch, 3=PcfBilinear, 4=WideTreeRayQuery
     uint32_t SdfShadowPenumbraIndex = 3u;    // [idx] - 0=PointSdf, 1=AnalyticCone, 2=VoxelClipmap, 3=VoxelConeGi, 4=HybridSobolCap, 5=SdfMcRef96Spp
@@ -76,6 +76,7 @@ struct ViewportDisplaySettings
     uint32_t PathTraceBatchSpp     = 1u;     // [spp] - PT samples accumulated per frame (1/2/4/8, HTML lab parity)
     bool     ClusterLodEnabled     = true;   // [-]   - Nanite-like cluster LOD drives the viewport BVH
     float    ClusterLodPixelError  = 1.25f;  // [px]  - Screen-space LOD error budget (0.5 quality / 1.25 balanced / 2.5 / 5 aggressive)
+    uint32_t ClusterLodCoarsestLevel = 7u;  // [lvl] - Coarsest LOD the cut may ever select (7 = uncapped, 0 = finest only)
     bool     AtmosphereSkyEnabled  = true;   // [-]   - Physical Bruneton/Hillaire atmospheric sky toggle
     bool     VolumetricCloudsEnabled = false;// [-]   - Raymarched volumetric cloud deck toggle (default off for Clear Sky)
     bool     CloudShadowsEnabled   = false;  // [-]   - Volumetric cloud ground shadow casting toggle
@@ -138,7 +139,7 @@ public:
     void TogglePlayPause() noexcept;
     void ConfigureSplitViewport(bool SplitEnabled) noexcept;
     void ConfigureDiagnosticsVisible(bool Visible) noexcept;
-    void AdvanceDebugChannelCycle() noexcept { DisplaySettings.DebugChannelIndex = (DisplaySettings.DebugChannelIndex + 1u) % 19u; }
+    void AdvanceDebugChannelCycle() noexcept { DisplaySettings.DebugChannelIndex = (DisplaySettings.DebugChannelIndex + 1u) % 20u; }
     void ConfigureRenderSettingsSheetOpen(bool Open) noexcept;
     void ConfigureSdfPenumbraDropdownOpen(bool Open) noexcept { SdfPenumbraDropdownOpen = Open; }
     void ConfigureConstructSheetOpen(bool Open) noexcept;

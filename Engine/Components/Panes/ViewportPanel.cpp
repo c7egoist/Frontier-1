@@ -75,7 +75,7 @@ namespace
 
 [[nodiscard]] const char* QueryDebugChannelName(uint32_t Channel) noexcept
 {
-    constexpr std::array<const char*, 19> Names = {{
+    constexpr std::array<const char*, 20> Names = {{
         "Off",
         "Depth",
         "Albedo",
@@ -94,7 +94,8 @@ namespace
         "SDF AO Raw",
         "SDF Cascade",
         "Nanite LOD Level",
-        "Nanite Clusters"
+        "Nanite Clusters",
+        "Nanite Cluster Density"
     }};
     return Names[std::min<std::size_t>(Channel, Names.size() - 1u)];
 }
@@ -1340,6 +1341,33 @@ void ViewportPanel::RenderSettingsSheet(
                 }
             }
             RowY += 32.0f;
+
+            // LOD floor: the coarsest level the monotonic cut may ever select. Level 0 keeps the
+            // finest clusters only (glass, thin shells); + = let the cut simplify further.
+            WorkspaceAppearance::ConstructWeightedText(
+                Overlay, FontWeightClass::Regular, { Sheet.X + 16.0f, RowY + 5.0f }, 11.5f,
+                WorkspaceSurfaceColors::SecondaryInk, "Min LOD Floor");
+            constexpr std::array<const char*, 5> FloorLabels = {{ "L0", "L1", "L2", "L4", "Max" }};
+            constexpr std::array<uint32_t, 5>    FloorValues = {{ 0u, 1u, 2u, 4u, 7u }};
+            const float FloorGroupW   = 204.0f;
+            const float FloorCapsuleW = (FloorGroupW - 16.0f) / 5.0f;
+            const float FloorGroupX   = Sheet.Right() - 16.0f - FloorGroupW;
+            for (uint32_t Idx = 0u; Idx < 5u; ++Idx)
+            {
+                const Rectangle2D Capsule{ FloorGroupX + static_cast<float>(Idx) * (FloorCapsuleW + 4.0f), RowY + 1.0f, FloorCapsuleW, 22.0f };
+                const bool        Active = (DisplaySettings.ClusterLodCoarsestLevel == FloorValues[Idx]);
+                Overlay.FillRectangle(Capsule, Active ? ColorRgba{ 62, 62, 62, 255 } : ColorRgba{ 36, 36, 36, 255 }, 11.0f);
+                Overlay.StrokeRectangle(Capsule, Active ? WorkspaceSurfaceColors::PreviewGoldInk : ColorRgba{ 255, 255, 255, 16 }, 11.0f, 1.0f);
+                const float TW = WorkspaceAppearance::MeasureWeightedTextWidth(Overlay, FontWeightClass::Regular, 9.0f, FloorLabels[Idx]);
+                WorkspaceAppearance::ConstructWeightedText(
+                    Overlay, FontWeightClass::Regular, { Capsule.Center().X - TW * 0.5f, Capsule.Y + 5.0f }, 9.0f,
+                    Active ? WorkspaceSurfaceColors::PrimaryInk : ColorRgba{ 162, 162, 162, 255 }, FloorLabels[Idx]);
+                if (!AnyDropdownOpen && Capsule.Contains(Cursor) && Input.PrimaryPointer.Pressed)
+                {
+                    DisplaySettings.ClusterLodCoarsestLevel = FloorValues[Idx];
+                }
+            }
+            RowY += 32.0f;
         }
     }
 
@@ -1635,9 +1663,10 @@ void ViewportPanel::RenderSettingsSheet(
             "Debug View: SDF Cascade",
             "Debug View: Nanite LOD Level",
             "Debug View: Nanite Clusters",
+            "Debug View: Nanite Cluster Density",
         }};
         const Rectangle2D DropBounds = DropdownSelector::QuerySheetBounds(DebugButtonBounds, static_cast<uint32_t>(DebugOptions.size()));
-        const uint32_t    CurrentIdx = DisplaySettings.DebugChannelIndex % 19u;
+        const uint32_t    CurrentIdx = DisplaySettings.DebugChannelIndex % 20u;
         uint32_t          ChosenIdx  = CurrentIdx;
         if (DropdownSelector::ConstructOptionSheet(
                 Overlay,
@@ -2112,10 +2141,11 @@ void ViewportPanel::Render(
             "16 · SDF Cascade",
             "17 · Nanite LOD Level",
             "18 · Nanite Clusters",
+            "19 · Nanite Cluster Density",
         }};
         const Rectangle2D DropSheet = DropdownSelector::QuerySheetBounds(
             HeaderDebugButtonBounds, static_cast<uint32_t>(HeaderDebugOptions.size()));
-        const uint32_t CurIdx    = DisplaySettings.DebugChannelIndex % 19u;
+        const uint32_t CurIdx    = DisplaySettings.DebugChannelIndex % 20u;
         uint32_t       ChosenIdx = CurIdx;
         if (DropdownSelector::ConstructOptionSheet(
                 ActiveOverlay, HeaderDebugButtonBounds, HeaderDebugOptions.data(),

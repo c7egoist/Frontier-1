@@ -126,11 +126,14 @@ public:
     [[nodiscard]] std::vector<ClusterLodLevelSummary> SummarizeLevels() const;
 
     // Selects a crack-free monotonic LOD cut where FinerSelfError <= AllowedError < CoarserThresholdError.
+    // CoarsestLevelOverride lets one instance tighten (never loosen) the asset's bake floor, e.g. a
+    // glass pane keeps its silhouette while the same mesh used as a solid body may simplify further.
     [[nodiscard]] ClusterCutSelection SelectMonotonicCut(
         Mathematics::Axis3D CameraWorldPosition,
         float               PixelsPerRadian,
         float               MaxAllowedPixelError = 1.25f,
-        bool                EnableNormalConeBackfaceCull = false) const;
+        bool                EnableNormalConeBackfaceCull = false,
+        uint32_t            CoarsestLevelOverride = 0xFFFFFFFFu) const;
 
     [[nodiscard]] std::vector<std::byte> SerializeToBinaryBytes() const;
     [[nodiscard]] bool                   DeserializeFromBinaryBytes(std::span<const std::byte> RawBytes);

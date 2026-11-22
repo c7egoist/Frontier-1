@@ -55,6 +55,8 @@ struct WorldViewportUniformBlock
     float4                      GlobalDistanceFineCenterSpan;   // xyz = FineCenterWorld,   w = FineHalfSpanMeters
     float4                      GlobalDistanceCoarseCenterSpan; // xyz = CoarseCenterWorld, w = CoarseHalfSpanMeters
     uint4                       GlobalDistanceBakeControl;      // x = BakePhase, y = CascadeIdx, z = GdfReadyMask, w = XeGTAO (bit0 enable, bits 8..15 strength)
+    float4                      GlobalDistanceDirtyMin;         // xyz = DirtyRegionMinWorld, w = 1 dirty-region restricted rebake / 0 full rebake
+    float4                      GlobalDistanceDirtyMax;         // xyz = DirtyRegionMaxWorld, w = Reserved
 };
 
 struct GpuWideTreeEntry128
@@ -144,6 +146,7 @@ struct RayHitReading
     uint   MaterialSlot;
     uint   LodLevel;       // Nanite debug: cluster hierarchy level of the hit triangle (packed in Corner0Pad.w)
     uint   ClusterOrdinal; // Nanite debug: global cluster ordinal of the hit triangle (packed in Edge01Pad.w)
+    uint   ClusterTriangleCount; // Nanite debug: triangles inside that cluster (packed in Edge01Pad.w low byte)
 };
 
 uint PcgNext(inout uint SeedVal)
@@ -623,6 +626,7 @@ RayHitReading TraceSceneClosest(float3 Origin, float3 Dir, float MinT, float Max
     Res.MaterialSlot  = 0u;
     Res.LodLevel      = 0u;
     Res.ClusterOrdinal = 0u;
+    Res.ClusterTriangleCount = 0u;
 
     uint EntryCount = uint(WorldUniforms.SkyRadianceBvhCount.w + 0.5);
     if (EntryCount == 0u) return Res;
@@ -690,7 +694,11 @@ RayHitReading TraceSceneClosest(float3 Origin, float3 Dir, float MinT, float Max
                         Res.ShadingNormal = SmoothN;
                         Res.MaterialSlot  = uint(N2Slot.w + 0.5);
                         Res.LodLevel      = uint(SceneTriangles[TriIdx].Corner0Pad.w + 0.5);
-                        Res.ClusterOrdinal = uint(SceneTriangles[TriIdx].Edge01Pad.w + 0.5);
+                        // Edge01Pad.w packs (globalClusterOrdinal << 8) | trianglesInCluster so the
+                        // cluster view and the cluster-density view stay exactly 1:1.
+                        const uint PackedCluster = uint(SceneTriangles[TriIdx].Edge01Pad.w + 0.5);
+                        Res.ClusterOrdinal       = PackedCluster >> 8u;
+                        Res.ClusterTriangleCount = PackedCluster & 0xFFu;
                     }
                 }
             }
@@ -962,6 +970,19 @@ uint QueryGlobalDistanceCascadeIndex(float3 Pos)
     float CoarseProbe = SampleGlobalDistanceCascade(1u, Pos, InCoarse);
     (void)CoarseProbe;
     return InCoarse ? 1u : 2u;
+}
+
+float3 EvaluateCategoricalPalette(uint Index)
+{
+    // 24 perceptually distinct entries (3 cycles of 8 fully saturated hues, alternating brightness)
+    const uint  Slot  = Index % 24u;
+    const float Hue   = float(Slot % 8u) * 0.125;
+    const float Value = (Slot / 8u == 0u) ? 1.0 : ((Slot / 8u == 1u) ? 0.62 : 0.85);
+    const float3 Base = float3(
+        abs(Hue * 6.0 - 3.0) - 1.0,
+        2.0 - abs(Hue * 6.0 - 2.0),
+        2.0 - abs(Hue * 6.0 - 4.0));
+    return saturate(Base) * Value;
 }
 
 float3 EvaluateSdfDistanceHeatColor(float SignedDistanceMeters, float VoxelMeters)
@@ -2693,15 +2714,22 @@ void ComputeEntry(uint3 DispatchThreadID : SV_DispatchThreadID)
             }
             else if (DebugMode == 18u)
             {
-                // Nanite Cluster ID: one vivid colour per cluster so cluster granularity is visible
-                uint CId = PrimaryHit.ClusterOrdinal + 1u;
-                float H1 = frac(float(CId) * 0.3819660113);
-                float H2 = frac(float(CId) * 0.6180339887 + 0.27);
-                float H3 = frac(float(CId) * 0.7548776662 + 0.53);
-                float3 ClusterColor = float3(H1, H2, H3);
-                ClusterColor /= max(ClusterColor.r, max(ClusterColor.g, ClusterColor.b));
-                float FormShade = 0.35 + 0.65 * saturate(dot(PrimaryHit.GeomNormal, WorldUniforms.SunDirConeTan.xyz) * 0.5 + 0.5);
-                DbgHdr = ClusterColor * FormShade;
+                // Nanite Cluster ID: 24-entry categorical palette (adjacent clusters never share a
+                // colour), flat-shaded by the geometric normal so cluster granularity reads clearly.
+                uint CId = PrimaryHit.ClusterOrdinal;
+                DbgHdr = EvaluateCategoricalPalette(CId) * (0.55 + 0.45 * saturate(PrimaryHit.GeomNormal.z * 0.5 + 0.5));
+            }
+            else if (DebugMode == 19u)
+            {
+                // Nanite Cluster Density: triangles per cluster, blue (sparse) -> green -> red (128, packed)
+                float Density = saturate(float(PrimaryHit.ClusterTriangleCount) / 128.0);
+                float3 LowDensity  = float3(0.10, 0.22, 0.92);
+                float3 MidDensity  = float3(0.15, 0.90, 0.35);
+                float3 HighDensity = float3(0.95, 0.18, 0.10);
+                float3 DensityColor = (Density < 0.5) ? lerp(LowDensity, MidDensity, Density * 2.0)
+                                                     : lerp(MidDensity, HighDensity, (Density - 0.5) * 2.0);
+                float FormShade = 0.45 + 0.55 * saturate(dot(PrimaryHit.GeomNormal, WorldUniforms.SunDirConeTan.xyz) * 0.5 + 0.5);
+                DbgHdr = DensityColor * FormShade;
             }
         }
         GBufPosMask[PixelIdx]            = float4(0.0, 0.0, 0.0, 0.0);
@@ -3295,6 +3323,19 @@ void GlobalDistanceBakeEntry(uint3 DispatchThreadID : SV_DispatchThreadID)
     float3 NormUVW    = (float3(DispatchThreadID) + 0.5) / float(GdfGridRes);
     float3 VoxelPos   = CenterSpan.xyz + (NormUVW * 2.0 - 1.0) * HalfSpan;
 
+    // Incremental rebake: an object move only invalidates the voxels around that object. Everything
+    // outside the dirty box keeps its previously baked distance, so moving the vehicle no longer
+    // re-marches the whole 64^3 grid (the cause of the multi-frame shadow stall).
+    if (WorldUniforms.GlobalDistanceDirtyMin.w > 0.5)
+    {
+        float3 DirtyMargin = float3(VoxSize * 5.5);
+        if (any(VoxelPos < WorldUniforms.GlobalDistanceDirtyMin.xyz - DirtyMargin) ||
+            any(VoxelPos > WorldUniforms.GlobalDistanceDirtyMax.xyz + DirtyMargin))
+        {
+            return; // Retain the existing field value inside this voxel
+        }
+    }
+
     uint   LinearIdx  = DispatchThreadID.z * (GdfGridRes * GdfGridRes) + DispatchThreadID.y * GdfGridRes + DispatchThreadID.x;
     uint   EntryCount = uint(WorldUniforms.SkyRadianceBvhCount.w + 0.5);
     float  MaxDist    = VoxSize * 5.5;
@@ -3458,6 +3499,24 @@ void GlobalRadiosityBakeEntry(uint3 DispatchThreadID : SV_DispatchThreadID)
     }
 
     uint  LinearIdx = DispatchThreadID.z * (GdfGridRes * GdfGridRes) + DispatchThreadID.y * GdfGridRes + DispatchThreadID.x;
+
+    float4 CenterSpan = WorldUniforms.GlobalDistanceFineCenterSpan;
+    float  HalfSpan   = max(0.25, CenterSpan.w);
+    float3 NormUVW    = (float3(DispatchThreadID) + 0.5) / float(GdfGridRes);
+    float3 VoxelPos   = CenterSpan.xyz + (NormUVW * 2.0 - 1.0) * HalfSpan;
+
+    // Incremental update: only re-light the voxels the moved object invalidated. Everything outside
+    // keeps its previously baked radiosity, so a moving vehicle no longer re-lights the whole grid.
+    if (WorldUniforms.GlobalDistanceDirtyMin.w > 0.5)
+    {
+        float3 DirtyMargin = float3((2.0 * max(0.25, WorldUniforms.GlobalDistanceCoarseCenterSpan.w)) / float(GdfGridRes) * 5.5);
+        if (any(VoxelPos < WorldUniforms.GlobalDistanceDirtyMin.xyz - DirtyMargin) ||
+            any(VoxelPos > WorldUniforms.GlobalDistanceDirtyMax.xyz + DirtyMargin))
+        {
+            return;
+        }
+    }
+
     uint2 ShellMeta = GlobalSurfaceShellBuffer[LinearIdx];
     float Opacity   = float((ShellMeta.y >> 16u) & 0xFFFFu) * (1.0 / 65535.0);
     if (Opacity <= 0.01)
@@ -3468,11 +3527,6 @@ void GlobalRadiosityBakeEntry(uint3 DispatchThreadID : SV_DispatchThreadID)
         }
         return;
     }
-
-    float4 CenterSpan = WorldUniforms.GlobalDistanceFineCenterSpan;
-    float  HalfSpan   = max(0.25, CenterSpan.w);
-    float3 NormUVW    = (float3(DispatchThreadID) + 0.5) / float(GdfGridRes);
-    float3 VoxelPos   = CenterSpan.xyz + (NormUVW * 2.0 - 1.0) * HalfSpan;
     float  SignedDist = GlobalDistanceFieldBuffer[LinearIdx];
     float3 SurfN      = UnpackOctNormal32(ShellMeta.x);
     float3 SurfPos    = VoxelPos - SurfN * clamp(SignedDist, -HalfSpan, HalfSpan);

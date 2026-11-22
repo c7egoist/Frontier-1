@@ -195,9 +195,11 @@ struct WorldViewportUniformBlockStd140
     float                        GlobalDistanceFineCenterSpan[4]   {};
     float                        GlobalDistanceCoarseCenterSpan[4] {};
     uint32_t                     GlobalDistanceBakeControl[4]      {};
+    float                        GlobalDistanceDirtyMin[4]         {}; // xyz = DirtyRegionMinWorld, w = 1 restricted rebake
+    float                        GlobalDistanceDirtyMax[4]         {}; // xyz = DirtyRegionMaxWorld
 };
 
-static_assert(sizeof(WorldViewportUniformBlockStd140) == 2960u, "WorldViewportUniformBlockStd140 must equal 2960 bytes.");
+static_assert(sizeof(WorldViewportUniformBlockStd140) == 2992u, "WorldViewportUniformBlockStd140 must equal 2992 bytes.");
 
 struct GpuShadedTriangle96
 {
@@ -642,6 +644,12 @@ void VulkanWorldRenderSequence::TeardownSequence() noexcept
     BoundDevice                     = nullptr;
     SceneUploadedOnce               = false;
     GlobalDistanceFieldReady        = false;
+    GlobalDistanceReport            = {};
+    GdfDirtyActive                  = false;
+    GdfNeedsFullRebuild             = true;
+    GdfFocusValid                   = false;
+    CachedGdfInstanceCentres.clear();
+    CachedGdfSceneBoundsSeeded      = false;
     SkyViewLutValid                 = false;
     LastSkyViewUniformSnapshot.fill(0u);
     LastRadiosityLightingSignature  = 0ull;
@@ -827,11 +835,38 @@ bool VulkanWorldRenderSequence::DispatchGpuScenePrecompute(const WorldSceneSpeci
         : Mathematics::NormalizeAxis(Scene.Sun.DirectionToSun, { 0.42f, -0.55f, 0.72f });
     LastSyncedSunDir = SunDir;
 
-    const Mathematics::Axis3D FocusCenter = (Scene.SceneTree.RootBoundsMin + Scene.SceneTree.RootBoundsMax) * 0.5f;
+    const Mathematics::Axis3D SceneCenter = (Scene.SceneTree.RootBoundsMin + Scene.SceneTree.RootBoundsMax) * 0.5f;
     const Mathematics::Axis3D BoundsSpan  = Scene.SceneTree.RootBoundsMax - Scene.SceneTree.RootBoundsMin;
     const float MaxHalfExtent = 0.5f * std::max({ std::abs(BoundsSpan.X), std::abs(BoundsSpan.Y), std::abs(BoundsSpan.Z), 5.6f });
-    const float FineGdfHalf   = std::clamp(MaxHalfExtent * 1.18f, 3.2f, 4.2f);
+
+    // Global view distance field: the cascades follow the viewpoint instead of being welded to the
+    // scene-bounds centre forever. A re-centre only happens when the view leaves the field's inner
+    // band (wide hysteresis), which keeps ordinary orbiting and vehicle authoring rebuild-free.
+    Mathematics::Axis3D FocusCenter = SceneCenter;
+    float               FineGdfHalf = std::clamp(MaxHalfExtent * 1.18f, 3.2f, 4.2f);
+    if (GdfFocusValid)
+    {
+        const Mathematics::Axis3D FocusRel  = GdfFocusWorld - SceneCenter;
+        const float               FocusDist = std::sqrt(Mathematics::EvaluateDot(FocusRel, FocusRel));
+        if (FocusDist > 0.62f * FineGdfHalf)
+        {
+            FocusCenter = GdfFocusWorld;
+            FineGdfHalf = std::clamp((FocusDist + MaxHalfExtent) * 1.18f, 3.2f, 24.0f);
+            GdfNeedsFullRebuild = true; // A moved cascade centre invalidates every baked voxel
+            GdfDirtyActive      = false;
+        }
+    }
+
     const float CoarseGdfHalf = std::max(FineGdfHalf * 3.0f, MaxHalfExtent * 1.18f);
+    const bool CenterChanged =
+        CachedFineGdfCenterSpan[0] != FocusCenter.X ||
+        CachedFineGdfCenterSpan[1] != FocusCenter.Y ||
+        CachedFineGdfCenterSpan[2] != FocusCenter.Z ||
+        CachedFineGdfCenterSpan[3] != FineGdfHalf;
+    if (CenterChanged)
+    {
+        GdfNeedsFullRebuild = true;
+    }
     CachedFineGdfCenterSpan[0]   = FocusCenter.X;
     CachedFineGdfCenterSpan[1]   = FocusCenter.Y;
     CachedFineGdfCenterSpan[2]   = FocusCenter.Z;
@@ -976,6 +1011,27 @@ bool VulkanWorldRenderSequence::DispatchGpuScenePrecompute(const WorldSceneSpeci
     std::memcpy(Uniforms.GlobalDistanceCoarseCenterSpan, CachedCoarseGdfCenterSpan, sizeof(CachedCoarseGdfCenterSpan));
     Uniforms.GlobalDistanceBakeControl[2] = 1u;
 
+    // Dirty-region restriction: only valid once a field already exists (a first build must fill all voxels).
+    const bool RestrictBakeToDirtyRegion = GdfDirtyActive && !GdfNeedsFullRebuild && GlobalDistanceFieldReady;
+    Uniforms.GlobalDistanceDirtyMin[0]   = GdfDirtyMinimumWorld[0];
+    Uniforms.GlobalDistanceDirtyMin[1]   = GdfDirtyMinimumWorld[1];
+    Uniforms.GlobalDistanceDirtyMin[2]   = GdfDirtyMinimumWorld[2];
+    Uniforms.GlobalDistanceDirtyMin[3]   = RestrictBakeToDirtyRegion ? 1.0f : 0.0f;
+    Uniforms.GlobalDistanceDirtyMax[0]   = GdfDirtyMaximumWorld[0];
+    Uniforms.GlobalDistanceDirtyMax[1]   = GdfDirtyMaximumWorld[1];
+    Uniforms.GlobalDistanceDirtyMax[2]   = GdfDirtyMaximumWorld[2];
+    Uniforms.GlobalDistanceDirtyMax[3]   = 0.0f;
+    {
+        const float DirtySpanX = std::max(0.0f, GdfDirtyMaximumWorld[0] - GdfDirtyMinimumWorld[0]);
+        const float DirtySpanY = std::max(0.0f, GdfDirtyMaximumWorld[1] - GdfDirtyMinimumWorld[1]);
+        const float DirtySpanZ = std::max(0.0f, GdfDirtyMaximumWorld[2] - GdfDirtyMinimumWorld[2]);
+        GlobalDistanceReport.LastDirtyExtentMeters = std::max({ DirtySpanX, DirtySpanY, DirtySpanZ });
+        const float CascadeVolume = std::max(1.0e-4f, 8.0f * FineGdfHalf * FineGdfHalf * FineGdfHalf);
+        GlobalDistanceReport.LastDirtyFraction = RestrictBakeToDirtyRegion
+            ? std::clamp((DirtySpanX * DirtySpanY * DirtySpanZ) / CascadeVolume, 0.0f, 1.0f)
+            : 1.0f;
+    }
+
     constexpr uint64_t UniformStrideBytes = 8192ull;
     EnsureBufferCapacity(UniformBuffer, UniformStrideBytes * 12ull, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     uint8_t* UniformHostBytes = reinterpret_cast<uint8_t*>(UniformBuffer.HostAddress);
@@ -1057,14 +1113,16 @@ bool VulkanWorldRenderSequence::DispatchGpuScenePrecompute(const WorldSceneSpeci
     else
     {
         const auto CascadeSlots = ConstructPrecomputeSlots(0ull);
+        const auto FieldStart   = std::chrono::steady_clock::now();
         if (!DispatchEncoder.EncodeComputeDispatch(Cmd, ShadowCascadeProgramHandle, CascadeSlots, 128u, 128u, 2u))
         {
             BoundDevice->FreeCommandBuffer(Cmd);
             return false;
         }
 
+        const bool FullGdfRebuild = RebuildGeometryFields || GdfNeedsFullRebuild || !GlobalDistanceFieldReady;
         const bool DoBakeGdf =
-            (RebuildGeometryFields || !GlobalDistanceFieldReady) &&
+            (FullGdfRebuild || GdfDirtyActive) &&
             (GlobalDistanceBakeProgramHandle != UINT32_MAX);
         if (DoBakeGdf)
         {
@@ -1090,7 +1148,10 @@ bool VulkanWorldRenderSequence::DispatchGpuScenePrecompute(const WorldSceneSpeci
         if (GlobalRadiosityProgramHandle != UINT32_MAX)
         {
             constexpr std::array<uint32_t, 8u> PhaseGroupCounts {{ 16u, 8u, 4u, 2u, 16u, 8u, 4u, 2u }};
-            for (uint32_t Phase = 0u; Phase < 8u; ++Phase)
+            // A dirty-region update only re-lights the invalidated voxels (the shader early-outs
+            // everywhere else), so the radiosity pyramid stays hot without a full-grid stall.
+            const uint32_t PhaseCount = 8u;
+            for (uint32_t Phase = 0u; Phase < PhaseCount; ++Phase)
             {
                 const uint64_t UniOffs = static_cast<uint64_t>(3u + Phase) * UniformStrideBytes;
                 WorldViewportUniformBlockStd140 RadUni = Uniforms;
@@ -1113,6 +1174,26 @@ bool VulkanWorldRenderSequence::DispatchGpuScenePrecompute(const WorldSceneSpeci
         else if (DoBakeGdf)
         {
             GlobalDistanceFieldReady = true;
+        }
+
+        if (DoBakeGdf)
+        {
+            const auto FieldEnd = std::chrono::steady_clock::now();
+            GlobalDistanceReport.Ready                    = GlobalDistanceFieldReady;
+            GlobalDistanceReport.LastUpdateMilliseconds   = static_cast<float>(
+                std::chrono::duration<double, std::milli>(FieldEnd - FieldStart).count());
+            if (FullGdfRebuild)
+            {
+                ++GlobalDistanceReport.RebuildCount;
+                GlobalDistanceReport.LastDirtyFraction = 1.0f;
+                GdfDirtyActive                         = false;
+                GdfNeedsFullRebuild                    = false;
+            }
+            else
+            {
+                ++GlobalDistanceReport.IncrementalUpdateCount;
+                GdfDirtyActive = false;
+            }
         }
     }
 
@@ -1166,6 +1247,14 @@ void VulkanWorldRenderSequence::UploadSolarCascadeDepth(const WorldSceneSpecific
         const float FallbackDepth[4]{ 60.0f, 60.0f, 60.0f, 60.0f };
         UploadToDeviceBuffer(SolarShadowDepthBuffer, FallbackDepth, sizeof(FallbackDepth), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     }
+}
+
+void VulkanWorldRenderSequence::ConfigureGlobalDistanceFieldFocus(
+    Mathematics::Axis3D FocusWorld,
+    bool                ViewValid) noexcept
+{
+    GdfFocusWorld = FocusWorld;
+    GdfFocusValid = ViewValid;
 }
 
 void VulkanWorldRenderSequence::SynchronizeSceneResources(
@@ -1226,7 +1315,7 @@ void VulkanWorldRenderSequence::SynchronizeSceneResources(
                 OutTri.Normal2Slot[2] = Smooth.Normal2.Z;
                 OutTri.Normal2Slot[3] = static_cast<float>(Prim.MaterialOrdinal);
                 OutTri.Corner0Pad[3]  = 0.0f; // full-res: LOD level 0
-                OutTri.Edge01Pad[3]   = static_cast<float>(Idx / 128u); // full-res pseudo-cluster (128-tri groups)
+                OutTri.Edge01Pad[3]   = static_cast<float>(((Idx / 128u) << 8u) | 128u); // full-res pseudo-cluster (128-tri groups)
                 ShadedTris[Idx]       = OutTri;
             }
         }
@@ -1306,7 +1395,7 @@ void VulkanWorldRenderSequence::SynchronizeSceneResources(
                 OutTri.Normal2Slot[2] = SmoothCorners[2u].Z;
                 OutTri.Normal2Slot[3] = static_cast<float>(Prim.MaterialOrdinal);
                 OutTri.Corner0Pad[3]  = 0.0f; // full-res: LOD level 0
-                OutTri.Edge01Pad[3]   = static_cast<float>(Idx / 128u); // full-res pseudo-cluster (128-tri groups)
+                OutTri.Edge01Pad[3]   = static_cast<float>(((Idx / 128u) << 8u) | 128u); // full-res pseudo-cluster (128-tri groups)
                 ShadedTris[Idx]       = OutTri;
             }
         }
@@ -1410,14 +1499,112 @@ void VulkanWorldRenderSequence::SynchronizeSceneResources(
         }
     }
 
+    // 3.5. Global distance field invalidation: a moved cluster instance only dirties the box swept by
+    //      its own bounds, so the field follows the vehicle within the same frame instead of waiting
+    //      for a full-scene rebuild (previously the shadow/GI field stayed pinned at the old position
+    //      during a drag and then froze the viewport for one long rebuild when the drag ended).
+    {
+        bool        GeometryDelta = !SceneUploadedOnce || RebuildShadows;
+        bool        AnyMove       = false;
+        Mathematics::Axis3D DirtyMin {  3.0e30f,  3.0e30f,  3.0e30f };
+        Mathematics::Axis3D DirtyMax { -3.0e30f, -3.0e30f, -3.0e30f };
+
+        const auto& Instances = Scene.ClusterInstances;
+        if (CachedGdfInstanceCentres.size() != Instances.size())
+        {
+            GeometryDelta = true;
+            CachedGdfInstanceCentres.clear();
+            CachedGdfInstanceCentres.reserve(Instances.size());
+            for (const RigidClusterInstance& Inst : Instances)
+            {
+                CachedGdfInstanceCentres.push_back(Inst.WorldTranslation);
+            }
+        }
+        else
+        {
+            for (std::size_t InstIdx = 0u; InstIdx < Instances.size(); ++InstIdx)
+            {
+                const RigidClusterInstance& Inst  = Instances[InstIdx];
+                const Mathematics::Axis3D    Prior = CachedGdfInstanceCentres[InstIdx];
+                const Mathematics::Axis3D    Move  = Inst.WorldTranslation - Prior;
+                if (Mathematics::EvaluateDot(Move, Move) <= 1.0e-10f)
+                {
+                    continue;
+                }
+
+                // Union of the previous and the current footprint of this instance.
+                float LocalRadius = 0.0f;
+                if (Inst.PyramidAsset != nullptr)
+                {
+                    for (const SpatialAcceleration::ClusterHeaderEntry& Cluster : Inst.PyramidAsset->Clusters)
+                    {
+                        const float ClusterReach =
+                            std::sqrt(Mathematics::EvaluateDot(Cluster.SphereCenter, Cluster.SphereCenter)) +
+                            Cluster.SphereRadiusMeters;
+                        LocalRadius = std::max(LocalRadius, ClusterReach);
+                    }
+                }
+                const float WorldRadius = std::max(0.5f, LocalRadius * std::max(1.0e-4f, Inst.UniformScale));
+
+                for (const Mathematics::Axis3D& Centre : { Prior, Inst.WorldTranslation })
+                {
+                    DirtyMin.X = std::min(DirtyMin.X, Centre.X - WorldRadius);
+                    DirtyMin.Y = std::min(DirtyMin.Y, Centre.Y - WorldRadius);
+                    DirtyMin.Z = std::min(DirtyMin.Z, Centre.Z - WorldRadius);
+                    DirtyMax.X = std::max(DirtyMax.X, Centre.X + WorldRadius);
+                    DirtyMax.Y = std::max(DirtyMax.Y, Centre.Y + WorldRadius);
+                    DirtyMax.Z = std::max(DirtyMax.Z, Centre.Z + WorldRadius);
+                }
+                AnyMove                       = true;
+                CachedGdfInstanceCentres[InstIdx] = Inst.WorldTranslation;
+            }
+        }
+
+        // Safety net for edits that move scene-tree primitives directly (no cluster instance involved).
+        const bool BoundsMoved =
+            CachedGdfSceneBoundsSeeded &&
+            (std::fabs(CachedGdfSceneBoundsMin[0] - Scene.SceneTree.RootBoundsMin.X) > 1.0e-4f ||
+             std::fabs(CachedGdfSceneBoundsMin[1] - Scene.SceneTree.RootBoundsMin.Y) > 1.0e-4f ||
+             std::fabs(CachedGdfSceneBoundsMin[2] - Scene.SceneTree.RootBoundsMin.Z) > 1.0e-4f ||
+             std::fabs(CachedGdfSceneBoundsMax[0] - Scene.SceneTree.RootBoundsMax.X) > 1.0e-4f ||
+             std::fabs(CachedGdfSceneBoundsMax[1] - Scene.SceneTree.RootBoundsMax.Y) > 1.0e-4f ||
+             std::fabs(CachedGdfSceneBoundsMax[2] - Scene.SceneTree.RootBoundsMax.Z) > 1.0e-4f);
+        if (BoundsMoved && !AnyMove)
+        {
+            GeometryDelta = true;
+        }
+        CachedGdfSceneBoundsMin[0] = Scene.SceneTree.RootBoundsMin.X;
+        CachedGdfSceneBoundsMin[1] = Scene.SceneTree.RootBoundsMin.Y;
+        CachedGdfSceneBoundsMin[2] = Scene.SceneTree.RootBoundsMin.Z;
+        CachedGdfSceneBoundsMax[0] = Scene.SceneTree.RootBoundsMax.X;
+        CachedGdfSceneBoundsMax[1] = Scene.SceneTree.RootBoundsMax.Y;
+        CachedGdfSceneBoundsMax[2] = Scene.SceneTree.RootBoundsMax.Z;
+        CachedGdfSceneBoundsSeeded = true;
+
+        GdfDirtyMinimumWorld[0] = DirtyMin.X;
+        GdfDirtyMinimumWorld[1] = DirtyMin.Y;
+        GdfDirtyMinimumWorld[2] = DirtyMin.Z;
+        GdfDirtyMaximumWorld[0] = DirtyMax.X;
+        GdfDirtyMaximumWorld[1] = DirtyMax.Y;
+        GdfDirtyMaximumWorld[2] = DirtyMax.Z;
+        GdfDirtyActive          = AnyMove && !GeometryDelta;
+
+        const bool FieldUsable = GlobalDistanceFieldReady && !GdfNeedsFullRebuild;
+        if (GeometryDelta || !FieldUsable)
+        {
+            GdfNeedsFullRebuild = true;
+            GdfDirtyActive      = false;
+        }
+    }
+
     // 4. Build Two-Cascade Solar Shadow Depth + Global Distance Field + 2-Bounce Radiosity Volume on GPU
     if (RebuildShadows || !SceneUploadedOnce || SolarShadowDepthBuffer.BufferHandle == VK_NULL_HANDLE)
     {
         UploadSolarCascadeDepth(Scene);
     }
-    else if (GlobalDistanceFieldReady)
+    else if (GlobalDistanceFieldReady || GdfDirtyActive)
     {
-        (void)DispatchGpuScenePrecompute(Scene, false);
+        (void)DispatchGpuScenePrecompute(Scene, false); // Dirty-region refresh only
     }
     LastRadiosityLightingSignature = 0ull;
 
@@ -1494,7 +1681,9 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
         const Mathematics::Axis3D LocalCamera = (Camera.CameraOrigin - Inst.WorldTranslation) * (1.0f / Scale);
         InstanceCut Cut {};
         Cut.InstanceIndex = InstIdx;
-        Cut.Selection     = Inst.PyramidAsset->SelectMonotonicCut(LocalCamera, PixelsPerRadian, PixelError, false);
+        // Effective floor: the stricter of the per-instance floor and the viewport-wide floor.
+        const uint32_t LevelFloor = std::min(Inst.CoarsestLodLevel, Config.NaniteCoarsestLevel);
+        Cut.Selection     = Inst.PyramidAsset->SelectMonotonicCut(LocalCamera, PixelsPerRadian, PixelError, false, LevelFloor);
         ActiveClusters += static_cast<uint32_t>(Cut.Selection.ActiveClusterIndices.size());
         ActiveTriangles += Cut.Selection.ActiveTriangleCount;
         MixSignature(InstIdx + 1u);
@@ -1518,7 +1707,9 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
     std::vector<SpatialAcceleration::TriangleSmoothNormals> LodNormals;
     std::vector<uint32_t> LodPrimLevel;   // per PrimitiveOrdinal: hierarchy level (debug channel 17)
     std::vector<uint32_t> LodPrimCluster; // per PrimitiveOrdinal: global cluster ordinal (debug channel 18)
+    std::vector<uint32_t> LodPrimClusterTriangleCount; // per PrimitiveOrdinal: triangles in that cluster (channel 19)
     LodPrims.reserve(std::max(1u, ActiveTriangles));
+    LodPrimClusterTriangleCount.reserve(std::max(1u, ActiveTriangles));
     LodNormals.reserve(std::max(1u, ActiveTriangles));
     LodPrimLevel.reserve(std::max(1u, ActiveTriangles));
     LodPrimCluster.reserve(std::max(1u, ActiveTriangles));
@@ -1554,6 +1745,7 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
                 Prim.PrimitiveOrdinal = PrimOrdinal++;
                 LodPrimLevel.push_back(Level);
                 LodPrimCluster.push_back(ThisClusterOrdinal);
+                LodPrimClusterTriangleCount.push_back(Cluster.TriangleCount);
                 LodPrims.push_back(Prim);
                 SpatialAcceleration::TriangleSmoothNormals Smooth {};
                 Smooth.Normal0 = GeometrySpace::UnpackOctahedralDirection32(Tri.PackedNormal0);
@@ -1612,10 +1804,16 @@ void VulkanWorldRenderSequence::RefreshNaniteLodGeometry(
         OutTri.Normal2Slot[1] = N2.Y;
         OutTri.Normal2Slot[2] = N2.Z;
         OutTri.Normal2Slot[3] = static_cast<float>(Prim.MaterialOrdinal);
-        // Nanite debug packing in spare pad lanes: level in Corner0Pad.w, cluster in Edge01Pad.w
+        // Nanite debug packing in spare pad lanes: level in Corner0Pad.w,
+        // (clusterOrdinal << 8 | trianglesInCluster) in Edge01Pad.w so the cluster view and the
+        // cluster-density view describe exactly the same cluster.
         const uint32_t Ord = Prim.PrimitiveOrdinal;
         OutTri.Corner0Pad[3] = (Ord < LodPrimLevel.size()) ? static_cast<float>(LodPrimLevel[Ord]) : 0.0f;
-        OutTri.Edge01Pad[3]  = (Ord < LodPrimCluster.size()) ? static_cast<float>(LodPrimCluster[Ord]) : 0.0f;
+        const uint32_t ClusterOrd  = (Ord < LodPrimCluster.size()) ? LodPrimCluster[Ord] : 0u;
+        const uint32_t ClusterTris = (Ord < LodPrimClusterTriangleCount.size())
+            ? std::min(255u, LodPrimClusterTriangleCount[Ord])
+            : 128u;
+        OutTri.Edge01Pad[3] = static_cast<float>((ClusterOrd << 8u) | ClusterTris);
         ShadedTris[Idx]       = OutTri;
     }
     const uint64_t TriBytes = ShadedTris.size() * sizeof(GpuShadedTriangle96);
@@ -1929,6 +2127,25 @@ bool VulkanWorldRenderSequence::ExecuteWorldRenderDispatch(
     if (!SceneUploadedOnce)
     {
         SynchronizeSceneResources(Scene, true);
+    }
+    // View-centred global distance field: the cascades track the viewpoint with wide hysteresis so
+    // the field never stays welded to one spot while the user flies away from it.
+    ConfigureGlobalDistanceFieldFocus(Camera.CameraOrigin, true);
+    if (GlobalDistanceFieldReady)
+    {
+        const Mathematics::Axis3D FineCenter {
+            CachedFineGdfCenterSpan[0],
+            CachedFineGdfCenterSpan[1],
+            CachedFineGdfCenterSpan[2],
+        };
+        const Mathematics::Axis3D FocusRel = Camera.CameraOrigin - FineCenter;
+        const float FocusDist = std::sqrt(Mathematics::EvaluateDot(FocusRel, FocusRel));
+        if (FocusDist > 0.62f * std::max(0.25f, CachedFineGdfCenterSpan[3]))
+        {
+            // One re-centre rebuild, then the field is local to the view again (no per-frame churn).
+            GdfNeedsFullRebuild = true;
+            (void)DispatchGpuScenePrecompute(Scene, false);
+        }
     }
     RefreshNaniteLodGeometry(Config, Camera, Scene);
 

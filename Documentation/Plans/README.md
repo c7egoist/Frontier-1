@@ -23,6 +23,7 @@
 | [CelestialSkyCloudsSystemPlan.md](CelestialSkyCloudsSystemPlan.md) | Physical 3-LUT sky, solar/lunar ephemeris & single-source `PlanetaryClouds` |
 | [NetworkingPolicyBringupPlan.md](NetworkingPolicyBringupPlan.md) | UDP/TCP socket transport & snapshot replication policy |
 | [RemediationInputCameraPlan.md](RemediationInputCameraPlan.md) | Input exchange & orbit/fly camera remediation |
+| [ViewportCameraSdfNaniteRemediationReport.md](ViewportCameraSdfNaniteRemediationReport.md) | **🟢 Remediation Report (`2026-11-22`)**: RMB look rate (23.4 % → 100 %), stale gizmo pick patch, incremental global distance field (dirty-region rebake + view-following cascades), Nanite LOD floor + cluster density debug view |
 
 ---
 
