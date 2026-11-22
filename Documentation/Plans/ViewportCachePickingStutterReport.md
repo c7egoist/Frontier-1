@@ -103,6 +103,20 @@ Measured: across a `96x64` UV sweep, `2966` rays hit the coarse world AABB but o
 
 `./build/NaniteViewportVehicleValidation` — `near 16,116 tris` vs `far 9,370 tris` (`L0 1,600 / L1 3,802 / L2 3,968`) vs `far LOD-off 25,080 tris`.
 
+### 6.1 Frame-Pacing Proof (`FrontierEditor --frames=120`)
+
+A `120`-frame `FrontierEditor` capture on the same `2`-vCPU SwiftShader machine gives a directly comparable `FrontierTiming.log`:
+
+| Stage | Median | p95 | Max |
+| :--- | ---: | ---: | ---: |
+| `SceneSync` | `0.00 ms` | `0.00 ms` | `15.92 ms` (warm-up only) |
+| `Gizmo` | `0.00 ms` | `0.00 ms` | `0.61 ms` |
+| `UI` | `1.16 ms` | `1.85 ms` | `10.45 ms` |
+| `Present` | `195.37 ms` | `235.33 ms` | `256.41 ms` (software rasteriser) |
+| **Unaccounted gap (`F >= 10`)** | **`0.08 ms`** | **`0.12 ms`** | **`0.17 ms`** |
+
+**Zero** steady-state frames exceed the `15 ms` unaccounted-gap threshold (previously `692`), and there are **zero** `Gizmo` spikes (previously `21`, max `30.10 ms`) because the synchronous `9x9` GPU hover readback is gone. The only remaining `> 15 ms` gaps are `F=1..3` (`2,474 / 2,650 / 3,984 ms`) — one-time Vulkan device creation plus SwiftShader Subzero JIT compilation of the seven compute pipelines, which is startup work that no per-frame change can absorb.
+
 ---
 
 ## 7. Files Touched
