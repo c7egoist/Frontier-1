@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#111419" />
+    <title>AO Workbench · Algorithm Comparison Lab</title>
+    <link rel="stylesheet" href="./ao-workbench.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <div class="brand-mark" aria-hidden="true">AO</div>
+          <div>
+            <div class="eyebrow">SHADOW ALGORITHM LAB</div>
+            <h1>Ambient Occlusion Workbench</h1>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <span class="live-dot"></span>
+          <span id="deviceLabel">WebGL 2 · loading vehicle</span>
+          <button id="benchmarkButton" class="button button-primary" disabled>Benchmark methods</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="viewport-column" aria-label="Ambient occlusion preview">
+          <div class="viewport-toolbar">
+            <div class="method-tabs" id="methodTabs" role="tablist" aria-label="AO method"></div>
+            <div class="viewport-actions">
+              <button id="compareButton" class="button button-quiet" aria-pressed="false">Compare 5-up</button>
+              <button id="panModeButton" class="button button-quiet" aria-pressed="false" title="Toggle drag-to-pan mode">Pan mode</button>
+              <button id="resetViewButton" class="button button-quiet" title="Center the ControlVehicle and reset camera orbit, pan, and zoom">Frame vehicle</button>
+            </div>
+          </div>
+          <div class="canvas-frame" id="canvasFrame">
+            <canvas id="aoCanvas" aria-label="Grayscale ambient occlusion view of the ControlVehicle"></canvas>
+            <div class="canvas-vignette" aria-hidden="true"></div>
+            <div class="canvas-hud">
+              <span class="hud-pill"><span class="live-dot"></span><span id="renderStatus">Preparing AO clipmaps</span></span>
+              <div class="camera-hud-controls" aria-label="Camera controls">
+                <button id="panModeHudButton" class="hud-control" type="button" aria-pressed="false" title="Toggle drag-to-pan mode">Pan mode</button>
+                <button id="frameVehicleHudButton" class="hud-control" type="button" title="Center and frame the whole vehicle">Frame</button>
+              </div>
+              <span class="hud-pill">AO only · white = open · black = occluded</span>
+            </div>
+            <div id="compareLegend" class="compare-legend" hidden></div>
+            <div id="canvasMessage" class="canvas-message" hidden></div>
+            <div class="drag-hint">Orbit: left-drag · Pan: Pan mode or middle/right/Shift-drag · Zoom: scroll</div>
+          </div>
+          <div class="viewport-footer">
+            <span>Source mesh: <strong>ControlVehicle</strong> · body, tyres and rims</span>
+            <span id="resolutionLabel">— × —</span>
+          </div>
+        </section>
+
+        <aside class="control-rail" aria-label="AO controls and performance">
+          <section class="rail-section method-summary">
+            <div class="section-kicker">CURRENT METHOD</div>
+            <h2 id="methodTitle">Unsigned Distance Clipmap AO</h2>
+            <p id="methodDescription" class="muted"></p>
+            <div class="method-reference">
+              <a href="https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/tree/v1.1.4" target="_blank" rel="noopener noreferrer">AMD FidelityFX SDK v1.1.4 · CACAO ↗</a>
+              <p>This workbench uses an independent WebGL 2 CACAO-style approximation, not AMD’s native DirectX 12/Vulkan SDK. CACAO is not automatically better than GTAO—compare appearance and measured cost here.</p>
+            </div>
+            <div class="metric-grid">
+              <div class="metric-card">
+                <span class="metric-label">AO pass</span>
+                <strong id="selectedCost">—</strong>
+                <small id="costSource">GPU ms / frame</small>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">UDF rebuild</span>
+                <strong id="rebuildCost">—</strong>
+                <small id="rebuildDetail">not built</small>
+              </div>
+            </div>
+          </section>
+
+          <section class="rail-section">
+            <div class="section-heading">
+              <div>
+                <div class="section-kicker">SHARED QUALITY</div>
+                <h3>Sampling</h3>
+              </div>
+            </div>
+            <label class="control-row">
+              <span>AO radius <output id="radiusValue">0.85 m</output></span>
+              <input id="radiusControl" type="range" min="0.20" max="2.50" step="0.05" value="0.85" />
+            </label>
+            <label class="control-row">
+              <span title="CACAO uses this as its adaptive per-pixel sample cap; other methods use it as their sample or direction budget.">Sample budget (CACAO max) <output id="samplesValue">10</output></span>
+              <input id="samplesControl" type="range" min="4" max="32" step="2" value="10" />
+            </label>
+            <label class="control-row">
+              <span>Surface bias <output id="biasValue">0.025 m</output></span>
+              <input id="biasControl" type="range" min="0.005" max="0.120" step="0.005" value="0.025" />
+            </label>
+            <label class="control-row">
+              <span>AO strength <output id="strengthValue">1.00×</output></span>
+              <input id="strengthControl" type="range" min="0.35" max="1.80" step="0.05" value="1.00" />
+            </label>
+          </section>
+
+          <section class="rail-section clipmap-section">
+            <div class="section-heading">
+              <div>
+            <div class="section-kicker">UDF CLIPMAP</div>
+            <h3>World-space detail</h3>
+              </div>
+              <button id="rebuildButton" class="text-button" disabled>Rebuild</button>
+            </div>
+            <label class="control-row">
+              <span>Fine voxel size <output id="voxelValue">0.13 m</output></span>
+              <input id="voxelControl" type="range" min="0.07" max="0.24" step="0.01" value="0.13" />
+            </label>
+            <label class="control-row">
+              <span>Clipmap levels <output id="levelsValue">3</output></span>
+              <input id="levelsControl" type="range" min="1" max="3" step="1" value="3" />
+            </label>
+            <label class="toggle-row">
+              <span>Trilinear distance filtering</span>
+              <input id="filterControl" type="checkbox" checked />
+              <i aria-hidden="true"></i>
+            </label>
+            <div class="clipmap-readout" id="clipmapReadout">Unsigned vehicle-surface distance fields · the ground plane is evaluated exactly.</div>
+            <div class="build-progress" aria-live="polite">
+              <div class="progress-track"><div id="buildProgressBar"></div></div>
+              <span id="buildProgressText">Waiting for vehicle mesh</span>
+            </div>
+          </section>
+
+          <section class="rail-section cost-section">
+            <div class="section-heading">
+              <div>
+                <div class="section-kicker">MEASURED ON THIS DEVICE</div>
+                <h3>Method cost</h3>
+              </div>
+              <span class="info-mark" title="GPU elapsed time for the AO pass only. Clipmap construction is reported separately.">i</span>
+            </div>
+            <div id="costTable" class="cost-table"></div>
+            <p id="benchmarkStatus" class="micro-copy">Select a method or run the benchmark to collect timings.</p>
+          </section>
+
+          <section class="rail-section diagnosis-section">
+            <div class="section-kicker">WHAT TO LOOK FOR</div>
+            <h3>Why can AO look blocky at one distance?</h3>
+            <p>
+              Clipmap artifacts usually come from coarse world-space cells, a cascade switch, or too few rays—not from the car mesh changing. This benchmark locks its nested fields around the vehicle, so their pattern is stable as you dolly. A production camera-following clipmap can re-center or switch cascades as the view moves. Screen-space AO changes its world coverage with depth even when the scene is fixed.
+            </p>
+            <p class="diagnosis-note">Compare the same contact area, then vary fine voxel size. If blotches stay pinned to the surface and respond to voxel size, inspect UDF resolution/filtering; if they change with view distance or render scale, inspect screen-space radius and upscaling. Sudden changes can indicate a cascade transition.</p>
+          </section>
+        </aside>
+      </main>
+      <footer class="app-footer">
+        <span>Grayscale visibility only · no albedo, direct lighting, or tone-mapped beauty pass</span>
+        <span>Reference path: exact ControlVehicle BLAS rays · <a href="./UdfClipmapPorting.md">UDF clipmap C++ port notes</a></span>
+      </footer>
+    </div>
+    <script type="module" src="./ao-workbench.js"></script>
+  </body>
+</html>
