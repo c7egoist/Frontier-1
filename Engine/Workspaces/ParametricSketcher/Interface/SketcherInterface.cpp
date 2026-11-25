@@ -13082,8 +13082,11 @@ void ExportBodies(SketcherWorkspaceStatus& State, const std::string& Path)
     if (!Session.Export.Refusal.empty()) { Announce(State, "Refused: " + Session.Export.Refusal); return; }
     ++Session.Exports;
     const SketcherExportOutcome& Export = Session.Export;
-    const std::string Figures = Export.Format == SketcherExchangeFormat::Step ? Compose("%d face(s)%s", Export.Faces, Export.Approximated > 0 ? Compose(" · %d certified stand-in(s)", Export.Approximated).c_str() : "")
-                                                                             : Compose("%d facet(s)", Export.Triangles);
+    const std::string Figures = Export.Format == SketcherExchangeFormat::Step
+        ? Compose("%d face(s)%s", Export.Faces, Export.Approximated > 0 ? Compose(" · %d certified stand-in(s)", Export.Approximated).c_str() : "")
+        : Export.Format == SketcherExchangeFormat::SolidArc
+            ? Compose("%d face(s) · GeometrySpace + Curve + DistanceField", Export.Faces)
+            : Compose("%d face(s)", Export.Triangles);
     Announce(State, Compose("Exported %d body(ies) as %s → %s · %s · %.0f bytes · %.0f ms", int(Export.Bodies.size()), SketcherExchangeFormatLabel(Export.Format), Path.c_str(),
                             Figures.c_str(), Export.Bytes, Export.Milliseconds));
 }
