@@ -1,0 +1,37 @@
+=== Frontier lighting architecture validation ===
+image 64x36, 32 frames, candidate sweep 1/4/16
+AtriumDaylight   UniformLightPick     lights=  20 treeNodes=  39 err@4=16.21% err@16=8.33% bias=-0.16% var=1.48e+0 ms=2.4
+AtriumDaylight   LightTreeCut         lights=  20 treeNodes=  39 err@4=14.67% err@16=7.57% bias=-0.24% var=1.15e+0 ms=7.3
+AtriumDaylight   SharedLightTreeCut   lights=  20 treeNodes=  39 err@4=18.46% err@16=9.32% bias=-0.26% var=1.76e+0 ms=4.0
+AtriumDaylight   DeterministicPolygon lights=  20 exact reference in 28.5 ms/frame (57.5 ms first pass)
+NightArrival     UniformLightPick     lights=  57 treeNodes= 113 err@4=57.95% err@16=27.90% bias=-0.02% var=4.10e-1 ms=2.3
+NightArrival     LightTreeCut         lights=  57 treeNodes= 113 err@4=29.12% err@16=33.90% bias=-3.15% var=9.43e-2 ms=9.8
+NightArrival     SharedLightTreeCut   lights=  57 treeNodes= 113 err@4=23.37% err@16=15.90% bias=-2.92% var=6.24e-2 ms=6.9
+NightArrival     DeterministicPolygon lights=  57 exact reference in 48.6 ms/frame (103.1 ms first pass)
+GalleryMixed     UniformLightPick     lights=  78 treeNodes= 155 err@4=9.31% err@16=7.51% bias=-1.56% var=1.64e-1 ms=3.1
+GalleryMixed     LightTreeCut         lights=  78 treeNodes= 155 err@4=8.10% err@16=9.99% bias=-5.00% var=3.50e-2 ms=12.6
+GalleryMixed     SharedLightTreeCut   lights=  78 treeNodes= 155 err@4=8.39% err@16=7.51% bias=-2.66% var=5.52e-2 ms=8.0
+GalleryMixed     DeterministicPolygon lights=  78 exact reference in 97.7 ms/frame (150.0 ms first pass)
+
+=== single shading point (GalleryMixed) ===
+UniformLightPick     candidates=  1 mean/ref=105.08% relErr=5.08% ±4.25% rsd=255.8% frames@5%=2618
+UniformLightPick     candidates=  4 mean/ref=109.67% relErr=9.67% ±2.80% rsd=161.7% frames@5%=1046
+UniformLightPick     candidates= 16 mean/ref=104.20% relErr=4.20% ±1.73% rsd=104.8% frames@5%=440
+UniformLightPick     candidates= 64 mean/ref=104.97% relErr=4.97% ±1.60% rsd=96.3% frames@5%=371
+LightTreeCut         candidates=  1 mean/ref=102.85% relErr=2.85% ±0.67% rsd=41.3% frames@5%=69
+LightTreeCut         candidates=  4 mean/ref=103.46% relErr=3.46% ±0.34% rsd=20.6% frames@5%=17
+LightTreeCut         candidates= 16 mean/ref=104.82% relErr=4.82% ±1.46% rsd=88.0% frames@5%=310
+LightTreeCut         candidates= 64 mean/ref=104.96% relErr=4.96% ±0.81% rsd=49.0% frames@5%=97
+SharedLightTreeCut   candidates=  1 mean/ref=103.49% relErr=3.49% ±1.32% rsd=80.8% frames@5%=261
+SharedLightTreeCut   candidates=  4 mean/ref=105.28% relErr=5.28% ±1.12% rsd=67.5% frames@5%=183
+SharedLightTreeCut   candidates= 16 mean/ref=104.60% relErr=4.60% ±1.02% rsd=61.8% frames@5%=153
+SharedLightTreeCut   candidates= 64 mean/ref=104.75% relErr=4.75% ±1.00% rsd=60.6% frames@5%=148
+
+=== visibility tiers (NightArrival) === relError=4.33% pixelDisagreement(10%)=5.1%
+224x126 frame UniformLightPick     35.4 ms
+224x126 frame LightTreeCut         167.9 ms
+224x126 frame SharedLightTreeCut   94.1 ms
+224x126 frame DeterministicPolygon 621.8 ms
+light tree build 0.619 ms (57 luminaires)
+
+Wrote ValidationReport.json and ValidationTables.md

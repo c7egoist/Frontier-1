@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Frontier — Lighting Architecture Studio</title>
+<style>
+:root
+{
+    --InkWell: #0d1014;
+    --PanelWell: #14181f;
+    --PanelRaised: #1b212b;
+    --Hairline: #2a3341;
+    --Prose: #dfe6ef;
+    --ProseDim: #93a1b3;
+    --Signal: #7fd4c1;
+    --Warning: #e0a75c;
+    --Error: #e2705f;
+}
+* { box-sizing: border-box; }
+html, body
+{
+    margin: 0; height: 100%; background: var(--InkWell); color: var(--Prose);
+    font: 13px/1.45 ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+}
+header
+{
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    padding: 14px 20px; border-bottom: 1px solid var(--Hairline); background: var(--PanelWell);
+}
+header h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.02em; }
+header .Subtle { color: var(--ProseDim); font-size: 12px; }
+main { display: grid; grid-template-columns: 1fr 320px; gap: 0; min-height: calc(100% - 58px); }
+#StageColumn { padding: 16px 20px 28px; overflow: auto; }
+#SideColumn
+{
+    border-left: 1px solid var(--Hairline); background: var(--PanelWell);
+    padding: 16px 16px 28px; overflow: auto;
+}
+.LobbyTabs { display: flex; gap: 8px; flex-wrap: wrap; }
+.LobbyTab
+{
+    border: 1px solid var(--Hairline); background: var(--PanelRaised); color: var(--ProseDim);
+    padding: 6px 12px; border-radius: 999px; cursor: pointer; font-size: 12px;
+}
+.LobbyTab[aria-selected="true"] { color: #0d1014; background: var(--Signal); border-color: var(--Signal); font-weight: 600; }
+.TileGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.Tile
+{
+    border: 1px solid var(--Hairline); border-radius: 8px; overflow: hidden; background: #05070a;
+    display: flex; flex-direction: column;
+}
+.Tile canvas { width: 100%; height: auto; display: block; image-rendering: auto; cursor: zoom-in; }
+.TileHead
+{
+    display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+    padding: 8px 10px; background: var(--PanelRaised); border-bottom: 1px solid var(--Hairline);
+}
+.TileHead strong { font-size: 12px; font-weight: 600; }
+.TileHead span { color: var(--ProseDim); font-size: 11px; font-variant-numeric: tabular-nums; }
+.TileFoot
+{
+    padding: 7px 10px; border-top: 1px solid var(--Hairline); color: var(--ProseDim);
+    font-size: 11px; font-variant-numeric: tabular-nums; display: flex; justify-content: space-between; gap: 8px;
+}
+.Row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.Row label { color: var(--ProseDim); font-size: 12px; }
+.Row output { font-variant-numeric: tabular-nums; color: var(--Prose); }
+input[type="range"] { width: 148px; accent-color: var(--Signal); }
+select
+{
+    background: var(--PanelRaised); color: var(--Prose); border: 1px solid var(--Hairline);
+    border-radius: 6px; padding: 4px 8px; font: inherit; font-size: 12px;
+}
+.SectionTitle
+{
+    margin: 18px 0 10px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em;
+    color: var(--ProseDim); border-bottom: 1px solid var(--Hairline); padding-bottom: 6px;
+}
+.StatGrid { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; font-size: 12px; }
+.StatGrid dt { color: var(--ProseDim); }
+.StatGrid dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+.ButtonRow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+button
+{
+    border: 1px solid var(--Hairline); background: var(--PanelRaised); color: var(--Prose);
+    border-radius: 6px; padding: 7px 12px; cursor: pointer; font: inherit; font-size: 12px;
+}
+button.Primary { background: var(--Signal); color: #0d1014; border-color: var(--Signal); font-weight: 600; }
+button:disabled { opacity: 0.45; cursor: default; }
+.ProgressTrack { height: 4px; background: var(--PanelRaised); border-radius: 999px; overflow: hidden; margin-top: 10px; }
+.ProgressFill { height: 100%; width: 0%; background: var(--Signal); transition: width 120ms linear; }
+.Note { color: var(--ProseDim); font-size: 11.5px; line-height: 1.5; margin: 10px 0 0; }
+.Badge { font-size: 10.5px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--Hairline); color: var(--ProseDim); }
+.Badge.Exact { color: #0d1014; background: var(--Signal); border-color: var(--Signal); font-weight: 600; }
+.Overlay
+{
+    position: fixed; inset: 0; background: rgba(5, 7, 10, 0.94); display: none;
+    place-items: center; padding: 28px; z-index: 20; cursor: zoom-out;
+}
+.Overlay[data-open="true"] { display: grid; }
+.Overlay canvas { max-width: 100%; max-height: 100%; border-radius: 8px; border: 1px solid var(--Hairline); }
+.OverlayCaption { position: absolute; bottom: 18px; color: var(--ProseDim); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+    <h1>Frontier · Lighting Architecture Studio</h1>
+    <span class="Subtle">Hierarchical stochastic cut lighting · deterministic polygon irradiance reference · signed-distance / analytic visibility tiers</span>
+</header>
+
+<main>
+<section id="StageColumn">
+    <div class="LobbyTabs" id="LobbyTabs" role="tablist"></div>
+    <p class="Note" id="LobbyNote"></p>
+    <div class="TileGrid" id="TileGrid"></div>
+</section>
+
+<aside id="SideColumn">
+    <div class="SectionTitle">Scene</div>
+    <div class="Row">
+        <label for="LampScale">Luminaire density</label>
+        <input id="LampScale" type="range" min="0.25" max="3" step="0.25" value="1" />
+    </div>
+    <div class="Row">
+        <label for="Resolution">Tile resolution</label>
+        <select id="Resolution">
+            <option value="160x90">160 × 90</option>
+            <option value="224x126" selected>224 × 126</option>
+            <option value="320x180">320 × 180</option>
+        </select>
+    </div>
+
+    <div class="SectionTitle">Estimator</div>
+    <div class="Row">
+        <label for="CandidateCount">Candidates per pixel</label>
+        <output id="CandidateCountOutput">6</output>
+    </div>
+    <input id="CandidateCount" type="range" min="1" max="32" step="1" value="6" style="width: 100%" />
+    <div class="Row" style="margin-top: 12px">
+        <label for="CutSize">Shared cut size</label>
+        <output id="CutSizeOutput">8</output>
+    </div>
+    <input id="CutSize" type="range" min="2" max="24" step="1" value="8" style="width: 100%" />
+
+    <div class="SectionTitle">Visibility tier</div>
+    <div class="Row">
+        <label for="Tier">Shadow evaluation</label>
+        <select id="Tier">
+            <option value="AnalyticPrism" selected>Analytic intersection</option>
+            <option value="SignedDistance">Signed distance cone</option>
+        </select>
+    </div>
+    <div class="Row">
+        <label for="FireflyClamp">Firefly clamp</label>
+        <select id="FireflyClamp">
+            <option value="on" selected>Bounded (12× reference)</option>
+            <option value="off">Unbounded</option>
+        </select>
+    </div>
+
+    <div class="SectionTitle">Display</div>
+    <div class="Row">
+        <label for="Exposure">Exposure</label>
+        <output id="ExposureOutput">0.0 EV</output>
+    </div>
+    <input id="Exposure" type="range" min="-3" max="4" step="0.25" value="0" style="width: 100%" />
+
+    <div class="ButtonRow">
+        <button class="Primary" id="StartStop">Pause</button>
+        <button id="Reset">Restart accumulation</button>
+    </div>
+    <div class="ProgressTrack"><div class="ProgressFill" id="ProgressFill"></div></div>
+
+    <div class="SectionTitle">Measurements</div>
+    <dl class="StatGrid" id="SceneStats"></dl>
+    <div class="SectionTitle">Per technique</div>
+    <dl class="StatGrid" id="TechniqueStats"></dl>
+    <p class="Note" id="MeasurementNote">
+        Error is measured against the deterministic tier rendered by the same page, so the numbers stay true to this machine.
+    </p>
+</aside>
+</main>
+
+<div class="Overlay" id="Overlay"><canvas id="OverlayCanvas"></canvas><div class="OverlayCaption" id="OverlayCaption"></div></div>
+
+<script type="module">
+import {
+    ConstructStudio, IntegrateFullImage, Technique, Representation, ToneMapToBytes, Luminance, StudioPresets,
+} from './illumination.mjs';
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                        STATE
+//------------------------------------------------------------------------------------------------------------------------
+
+const TargetSampleCount = 96;
+const TileDefinitions = [
+    { Technique: Technique.UniformLightPick,   Caption: 'Uniform light pick',       Exact: false },
+    { Technique: Technique.LightTreeCut,       Caption: 'Hierarchical cut',         Exact: false },
+    { Technique: Technique.SharedLightTreeCut, Caption: 'Shared hierarchical cut',  Exact: false },
+    { Technique: Technique.DeterministicPolygon, Caption: 'Deterministic polygon',  Exact: true  },
+];
+
+const Application = {
+    LobbyIndex: 0,
+    LampScale: 1.0,
+    Width: 224,
+    Height: 126,
+    CandidateCount: 6,
+    CutSize: 8,
+    Representation: Representation.AnalyticPrism,
+    FireflyClamp: true,
+    Exposure: 0.0,
+    Running: true,
+    Studio: null,
+    Tiles: [],
+    SampleIndex: 0,
+    RenderSlot: 0,
+};
+
+const Element = (Identifier) => document.getElementById(Identifier);
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                       TILE SETUP
+//------------------------------------------------------------------------------------------------------------------------
+
+function ConstructTiles()
+{
+    const Grid = Element('TileGrid');
+    Grid.innerHTML = '';
+    Application.Tiles = TileDefinitions.map((Definition) =>
+    {
+        const Container = document.createElement('div');
+        Container.className = 'Tile';
+        Container.innerHTML = `
+            <div class="TileHead"><strong>${Definition.Caption}</strong>
+                <span>${Definition.Exact ? '<span class="Badge Exact">exact</span>' : '<span class="Badge">stochastic</span>'}</span></div>
+            <canvas width="${Application.Width}" height="${Application.Height}"></canvas>
+            <div class="TileFoot"><span class="Timing">—</span><span class="Error">—</span></div>`;
+        Grid.appendChild(Container);
+        const Canvas = Container.querySelector('canvas');
+        Canvas.addEventListener('click', () => OpenOverlay(Definition));
+        return {
+            Definition: Definition,
+            Canvas: Canvas,
+            PixelContext: Canvas.getContext('2d'),
+            Accumulator: new Float64Array(Application.Width * Application.Height * 3),
+            FrameBytes: null,
+            AccumulatedCount: 0,
+            LastMilliseconds: 0,
+            TimingLabel: Container.querySelector('.Timing'),
+            ErrorLabel: Container.querySelector('.Error'),
+        };
+    });
+}
+
+function ResetAccumulation()
+{
+    Application.SampleIndex = 0;
+    for (const Tile of Application.Tiles)
+    {
+        Tile.Accumulator.fill(0.0);
+        Tile.AccumulatedCount = 0;
+        Tile.LastMilliseconds = 0.0;
+        Tile.TimingLabel.textContent = '—';
+        Tile.ErrorLabel.textContent = '—';
+    }
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                      RENDER SLOT
+//------------------------------------------------------------------------------------------------------------------------
+
+function RenderNextTile()
+{
+    const Tile = Application.Tiles[Application.RenderSlot % Application.Tiles.length];
+    Application.RenderSlot += 1;
+
+    if (Tile.AccumulatedCount >= TargetSampleCount)
+    {
+        return;
+    }
+
+    const Options = {
+        Technique: Tile.Definition.Technique,
+        Representation: Application.Representation,
+        CandidateCount: Application.CandidateCount,
+        SharedCutSize: Application.CutSize,
+        Width: Application.Width,
+        Height: Application.Height,
+        SampleIndex: Application.SampleIndex,
+        EnableFireflyClamp: Application.FireflyClamp,
+    };
+
+    const StartTime = performance.now();
+    const Pixels = IntegrateFullImage(Application.Studio, Options);
+    Tile.LastMilliseconds = performance.now() - StartTime;
+
+    for (let Channel = 0; Channel < Pixels.length; Channel += 1)
+    {
+        Tile.Accumulator[Channel] += Pixels[Channel];
+    }
+    Tile.AccumulatedCount += 1;
+    PresentTile(Tile);
+    UpdateTechniqueStats();
+}
+
+function PresentTile(Tile)
+{
+    const PixelCount = Application.Width * Application.Height;
+    const Mean = new Float32Array(PixelCount * 3);
+    const Scale = 1.0 / Math.max(1, Tile.AccumulatedCount);
+    for (let Channel = 0; Channel < Mean.length; Channel += 1)
+    {
+        Mean[Channel] = Tile.Accumulator[Channel] * Scale;
+    }
+    const Bytes = ToneMapToBytes(Mean, Application.Exposure);
+    const Image = Tile.PixelContext.createImageData(Application.Width, Application.Height);
+    Image.data.set(Bytes);
+    Tile.PixelContext.putImageData(Image, 0, 0);
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                       MEASUREMENTS
+//------------------------------------------------------------------------------------------------------------------------
+
+function AccumulatedLuminance(Tile)
+{
+    const PixelCount = Application.Width * Application.Height;
+    const Result = new Float64Array(PixelCount);
+    const Scale = 1.0 / Math.max(1, Tile.AccumulatedCount);
+    for (let PixelIndex = 0; PixelIndex < PixelCount; PixelIndex += 1)
+    {
+        Result[PixelIndex] = Luminance([
+            Tile.Accumulator[PixelIndex * 3] * Scale,
+            Tile.Accumulator[PixelIndex * 3 + 1] * Scale,
+            Tile.Accumulator[PixelIndex * 3 + 2] * Scale,
+        ]);
+    }
+    return Result;
+}
+
+function UpdateTechniqueStats()
+{
+    const ReferenceTile = Application.Tiles[Application.Tiles.length - 1];
+    if (ReferenceTile.AccumulatedCount === 0)
+    {
+        return;
+    }
+    const Reference = AccumulatedLuminance(ReferenceTile);
+    for (const Tile of Application.Tiles)
+    {
+        if (Tile.AccumulatedCount === 0)
+        {
+            continue;
+        }
+        Tile.TimingLabel.textContent = `${Tile.LastMilliseconds.toFixed(1)} ms · ${Tile.AccumulatedCount} spp`;
+        if (Tile.Definition.Exact)
+        {
+            Tile.ErrorLabel.textContent = 'reference';
+            continue;
+        }
+        const Estimate = AccumulatedLuminance(Tile);
+        let ErrorSum = 0.0;
+        let WeightSum = 0.0;
+        for (let PixelIndex = 0; PixelIndex < Reference.length; PixelIndex += 1)
+        {
+            const Winsorised = Math.min(Estimate[PixelIndex], Reference[PixelIndex] * 4.0);
+            ErrorSum += Math.pow(Winsorised - Reference[PixelIndex], 2);
+            WeightSum += Reference[PixelIndex] * Reference[PixelIndex];
+        }
+        const RelativeError = WeightSum > 1.0e-12 ? Math.sqrt(ErrorSum / WeightSum) : 0.0;
+        Tile.ErrorLabel.textContent = `RelMSE ${(RelativeError * 100).toFixed(1)}%`;
+    }
+
+    const Rows = [];
+    for (const Tile of Application.Tiles)
+    {
+        Rows.push(`<dt>${Tile.Definition.Caption}</dt><dd>${Tile.Definition.Exact ? 'exact'
+            : (Tile.LastMilliseconds.toFixed(1) + ' ms')}</dd>`);
+    }
+    Element('TechniqueStats').innerHTML = Rows.join('');
+}
+
+function UpdateSceneStats()
+{
+    const Studio = Application.Studio;
+    const AreaCount = Studio.Lights.filter((Entry) => Entry.MeasureKind === 'Area').length;
+    Element('SceneStats').innerHTML = [
+        `<dt>Luminaires</dt><dd>${Studio.Lights.length}</dd>`,
+        `<dt>Area luminaires</dt><dd>${AreaCount}</dd>`,
+        `<dt>Practical / solar</dt><dd>${Studio.Lights.length - AreaCount}</dd>`,
+        `<dt>Light tree nodes</dt><dd>${Studio.Tree.NodeCount}</dd>`,
+        `<dt>Occluding prisms</dt><dd>${Studio.OcclusionPrisms.length}</dd>`,
+        `<dt>Resolution</dt><dd>${Application.Width} × ${Application.Height}</dd>`,
+    ].join('');
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                       SCENE LOADING
+//------------------------------------------------------------------------------------------------------------------------
+
+function LoadLobby(LobbyIndex)
+{
+    Application.LobbyIndex = LobbyIndex;
+    const Preset = StudioPresets[LobbyIndex];
+    Application.Studio = ConstructStudio(Preset.Identifier, Application.LampScale);
+
+    for (const Tab of Element('LobbyTabs').querySelectorAll('.LobbyTab'))
+    {
+        Tab.setAttribute('aria-selected', String(Number(Tab.dataset.index) === LobbyIndex));
+    }
+    Element('LobbyNote').textContent = `${Preset.Caption} — ${Application.Studio.Lights.length} luminaires `
+        + `(${Application.Studio.Lights.filter((Entry) => Entry.MeasureKind === 'Area').length} area, `
+        + `${Application.Studio.Lights.filter((Entry) => Entry.MeasureKind !== 'Area').length} practical) `
+        + `assembled into a ${Application.Studio.Tree.NodeCount}-node binary light tree.`;
+    UpdateSceneStats();
+    ResetAccumulation();
+}
+
+function ConstructLobbyTabs()
+{
+    const Container = Element('LobbyTabs');
+    Container.innerHTML = '';
+    StudioPresets.forEach((Preset, Index) =>
+    {
+        const Tab = document.createElement('button');
+        Tab.className = 'LobbyTab';
+        Tab.type = 'button';
+        Tab.dataset.index = String(Index);
+        Tab.textContent = Preset.Caption;
+        Tab.setAttribute('role', 'tab');
+        Tab.addEventListener('click', () => LoadLobby(Index));
+        Container.appendChild(Tab);
+    });
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                        OVERLAY
+//------------------------------------------------------------------------------------------------------------------------
+
+function OpenOverlay(Definition)
+{
+    const Tile = Application.Tiles.find((Entry) => Entry.Definition === Definition);
+    const Overlay = Element('Overlay');
+    const Canvas = Element('OverlayCanvas');
+    Canvas.width = Tile.Canvas.width;
+    Canvas.height = Tile.Canvas.height;
+    Canvas.getContext('2d').drawImage(Tile.Canvas, 0, 0);
+    Element('OverlayCaption').textContent = `${Definition.Caption} · ${Tile.TimingLabel.textContent} · ${Tile.ErrorLabel.textContent}`;
+    Overlay.dataset.open = 'true';
+}
+
+Element('Overlay').addEventListener('click', () => { Element('Overlay').dataset.open = 'false'; });
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                      CONTROL WIRING
+//------------------------------------------------------------------------------------------------------------------------
+
+Element('CandidateCount').addEventListener('input', (Event) =>
+{
+    Application.CandidateCount = Number(Event.target.value);
+    Element('CandidateCountOutput').textContent = String(Application.CandidateCount);
+    ResetAccumulation();
+});
+
+Element('CutSize').addEventListener('input', (Event) =>
+{
+    Application.CutSize = Number(Event.target.value);
+    Element('CutSizeOutput').textContent = String(Application.CutSize);
+    ResetAccumulation();
+});
+
+Element('Resolution').addEventListener('change', (Event) =>
+{
+    const [Width, Height] = Event.target.value.split('x').map(Number);
+    Application.Width = Width;
+    Application.Height = Height;
+    ConstructTiles();
+    ResetAccumulation();
+});
+
+Element('Tier').addEventListener('change', (Event) =>
+{
+    Application.Representation = Event.target.value;
+    ResetAccumulation();
+});
+
+Element('FireflyClamp').addEventListener('change', (Event) =>
+{
+    Application.FireflyClamp = Event.target.value === 'on';
+    ResetAccumulation();
+});
+
+Element('Exposure').addEventListener('input', (Event) =>
+{
+    Application.Exposure = Number(Event.target.value);
+    Element('ExposureOutput').textContent = `${Application.Exposure.toFixed(1)} EV`;
+    for (const Tile of Application.Tiles)
+    {
+        if (Tile.AccumulatedCount > 0)
+        {
+            PresentTile(Tile);
+        }
+    }
+});
+
+Element('LampScale').addEventListener('change', (Event) =>
+{
+    Application.LampScale = Number(Event.target.value);
+    LoadLobby(Application.LobbyIndex);
+});
+
+Element('StartStop').addEventListener('click', (Event) =>
+{
+    Application.Running = !Application.Running;
+    Event.target.textContent = Application.Running ? 'Pause' : 'Resume';
+});
+
+Element('Reset').addEventListener('click', () => ResetAccumulation());
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                     ANIMATION DRIVER
+//------------------------------------------------------------------------------------------------------------------------
+
+function Advance()
+{
+    if (Application.Running)
+    {
+        RenderNextTile();
+        const MinimumAccumulated = Math.min(...Application.Tiles.map((Entry) => Entry.AccumulatedCount));
+        if (MinimumAccumulated >= TargetSampleCount)
+        {
+            Application.Running = false;
+            Element('StartStop').textContent = 'Resume';
+        }
+        if (Application.Tiles.every((Entry) => Entry.AccumulatedCount > 0))
+        {
+            Application.SampleIndex += 1;
+        }
+        Element('ProgressFill').style.width = `${Math.min(100.0, (MinimumAccumulated / TargetSampleCount) * 100.0)}%`;
+    }
+    requestAnimationFrame(Advance);
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                          START
+//------------------------------------------------------------------------------------------------------------------------
+
+ConstructLobbyTabs();
+ConstructTiles();
+LoadLobby(0);
+requestAnimationFrame(Advance);
+</script>
+</body>
+</html>

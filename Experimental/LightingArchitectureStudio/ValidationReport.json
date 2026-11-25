@@ -1,0 +1,455 @@
+{
+  "GeneratedAt": "2026-11-25T11:34:27.418Z",
+  "ImageWidth": 64,
+  "ImageHeight": 36,
+  "Lobbies": [
+    {
+      "Identifier": "AtriumDaylight",
+      "LuminaireCount": 20,
+      "AreaLuminaireCount": 3,
+      "TreeNodeCount": 39,
+      "ReferenceMilliseconds": 57.548168,
+      "Techniques": [
+        {
+          "Technique": "DeterministicPolygon",
+          "CandidateCount": 0,
+          "ErrorAtFourCandidates": 0,
+          "ErrorAtSixteenCandidates": 0,
+          "Bias": 0,
+          "RelativeVariancePerFrame": 0,
+          "MillisecondsPerFrame": 28.4677085
+        },
+        {
+          "Technique": "UniformLightPick",
+          "CandidateCount": 4,
+          "ErrorAtFourCandidates": 0.16214746152080298,
+          "ErrorAtSixteenCandidates": 0.08329087630014487,
+          "SingleFrameErrorAtFourCandidates": 0.9396552045249579,
+          "WinsorizedErrorAtFourCandidates": 0.16214746152080298,
+          "ErrorSweep": [
+            {
+              "CandidateCount": 1,
+              "Error": 0.2649917107381369,
+              "WinsorizedError": 0.2649917107381369
+            },
+            {
+              "CandidateCount": 4,
+              "Error": 0.16214746152080298,
+              "WinsorizedError": 0.16214746152080298
+            },
+            {
+              "CandidateCount": 16,
+              "Error": 0.08329087630014487,
+              "WinsorizedError": 0.08329087630014487
+            }
+          ],
+          "Bias": -0.0015957942308536153,
+          "RelativeVariancePerFrame": 1.4782172541452039,
+          "MillisecondsPerFrame": 2.40488821875
+        },
+        {
+          "Technique": "LightTreeCut",
+          "CandidateCount": 4,
+          "ErrorAtFourCandidates": 0.14670684120219699,
+          "ErrorAtSixteenCandidates": 0.07568655711498731,
+          "SingleFrameErrorAtFourCandidates": 0.846681813256089,
+          "WinsorizedErrorAtFourCandidates": 0.14670684120219699,
+          "ErrorSweep": [
+            {
+              "CandidateCount": 1,
+              "Error": 0.2892299565121753,
+              "WinsorizedError": 0.2892299565121753
+            },
+            {
+              "CandidateCount": 4,
+              "Error": 0.14670684120219699,
+              "WinsorizedError": 0.14670684120219699
+            },
+            {
+              "CandidateCount": 16,
+              "Error": 0.07568655711498731,
+              "WinsorizedError": 0.07568655711498731
+            }
+          ],
+          "Bias": -0.0023875609390419505,
+          "RelativeVariancePerFrame": 1.1451025953428968,
+          "MillisecondsPerFrame": 7.34377096875
+        },
+        {
+          "Technique": "SharedLightTreeCut",
+          "CandidateCount": 4,
+          "ErrorAtFourCandidates": 0.18458456300137582,
+          "ErrorAtSixteenCandidates": 0.09316963068260083,
+          "SingleFrameErrorAtFourCandidates": 1.0357675545842127,
+          "WinsorizedErrorAtFourCandidates": 0.18458456300137582,
+          "ErrorSweep": [
+            {
+              "CandidateCount": 1,
+              "Error": 0.29732496812885895,
+              "WinsorizedError": 0.29732496812885895
+            },
+            {
+              "CandidateCount": 4,
+              "Error": 0.18458456300137582,
+              "WinsorizedError": 0.18458456300137582
+            },
+            {
+              "CandidateCount": 16,
+              "Error": 0.09316963068260083,
+              "WinsorizedError": 0.09316963068260083
+            }
+          ],
+          "Bias": -0.002570784137683172,
+          "RelativeVariancePerFrame": 1.7560391654325949,
+          "MillisecondsPerFrame": 3.95083675
+        }
+      ]
+    },
+    {
+      "Identifier": "NightArrival",
+      "LuminaireCount": 57,
+      "AreaLuminaireCount": 4,
+      "TreeNodeCount": 113,
+      "ReferenceMilliseconds": 103.127231,
+      "Techniques": [
+        {
+          "Technique": "DeterministicPolygon",
+          "CandidateCount": 0,
+          "ErrorAtFourCandidates": 0,
+          "ErrorAtSixteenCandidates": 0,
+          "Bias": 0,
+          "RelativeVariancePerFrame": 0,
+          "MillisecondsPerFrame": 48.623026
+        },
+        {
+          "Technique": "UniformLightPick",
+          "CandidateCount": 4,
+          "ErrorAtFourCandidates": 0.5795128607363446,
+          "ErrorAtSixteenCandidates": 0.2789636396366459,
+          "SingleFrameErrorAtFourCandidates": 3.2058080430061144,
+          "WinsorizedErrorAtFourCandidates": 0.5795128607363446,
+          "ErrorSweep": [
+            {
+              "CandidateCount": 1,
+              "Error": 1.1049071813120181,
+              "WinsorizedError": 1.0005250130664283
+            },
+            {
+              "CandidateCount": 4,
+              "Error": 0.5795128607363446,
+              "WinsorizedError": 0.5795128607363446
+            },
+            {
+              "CandidateCount": 16,
+              "Error": 0.2789636396366459,
+              "WinsorizedError": 0.2789636396366459
+            }
+          ],
+          "Bias": -0.0002483638010109363,
+          "RelativeVariancePerFrame": 0.40995020123209686,
+          "MillisecondsPerFrame": 2.27805503125
+        },
+        {
+          "Technique": "LightTreeCut",
+          "CandidateCount": 4,
+          "ErrorAtFourCandidates": 0.29122117099885664,
+          "ErrorAtSixteenCandidates": 0.3390448015058243,
+          "SingleFrameErrorAtFourCandidates": 0.6828798122553639,
+          "WinsorizedErrorAtFourCandidates": 0.1991314700023729,
+          "ErrorSweep": [
+            {
+              "CandidateCount": 1,
+              "Error": 0.3252331584199123,
+              "WinsorizedError": 0.29683016041100696
+            },
+            {
+              "CandidateCount": 4,
+              "Error": 0.29122117099885664,
+              "WinsorizedError": 0.1991314700023729
+            },
+            {
+              "CandidateCount": 16,
+              "Error": 0.3390448015058243,
+              "WinsorizedError": 0.1955915273582445
+            }
+          ],
+          "Bias": -0.03149558912637655,
+          "RelativeVariancePerFrame": 0.0943400272702839,
+          "MillisecondsPerFrame": 9.78606278125
+        },
+        {
+          "Technique": "SharedLightTreeCut",
+          "CandidateCount": 4,
+          "ErrorAtFourCandidates": 0.2336623369619684,
+          "ErrorAtSixteenCandidates": 0.15899801165447203,
+          "SingleFrameErrorAtFourCandidates": 1.16602715212979,
+          "WinsorizedErrorAtFourCandidates": 0.2336623369619684,
+          "ErrorSweep": [
+            {
+              "CandidateCount": 1,
+              "Error": 0.38793389414618246,
+              "WinsorizedError": 0.38548877276784616
+            },
+            {
+              "CandidateCount": 4,
+              "Error": 0.2336623369619684,
+              "WinsorizedError": 0.2336623369619684
+            },
+            {
+              "CandidateCount": 16,
+              "Error": 0.15899801165447203,
+              "WinsorizedError": 0.15899801165447203
+            }
+          ],
+          "Bias": -0.02922027178544673,
+          "RelativeVariancePerFrame": 0.06236175990435616,
+          "MillisecondsPerFrame": 6.8882688125
+        }
+      ]
+    },
+    {
+      "Identifier": "GalleryMixed",
+      "LuminaireCount": 78,
+      "AreaLuminaireCount": 5,
+      "TreeNodeCount": 155,
+      "ReferenceMilliseconds": 149.974906,
+      "Techniques": [
+        {
+          "Technique": "DeterministicPolygon",
+          "CandidateCount": 0,
+          "ErrorAtFourCandidates": 0,
+          "ErrorAtSixteenCandidates": 0,
+          "Bias": 0,
+          "RelativeVariancePerFrame": 0,
+          "MillisecondsPerFrame": 97.7379705
+        },
+        {
+          "Technique": "UniformLightPick",
+          "CandidateCount": 4,
+          "ErrorAtFourCandidates": 0.09312641463646099,
+          "ErrorAtSixteenCandidates": 0.07506481826883983,
+          "SingleFrameErrorAtFourCandidates": 0.7075055348535153,
+          "WinsorizedErrorAtFourCandidates": 0.09312641463646099,
+          "ErrorSweep": [
+            {
+              "CandidateCount": 1,
+              "Error": 0.14340712827127378,
+              "WinsorizedError": 0.14340287669175278
+            },
+            {
+              "CandidateCount": 4,
+              "Error": 0.09312641463646099,
+              "WinsorizedError": 0.09312641463646099
+            },
+            {
+              "CandidateCount": 16,
+              "Error": 0.07506481826883983,
+              "WinsorizedError": 0.07506481826883983
+            }
+          ],
+          "Bias": -0.01562826683495567,
+          "RelativeVariancePerFrame": 0.1635576418096125,
+          "MillisecondsPerFrame": 3.05702125
+        },
+        {
+          "Technique": "LightTreeCut",
+          "CandidateCount": 4,
+          "ErrorAtFourCandidates": 0.08098974501535441,
+          "ErrorAtSixteenCandidates": 0.0999068985633813,
+          "SingleFrameErrorAtFourCandidates": 0.15649338364375584,
+          "WinsorizedErrorAtFourCandidates": 0.08098974501535441,
+          "ErrorSweep": [
+            {
+              "CandidateCount": 1,
+              "Error": 0.09121377608197688,
+              "WinsorizedError": 0.09051057961627028
+            },
+            {
+              "CandidateCount": 4,
+              "Error": 0.08098974501535441,
+              "WinsorizedError": 0.08098974501535441
+            },
+            {
+              "CandidateCount": 16,
+              "Error": 0.0999068985633813,
+              "WinsorizedError": 0.0991632177188537
+            }
+          ],
+          "Bias": -0.04996255824391139,
+          "RelativeVariancePerFrame": 0.03495063713041653,
+          "MillisecondsPerFrame": 12.5684845625
+        },
+        {
+          "Technique": "SharedLightTreeCut",
+          "CandidateCount": 4,
+          "ErrorAtFourCandidates": 0.08388232546136017,
+          "ErrorAtSixteenCandidates": 0.07514217521519141,
+          "SingleFrameErrorAtFourCandidates": 0.27491190088747003,
+          "WinsorizedErrorAtFourCandidates": 0.08388232546136017,
+          "ErrorSweep": [
+            {
+              "CandidateCount": 1,
+              "Error": 0.09777375433773382,
+              "WinsorizedError": 0.09777375433773382
+            },
+            {
+              "CandidateCount": 4,
+              "Error": 0.08388232546136017,
+              "WinsorizedError": 0.08388232546136017
+            },
+            {
+              "CandidateCount": 16,
+              "Error": 0.07514217521519141,
+              "WinsorizedError": 0.07514217521519141
+            }
+          ],
+          "Bias": -0.0266464287370734,
+          "RelativeVariancePerFrame": 0.0552180279440533,
+          "MillisecondsPerFrame": 7.98106234375
+        }
+      ]
+    }
+  ],
+  "SinglePoint": {
+    "ReferenceLuminance": 0.20568718351728832,
+    "MedianOverReferenceUnclamped": 1.0121839894573603,
+    "Rows": [
+      {
+        "Technique": "UniformLightPick",
+        "CandidateCount": 1,
+        "MeanOverReference": 1.0508153702430398,
+        "RelativeError": 0.05081537024303991,
+        "StandardErrorOverReference": 0.042500252254818155,
+        "RelativeStandardDeviation": 2.5579678802347137,
+        "FramesForFivePercentError": 2618
+      },
+      {
+        "Technique": "UniformLightPick",
+        "CandidateCount": 4,
+        "MeanOverReference": 1.0966736052806865,
+        "RelativeError": 0.09667360528068654,
+        "StandardErrorOverReference": 0.02803528834130618,
+        "RelativeStandardDeviation": 1.6168049562093871,
+        "FramesForFivePercentError": 1046
+      },
+      {
+        "Technique": "UniformLightPick",
+        "CandidateCount": 16,
+        "MeanOverReference": 1.0420255627716075,
+        "RelativeError": 0.04202556277160749,
+        "StandardErrorOverReference": 0.017271604159323245,
+        "RelativeStandardDeviation": 1.048296892890531,
+        "FramesForFivePercentError": 440
+      },
+      {
+        "Technique": "UniformLightPick",
+        "CandidateCount": 64,
+        "MeanOverReference": 1.0497300667624996,
+        "RelativeError": 0.049730066762499685,
+        "StandardErrorOverReference": 0.015977713781487674,
+        "RelativeStandardDeviation": 0.9626468546831546,
+        "FramesForFivePercentError": 371
+      },
+      {
+        "Technique": "LightTreeCut",
+        "CandidateCount": 1,
+        "MeanOverReference": 1.028451669651409,
+        "RelativeError": 0.028451669651409064,
+        "StandardErrorOverReference": 0.006718665473412905,
+        "RelativeStandardDeviation": 0.41317032894544486,
+        "FramesForFivePercentError": 69
+      },
+      {
+        "Technique": "LightTreeCut",
+        "CandidateCount": 4,
+        "MeanOverReference": 1.0346491562817977,
+        "RelativeError": 0.03464915628179768,
+        "StandardErrorOverReference": 0.0033648539274472645,
+        "RelativeStandardDeviation": 0.2056852284640193,
+        "FramesForFivePercentError": 17
+      },
+      {
+        "Technique": "LightTreeCut",
+        "CandidateCount": 16,
+        "MeanOverReference": 1.0481793778994795,
+        "RelativeError": 0.04817937789947947,
+        "StandardErrorOverReference": 0.014587399228684668,
+        "RelativeStandardDeviation": 0.8801815352114433,
+        "FramesForFivePercentError": 310
+      },
+      {
+        "Technique": "LightTreeCut",
+        "CandidateCount": 64,
+        "MeanOverReference": 1.0496237019809445,
+        "RelativeError": 0.049623701980944554,
+        "StandardErrorOverReference": 0.008133352637830953,
+        "RelativeStandardDeviation": 0.4900788596969262,
+        "FramesForFivePercentError": 97
+      },
+      {
+        "Technique": "SharedLightTreeCut",
+        "CandidateCount": 1,
+        "MeanOverReference": 1.034930747612847,
+        "RelativeError": 0.03493074761284707,
+        "StandardErrorOverReference": 0.013214534367479505,
+        "RelativeStandardDeviation": 0.8075521365307823,
+        "FramesForFivePercentError": 261
+      },
+      {
+        "Technique": "SharedLightTreeCut",
+        "CandidateCount": 4,
+        "MeanOverReference": 1.0528161311649187,
+        "RelativeError": 0.05281613116491862,
+        "StandardErrorOverReference": 0.011239228219592357,
+        "RelativeStandardDeviation": 0.67517127187299,
+        "FramesForFivePercentError": 183
+      },
+      {
+        "Technique": "SharedLightTreeCut",
+        "CandidateCount": 16,
+        "MeanOverReference": 1.0460249371640704,
+        "RelativeError": 0.0460249371640704,
+        "StandardErrorOverReference": 0.010214662045991281,
+        "RelativeStandardDeviation": 0.6176066448622632,
+        "FramesForFivePercentError": 153
+      },
+      {
+        "Technique": "SharedLightTreeCut",
+        "CandidateCount": 64,
+        "MeanOverReference": 1.0475338471221058,
+        "RelativeError": 0.047533847122105906,
+        "StandardErrorOverReference": 0.010041436704413834,
+        "RelativeStandardDeviation": 0.6062584240805209,
+        "FramesForFivePercentError": 148
+      }
+    ]
+  },
+  "Visibility": {
+    "RelativeErrorBetweenTiers": 0.04326996929883907,
+    "PixelDisagreementFraction": 0.051215277777777776,
+    "ComparedPixels": 2304
+  },
+  "FrameCost": {
+    "Width": 224,
+    "Height": 126,
+    "Techniques": [
+      {
+        "Technique": "UniformLightPick",
+        "MillisecondsPerFrame": 35.41239733333333
+      },
+      {
+        "Technique": "LightTreeCut",
+        "MillisecondsPerFrame": 167.946729
+      },
+      {
+        "Technique": "SharedLightTreeCut",
+        "MillisecondsPerFrame": 94.06909933333333
+      },
+      {
+        "Technique": "DeterministicPolygon",
+        "MillisecondsPerFrame": 621.7738876666666
+      }
+    ],
+    "TreeBuildMilliseconds": 0.619312685
+  }
+}
