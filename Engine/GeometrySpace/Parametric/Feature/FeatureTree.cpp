@@ -1083,7 +1083,9 @@ RegenerationOutcome RegenerateFeatureTree(ModelPartition& Partition, FeatureTree
             if (!Load(Step.Target)) { Refuse(std::string(Verb) + ": no body named " + Step.Target); break; }
             const bool SheetTargetCondition = Partition.Bodies.Resolve(Current).Category == BodyCategory::Sheet;
             if (SheetTargetCondition && (Step.Kind == FeatureStepCategory::Blend ||
-                (Step.Operation != FaceOperationCategory::Extrude && Step.Operation != FaceOperationCategory::Thicken)))
+                (Step.Operation != FaceOperationCategory::Extrude &&
+                 Step.Operation != FaceOperationCategory::Thicken &&
+                 Step.Operation != FaceOperationCategory::Reshape)))
             {
                 Refuse(std::string(Verb) + ": the body is a sheet (🚧 blends / face operations on sheets)");
                 break;

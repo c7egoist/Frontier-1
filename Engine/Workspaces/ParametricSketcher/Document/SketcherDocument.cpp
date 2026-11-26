@@ -1316,10 +1316,27 @@ SketcherCommandOutcome ReshapeSketcherSelection(SketcherDocument& Document, cons
         MergeOwner(SketcherSelectionCategory::Edge, Selection.Edges);
         MergeOwner(SketcherSelectionCategory::Vertex, Selection.Vertices);
     }
+    std::vector<Vector3> ExpectedVertices;
+    if (Problem.empty() && Document.Partition && !Selection.Vertices.empty())
+    {
+        if (const RegeneratedBody* TargetBody = FindRegeneratedBody(Document, Owner))
+        {
+            for (const std::string& VName : Selection.Vertices)
+            {
+                for (const auto& [Slot, CandidateName] : TargetBody->Naming.Vertices)
+                {
+                    if (CandidateName != VName) continue;
+                    const Vector3 Was = Document.Partition->Vertices.Resolve(Document.Partition->Vertices.TokenAt(Slot)).Position;
+                    ExpectedVertices.push_back(Map.ColumnX * Was.X + Map.ColumnY * Was.Y + Map.ColumnZ * Was.Z + Map.Shift);
+                    break;
+                }
+            }
+        }
+    }
     std::vector<std::string> Names = Selection.Vertices;
     Names.insert(Names.end(), Selection.Edges.begin(), Selection.Edges.end());
     Names.insert(Names.end(), Selection.Faces.begin(), Selection.Faces.end());
-    return RunDirectEdit(Document, Label, Problem.empty() ? Owner : std::string(), Names, [&](FeatureStep& Step) -> std::string
+    SketcherCommandOutcome Outcome = RunDirectEdit(Document, Label, Problem.empty() ? Owner : std::string(), Names, [&](FeatureStep& Step) -> std::string
     {
         if (!Problem.empty()) return Problem;
         const std::string StepLabel = "Change#" + std::to_string(NextStepOrdinal(Document.Tree));
@@ -1334,6 +1351,33 @@ SketcherCommandOutcome ReshapeSketcherSelection(SketcherDocument& Document, cons
         Document.Captions[StepLabel] = NextCaption(Document, "Reshape");
         return {};
     });
+    // When an off-plane reshape splits an N-gon face, face disambiguation (/1, /2) updates incident vertex names;
+    // rebind any moved vertex whose name changed so the active vertex selection & gizmo stay anchored across edits.
+    if (Outcome.AcceptedCondition && Document.Partition && !ExpectedVertices.empty() && Document.Selection.Vertices.size() < ExpectedVertices.size())
+    {
+        if (const RegeneratedBody* TargetBody = FindRegeneratedBody(Document, Owner))
+        {
+            const BodyInventory Inventory = Document.Partition->CollectInventory(TargetBody->Body);
+            for (const Vector3& TargetPos : ExpectedVertices)
+            {
+                double      BestGap  = 1.0e-4;
+                std::string BestName = {};
+                for (VertexToken VToken : Inventory.Vertices)
+                {
+                    const auto FoundName = TargetBody->Naming.Vertices.find(VToken.Slot);
+                    if (FoundName == TargetBody->Naming.Vertices.end()) continue;
+                    const double Gap = Distance(Document.Partition->Vertices.Resolve(VToken).Position, TargetPos);
+                    if (Gap < BestGap) { BestGap = Gap; BestName = FoundName->second; }
+                }
+                if (!BestName.empty() &&
+                    std::find(Document.Selection.Vertices.begin(), Document.Selection.Vertices.end(), BestName) == Document.Selection.Vertices.end())
+                {
+                    Document.Selection.Vertices.push_back(BestName);
+                }
+            }
+        }
+    }
+    return Outcome;
 }
 
 SketcherCommandOutcome InsetSketcherSelection(SketcherDocument& Document, double Distance, double Depth)
@@ -1725,7 +1769,11 @@ OrthonormalBasis SketcherSketchPlane(int GridPlane) noexcept
 
 bool SketcherSketchConsumedCondition(const SketcherDocument& Document, const std::string& SketchLabel)
 {
-    return std::any_of(Document.Tree.Steps.begin(), Document.Tree.Steps.end(), [&](const FeatureStep& Step) { return Step.Profile == SketchLabel; });
+    return std::any_of(Document.Tree.Steps.begin(), Document.Tree.Steps.end(), [&](const FeatureStep& Step)
+    {
+        return Step.Profile == SketchLabel || Step.Path == SketchLabel ||
+               std::find(Step.Sections.begin(), Step.Sections.end(), SketchLabel) != Step.Sections.end();
+    });
 }
 
 bool SketcherSketchReferencedCondition(const SketcherDocument& Document, const std::string& SketchLabel)
