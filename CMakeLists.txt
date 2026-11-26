@@ -1485,6 +1485,7 @@ if(NOT ANDROID AND FRONTIER_PROFILE STREQUAL "Editor")
 
     frontier_register_desktop_app(Frontier         Engine/Lifecycle/FrontierHostLaunch.cpp)
     frontier_register_desktop_app(FrontierSketcher Engine/Lifecycle/FrontierSketcherLaunch.cpp)
+    frontier_register_desktop_app(SolidArc         Engine/Lifecycle/SolidArcLaunch.cpp)
 
     add_executable(FrontierDefaultContentGenerator EXCLUDE_FROM_ALL Engine/Tools/DefaultContentGeneratorMain.cpp)
     target_compile_definitions(FrontierDefaultContentGenerator PRIVATE "FRONTIER_REPO_ROOT_DIR=\"${CMAKE_SOURCE_DIR}\"")
