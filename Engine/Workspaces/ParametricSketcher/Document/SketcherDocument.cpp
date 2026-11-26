@@ -1677,7 +1677,9 @@ SketcherCommandOutcome FlipSketcherFaces(SketcherDocument& Document, const std::
 SketcherCommandOutcome ExtrudeSketcherSketch(SketcherDocument& Document, const std::string& SketchLabel, double Distance, FeatureCombination Combination,
                                              const std::string& Target, double Start, bool FillCondition)
 {
-    const bool        FirstBodyCondition = !Document.Summary.PresentCondition && Combination != FeatureCombination::Separate;
+    const bool SolidPresentCondition = std::any_of(Document.Summary.Bodies.begin(), Document.Summary.Bodies.end(),
+                                                   [](const SketcherBodyFigures& Entry) { return !Entry.SheetCondition; });
+    const bool        FirstBodyCondition = !SolidPresentCondition && Combination != FeatureCombination::Separate;
     const std::string Caption = NextCaption(Document, "Extrude");
     const auto        Source  = Document.Captions.find(SketchLabel);
     const std::string Label   = Caption + " · " + (Source != Document.Captions.end() ? Source->second : SketchLabel) + " · " +
@@ -1701,7 +1703,7 @@ SketcherCommandOutcome ExtrudeSketcherSketch(SketcherDocument& Document, const s
         Step.Profile     = SketchLabel;
         Step.Extent      = FeatureScalar{ Distance };
         Step.Combination = FirstBodyCondition ? FeatureCombination::New : Combination;
-        Step.Target      = Target;
+        Step.Target      = FirstBodyCondition ? std::string{} : Target;
         Document.Captions[Step.Label] = Caption;
         Document.Tree.Steps.push_back(std::move(Step));
         return {};
@@ -5380,7 +5382,9 @@ namespace
 SketcherCommandOutcome RevolveSketcherSketch(SketcherDocument& Document, const std::string& Sketch, const SketcherRevolveAxis& Axis, double Angle, FeatureCombination Combination,
                                              const std::string& Target)
 {
-    const bool        FirstBodyCondition = !Document.Summary.PresentCondition && Combination != FeatureCombination::Separate;
+    const bool SolidPresentCondition = std::any_of(Document.Summary.Bodies.begin(), Document.Summary.Bodies.end(),
+                                                   [](const SketcherBodyFigures& Entry) { return !Entry.SheetCondition; });
+    const bool        FirstBodyCondition = !SolidPresentCondition && Combination != FeatureCombination::Separate;
     const std::string Caption = NextCaption(Document, "Revolve");
     const std::string Label   = Caption + " · " + SketcherBodyCaption(Document, Sketch) + " · " + FormatAmount(Angle * 180.0 / std::numbers::pi) + "° about " +
                                 DescribeSketcherRevolveAxis(Document, Sketch, Axis) + " · " + (FirstBodyCondition ? "New" : FeatureCombinationLabel(Combination));
@@ -5398,7 +5402,7 @@ SketcherCommandOutcome RevolveSketcherSketch(SketcherDocument& Document, const s
         if (Axis.Line < 0) { Step.AxisOrigin = Axis.Origin; Step.AxisDirection = Axis.Direction; }
         Step.Angle          = FeatureScalar{ Angle };
         Step.Combination    = FirstBodyCondition ? FeatureCombination::New : Combination;
-        Step.Target         = Target;
+        Step.Target         = FirstBodyCondition ? std::string{} : Target;
         Document.Captions[Step.Label] = Caption;
         Document.Tree.Steps.push_back(std::move(Step));
         return {};
@@ -5407,7 +5411,9 @@ SketcherCommandOutcome RevolveSketcherSketch(SketcherDocument& Document, const s
 
 SketcherCommandOutcome EvolveSketcherProfile(SketcherDocument& Document, const std::string& Profile, const std::string& Path, FeatureCombination Combination, const std::string& Target)
 {
-    const bool        FirstBodyCondition = !Document.Summary.PresentCondition && Combination != FeatureCombination::Separate;
+    const bool SolidPresentCondition = std::any_of(Document.Summary.Bodies.begin(), Document.Summary.Bodies.end(),
+                                                   [](const SketcherBodyFigures& Entry) { return !Entry.SheetCondition; });
+    const bool        FirstBodyCondition = !SolidPresentCondition && Combination != FeatureCombination::Separate;
     const std::string Caption = NextCaption(Document, "Evolution");
     const std::string Label   = Caption + " · " + SketcherBodyCaption(Document, Profile) + " along " + (Path.empty() ? std::string("?") : SketcherBodyCaption(Document, Path)) + " · " +
                                 (FirstBodyCondition ? "New" : FeatureCombinationLabel(Combination));
@@ -5425,7 +5431,7 @@ SketcherCommandOutcome EvolveSketcherProfile(SketcherDocument& Document, const s
         Step.Profile     = Profile;
         Step.Path        = Path;
         Step.Combination = FirstBodyCondition ? FeatureCombination::New : Combination;
-        Step.Target      = Target;
+        Step.Target      = FirstBodyCondition ? std::string{} : Target;
         Document.Captions[Step.Label] = Caption;
         Document.Tree.Steps.push_back(std::move(Step));
         Document.Selection = {};

@@ -966,6 +966,46 @@ void OpenExtrudeSessionWithMode(SketcherWorkspaceStatus& State, SketcherExtrudeM
     }
     if (State.Document.Selection.Faces.empty())
     {
+        auto SheetKeyCondition = [&](const std::string& Key) -> bool
+        {
+            return std::any_of(State.Document.Summary.Bodies.begin(), State.Document.Summary.Bodies.end(),
+                               [&](const SketcherBodyFigures& Entry) { return Entry.Key == Key && Entry.SheetCondition; });
+        };
+        std::string CandidateSheet;
+        for (const std::string& PickedBody : State.Document.Selection.Bodies)
+        {
+            if (SheetKeyCondition(PickedBody)) { CandidateSheet = PickedBody; break; }
+        }
+        if (CandidateSheet.empty() && !State.FocusedStep.empty())
+        {
+            if (SheetKeyCondition(State.FocusedStep)) CandidateSheet = State.FocusedStep;
+            else
+            {
+                std::string SingleOwner;
+                for (const FeatureStep& Step : State.Document.Tree.Steps)
+                {
+                    if ((Step.Kind == FeatureStepCategory::Network || Step.Kind == FeatureStepCategory::Loft) &&
+                        std::find(Step.Sections.begin(), Step.Sections.end(), State.FocusedStep) != Step.Sections.end() &&
+                        SheetKeyCondition(Step.Label))
+                    {
+                        if (!SingleOwner.empty()) { SingleOwner.clear(); break; }
+                        SingleOwner = Step.Label;
+                    }
+                }
+                CandidateSheet = SingleOwner;
+            }
+        }
+        if (!CandidateSheet.empty())
+        {
+            for (const SketcherSceneFace& SceneFace : State.Scene.Faces)
+            {
+                if (SceneFace.Body < State.Scene.Bodies.size() && State.Scene.Bodies[SceneFace.Body].Key == CandidateSheet)
+                    State.Document.Selection.Faces.push_back(SceneFace.Name);
+            }
+        }
+    }
+    if (State.Document.Selection.Faces.empty())
+    {
         Announce(State, std::string(SketcherExtrudeModeLabel(Mode)) + " needs selected faces (mode 3) or a focused sketch");
         return;
     }
@@ -2905,13 +2945,15 @@ void OpenSketchExtrudeSession(SketcherWorkspaceStatus& State)
 {
     const std::string Label = State.FocusedStep;
     const double Remembered = State.Bevel.Verb == SketcherSessionVerb::Profile && State.Bevel.Size != 0.0 ? State.Bevel.Size : 0.5;
+    const bool SolidPresentCondition = std::any_of(State.Document.Summary.Bodies.begin(), State.Document.Summary.Bodies.end(),
+                                                   [](const SketcherBodyFigures& Entry) { return !Entry.SheetCondition; });
     ResetBevelSession(State);
     State.Bevel.ActiveCondition = true;
     State.Bevel.Verb            = SketcherSessionVerb::Profile;
     State.Bevel.ProfileLabel    = Label;
-    State.Bevel.ProfileSink     = MeasureSketcherProfileSink(State.Document, State.Scene, Label);
-    State.Bevel.Combination     = State.Document.Summary.PresentCondition ? FeatureCombination::Union : FeatureCombination::New;
-    State.Bevel.ProfileMaterial = State.Document.Summary.PresentCondition ? MeasureSketcherProfileMaterial(State.Document, Label, BooleanTarget(State)) : 0;
+    State.Bevel.ProfileSink     = SolidPresentCondition ? MeasureSketcherProfileSink(State.Document, State.Scene, Label) : 0.0;
+    State.Bevel.Combination     = SolidPresentCondition ? FeatureCombination::Union : FeatureCombination::New;
+    State.Bevel.ProfileMaterial = SolidPresentCondition ? MeasureSketcherProfileMaterial(State.Document, Label, BooleanTarget(State)) : 0;
     State.Bevel.AutoCombinationCondition = State.Bevel.ProfileMaterial != 0;
     State.Bevel.Size            = Remembered;
     ResolveProfileCombination(State.Bevel);
